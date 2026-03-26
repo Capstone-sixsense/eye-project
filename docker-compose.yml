@@ -1,0 +1,36 @@
+services:
+  # AI 백엔드 서비스
+  backend:
+    build: 
+      context: ./backend
+      dockerfile : backend_Dockerfile
+    container_name: eye-backend-service
+    ports:
+      - "8000:8000"
+    volumes:
+      # 로컬에 SQLite DB와 업로드된 이미지를 영구 저장
+      - ./backend/data:/app/data
+      - ./backend/storage:/app/storage
+      # 개발 편의를 위해 소스 코드 동기화 (Hot Reload 대용)
+      - ./backend:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
+
+
+
+  # Flutter 프론트엔드 서비스
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: frontend_Dockerfile
+    container_name: flutter-web-client
+    ports:
+      - "8080:80"  # 윈도우 브라우저에서 localhost:8080으로 접속
+    depends_on:
+      - backend
+    restart: always
+
+networks:
+  default:
+    name: eye-project-network

@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+# AI/ML 의존성
+torch
+torchvision
+opencv-python-headless
+albumentations
+cleanvision
+grad-cam
+captum

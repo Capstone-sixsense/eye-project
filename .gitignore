@@ -1,0 +1,19 @@
+# Docker 데이터 및 로그
+backend/data/
+backend/storage/
+*.log
+
+# Flutter 빌드 결과물 및 도구 [cite: 7]
+frontend/build/
+frontend/.dart_tool/
+frontend/.packages
+frontend/linux/flutter/
+
+# Python/FastAPI
+__pycache__/
+*.pyc
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
