@@ -7,7 +7,7 @@ backend/storage/
 frontend/build/
 frontend/.dart_tool/
 frontend/.packages
-frontend/linux/flutter/
+frontend/linux/flutter/ephemeral/
 
 # Python/FastAPI
 __pycache__/
