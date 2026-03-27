@@ -30,4 +30,6 @@ WORKDIR /output
 # 빌드된 'bundle' 폴더(실행 파일과 필수 라이브러리 포함)를 통째로 복사
 COPY --from=build-stage /app/build/linux/x64/release/bundle .
 
-CMD ["ls", "-l"]
+# 임시 유지용 CMD: 현재는 GUI 실행 환경이 없어서 번들을 출력만 한 뒤
+# 종료되는 상태이므로, 컨테이너가 바로 죽지 않게 유지한다.
+CMD ["sh", "-c", "ls -l /output && tail -f /dev/null"]
