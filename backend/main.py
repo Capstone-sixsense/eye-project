@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
+import os
+import shutil
 
 
 # Temporary placeholder app so the backend container can start before
@@ -17,9 +19,9 @@ def health() -> dict[str, str]:
 
 
 @app.post("/analyze")
-def analyze_image(file: UploadFile = File(...): ):
+def analyze_image(file: UploadFile = File(...)):
 
-    raw_result = check_image_quality("storage". "test_image")
+    raw_result = check_image_quality("storage", "normal_01.png")
 
     report = PassNonPass(raw_result["issues_found"])
 
@@ -31,4 +33,4 @@ def analyze_image(file: UploadFile = File(...): ):
     ai_prediction = run_ai_inference(save_path) # 가정된 AI 실행 함수
 
     #AI 분석 결과를 프론트로 넘김
-    return report
+    return ai_prediction
