@@ -1,28 +1,27 @@
 import os
 import json
 from cleanvision import Imagelab
+from PIL import Image
 
 #CleanVision을 이용한 1차적인 이미지 필터 기능입니다
 #check_image_quality()함수와 PassNonPass()함수로 구성되며
 #check_image_quality()에서 이미지 분석을 작업하고
 #PassNonPass()에서 임계값에 따른 통과 여부를 결정합니다
 
+
 def check_image_quality(data_path: str, target_filename: str):
-    #파일이 아닌 '폴더 경로'의 절대 경로를 구합니다.
-    abs_folder_path = os.path.abspath(data_path)
+    # 분석할 타겟 파일의 절대 경로만 구합니다.
+    target_abs_path = os.path.abspath(os.path.join(data_path, target_filename))
     
-    #폴더 내의 모든 이미지를 한꺼번에 읽습니다.
-    imagelab = Imagelab(data_path=abs_folder_path)
+    # 폴더 전체가 아닌, 해당 파일 하나만 리스트로 전달합니다.
+    imagelab = Imagelab(filepaths=[target_abs_path])
 
     imagelab.find_issues()
 
     all_issues = imagelab.issues
-    
-    #분석할 타겟 파일의 전체 경로를 만듭니다. (결과 테이블에서 찾기용)
-    target_abs_path = os.path.abspath(os.path.join(data_path, target_filename))
 
     try:
-        #전체 결과 테이블(all_issues)에서 우리 파일(target_abs_path)의 행만 추출합니다.
+        # 결과 테이블에서 해당 파일의 행만 추출합니다.
         file_report = all_issues.loc[target_abs_path].to_dict()
         
         return {
@@ -32,6 +31,7 @@ def check_image_quality(data_path: str, target_filename: str):
         }
     except KeyError:
         return {"error": f"파일 {target_filename}을 찾을 수 없습니다. 이름이나 경로를 확인하세요."}
+
 
 def PassNonPass(result: dict):
     #result가 없거나 내부에 'error'가 포함되어 있다면 즉시 불합격 처리
@@ -77,15 +77,41 @@ def PassNonPass(result: dict):
         "messages": fail_messages if not is_acceptable else ["사용 가능한 이미지입니다."]
     }
 
+
+#AI 모델에 적합한 사이즈로 이미지 크기 조절 함수(초기 설정값 : 1024x1024)
+def resize_image_high_quality(input_path: str, output_path: str, target_size=(1024, 1024)):
+    """
+    고품질 리사이징: 가로세로 비율을 유지하며 LANCZOS 필터 적용
+    """
+    with Image.open(input_path) as img:
+        #원본 비율 유지하며 최대 크기에 맞추기 (thumbnail은 원본을 직접 변경하므로 copy 권장)
+        img_copy = img.copy()
+        
+        #비율을 유지하며 target_size 내에 꽉 차도록 조절합니다.
+        img_copy.thumbnail(target_size, Image.Resampling.LANCZOS)
+        
+        #저장 (의료용은 무손실 PNG 또는 고품질 JPEG 권장)
+        #JPEG인 경우 quality를 95 이상으로 설정하여 손실 최소화
+        if output_path.lower().endswith('.jpg') or output_path.lower().endswith('.jpeg'):
+            img_copy.save(output_path, "JPEG", quality=95, subsampling=0)
+        else:
+            img_copy.save(output_path, "PNG")
+            
+    return output_path
+
+
 #자체 테스트용 코드
 if __name__ == "__main__":
     TEST_FOLDER = "storage"
-    TEST_FILE = "ambiguous_02.png"
+    TEST_FILE = "ambiguous_01.png"
 
     print(f"🔍 {TEST_FILE} 분석을 시작합니다...")
 
     #품질 분석 수행
     raw_data = check_image_quality(TEST_FOLDER, TEST_FILE)
+
+    #raw_data값 체크
+    print(raw_data)
 
     #판정 수행
     final_report = PassNonPass(raw_data)

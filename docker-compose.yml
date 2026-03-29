@@ -11,6 +11,7 @@ services:
       # 로컬에 SQLite DB와 업로드된 이미지를 영구 저장
       - ./backend/data:/app/data
       - ./backend/storage:/app/storage
+      - ./backend/results:/app/results
       # 개발 편의를 위해 소스 코드 동기화 (Hot Reload 대용)
       - ./backend:/app
     environment:
