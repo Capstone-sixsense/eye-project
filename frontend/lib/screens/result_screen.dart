@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-class UploadScreen extends StatelessWidget {
-  const UploadScreen({super.key});
+class ResultScreen extends StatelessWidget {
+  const ResultScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
