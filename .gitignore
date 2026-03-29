@@ -1,19 +1,63 @@
-# Docker 데이터 및 로그
-backend/data/
-backend/storage/
-*.log
+# -------------------------
+# Flutter / Dart
+# -------------------------
+.dart_tool/
+.packages
+build/
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
 
-# Flutter 빌드 결과물 및 도구 [cite: 7]
-frontend/build/
-frontend/.dart_tool/
-frontend/.packages
-frontend/linux/flutter/ephemeral/
+# VSCode
+.vscode/
 
-# Python/FastAPI
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# Android
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.podspec
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+Runner.generated.xcconfig
+
+# -------------------------
+# FastAPI / Python
+# -------------------------
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
 .venv/
+venv/
+.env
 
-# OS files
+# -------------------------
+# Docker
+# -------------------------
+**/dist/
+**/out/
+**/target/
+docker-data/
+docker-volume/
+*.log
+
+# WSL temp files
+.tmp/
+*.swp
+
+# -------------------------
+# OS
+# -------------------------
 .DS_Store
 Thumbs.db
