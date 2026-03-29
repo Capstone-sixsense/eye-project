@@ -1,7 +1,19 @@
 import 'package:flutter/material.dart';
-
+import 'screens/upload_screen.dart';
+import 'screens/preview_screen.dart';
+import 'screens/result_screen.dart';
+import 'screens/metrics_screen.dart';
 void main() {
-  runApp(const MyApp());
+  runApp(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    initialRoute: '/upload',
+    routes: {
+      '/upload': (_) => UploadScreen(),
+      '/preview': (_) => PreviewScreen(),
+      '/result': (_) => ResultScreen(),
+      '/metrics': (_) => MetricsScreen(),
+    },
+  ));
 }
 
 class MyApp extends StatelessWidget {
