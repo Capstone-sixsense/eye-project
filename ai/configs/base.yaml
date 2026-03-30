@@ -1,6 +1,6 @@
 project:
   name: drscreen
-  version: v4
+  version: v3
   task: binary_dr_screening
   output_root: artifacts
 
