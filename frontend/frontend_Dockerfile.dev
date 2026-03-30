@@ -22,5 +22,5 @@ COPY . .
 # Flutter 의존성 설치
 RUN flutter pub get
 
-# 웹 개발용 서버 실행 (팀원 브라우저 접속용)
-CMD ["flutter", "run", "-d", "web-server", "--web-port", "80", "--web-hostname", "0.0.0.0"]
+# 볼륨 마운트 후에도 컨테이너 기준으로 의존성 경로를 맞추기 위해 pub get 후 실행
+CMD ["sh", "-c", "flutter pub get && exec flutter run -d web-server --web-port 80 --web-hostname 0.0.0.0"]

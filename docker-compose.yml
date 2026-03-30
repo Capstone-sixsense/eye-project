@@ -28,5 +28,14 @@ services:
     depends_on:
       - backend
     volumes:
-      - ./frontend:/app  # 소스 동기화, Hot Reload 효과
+      - ./frontend:/app # 소스 동기화
+      # 호스트에서 pub get 한 .dart_tool(WSL 절대경로)이 컨테이너와 충돌하므로 분리
+      - frontend_dart_tool:/app/.dart_tool
     restart: always
+
+volumes:
+  frontend_dart_tool:
+
+networks:
+  default:
+    name: eye-project-network
