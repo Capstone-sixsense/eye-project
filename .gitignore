@@ -1,33 +1,15 @@
-﻿# AI docs and agent instructions
-ai/docs/
-ai/AGENTS.md
-.omc/
-
-# AI datasets
-ai/data/
-
-# AI generated artifacts
-ai/artifacts/evaluations/
-ai/artifacts/predictions/
-ai/artifacts/heatmaps/
-ai/artifacts/quality/
-
-# AI checkpoints: keep only the current core checkpoint
-ai/artifacts/checkpoints/**
-!ai/artifacts/checkpoints/
-!ai/artifacts/checkpoints/v3/
-!ai/artifacts/checkpoints/v3/best.pt
-
-# Logs
+# Docker 데이터 및 로그
+backend/data/
+backend/storage/
 *.log
 
-# Flutter build outputs and generated files
+# Flutter 빌드 결과물 및 도구 [cite: 7]
 frontend/build/
 frontend/.dart_tool/
 frontend/.packages
 frontend/linux/flutter/ephemeral/
 
-# Python / backend
+# Python/FastAPI
 __pycache__/
 *.pyc
 .venv/
