@@ -13,14 +13,14 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # 4. 의존성 파일 복사 및 설치
-COPY backend_requirements . 
+COPY backend_requirements .
 RUN pip install --no-cache-dir -r backend_requirements
 
 # 5. 소스 코드 복사
 COPY . .
 
-# 6. SQLite DB 및 이미지 저장을 위한 디렉토리 생성
-RUN mkdir -p /app/data /app/storage
+# 6. AI 패키지 경로 등록 (/ai 는 docker-compose 볼륨으로 마운트)
+ENV PYTHONPATH=/ai
 
 # 7. 포트 개방 및 실행
 EXPOSE 8000

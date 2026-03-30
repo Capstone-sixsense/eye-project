@@ -8,11 +8,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 로컬에 SQLite DB와 업로드된 이미지를 영구 저장
-      - ./backend/data:/app/data
-      - ./backend/storage:/app/storage
-      # 개발 편의를 위해 소스 코드 동기화 (Hot Reload 대용)
+      # 백엔드 소스 코드 동기화 (Hot Reload 대용)
       - ./backend:/app
+      # AI 모듈, configs, 데이터, 아티팩트 (git 미추적)
+      - ./ai:/ai
     environment:
       - PYTHONUNBUFFERED=1
     restart: always

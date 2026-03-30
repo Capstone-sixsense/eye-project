@@ -1,0 +1,69 @@
+project:
+  name: drscreen
+  version: v3
+  task: binary_dr_screening
+  output_root: artifacts
+
+data:
+  manifest_path: data/processed/manifest_preprocessed.csv
+  image_root: data/raw
+  resize_size: 448
+  image_size: 448
+  num_workers: 4
+  persistent_workers: false
+  batch_size: 16
+  use_preprocessing: false
+  preprocess_size: 448
+  train_split: train
+  val_split: val
+  test_split: test
+  external_test_split: external_test
+
+labels:
+  mode: normal_vs_abnormal
+  names:
+    - normal
+    - abnormal
+  positive_index: 1
+
+quality:
+  blur_score_min: 248.929
+  brightness_mean_min: 126.870
+  action_on_low_quality: warn
+  calibration:
+    blur_percentile: 5.0
+    brightness_percentile: 5.0
+    output_dir: artifacts/quality
+
+quickqual:
+  weights_path: artifacts/quickqual/quickqual_dn121_512.pkl
+
+model:
+  architecture: efficientnet_b5
+  pretrained: true
+  num_outputs: 1
+  use_attention: true
+  grad_checkpointing: false
+
+train:
+  seed: 42
+  device: cuda
+  optimizer: adamw
+  scheduler: cosine
+  head_epochs: 3
+  finetune_epochs: 15
+  warmup_epochs: 2
+  head_learning_rate: 0.0002
+  backbone_learning_rate: 0.00008
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+  min_checkpoint_sensitivity: 0.80
+  amp: true
+  checkpoint_dir: artifacts/checkpoints
+
+infer:
+  device: cuda
+  checkpoint_path: artifacts/checkpoints/v3/best.pt
+  prediction_dir: artifacts/predictions
+  heatmap_dir: artifacts/heatmaps
+  use_preprocessing: true

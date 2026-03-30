@@ -1,0 +1,19 @@
+data:
+  resize_size: 232
+  image_size: 224
+  batch_size: 16
+
+model:
+  architecture: resnet50
+  pretrained: true
+  num_outputs: 1
+
+train:
+  optimizer: adamw
+  scheduler: cosine
+  head_epochs: 2
+  finetune_epochs: 10
+  warmup_epochs: 1
+  head_learning_rate: 0.0005
+  backbone_learning_rate: 0.00015
+  weight_decay: 0.00002
