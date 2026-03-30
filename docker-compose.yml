@@ -18,19 +18,15 @@ services:
     restart: always
 
 
-
-  # Flutter 프론트엔드 서비스
   frontend:
     build: 
       context: ./frontend
-      dockerfile: frontend_Dockerfile
+      dockerfile: frontend_Dockerfile.dev
     container_name: flutter-web-client
     ports:
-      - "8080:80"  # 윈도우 브라우저에서 localhost:8080으로 접속
+      - "8080:80"  # 브라우저에서 localhost:8080 접속 가능
     depends_on:
       - backend
+    volumes:
+      - ./frontend:/app  # 소스 동기화, Hot Reload 효과
     restart: always
-
-networks:
-  default:
-    name: eye-project-network
