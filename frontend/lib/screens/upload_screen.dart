@@ -59,7 +59,7 @@ class _UploadScreenState extends State<UploadScreen> {
               onPressed: fileBytes == null
                   ? null
                   : () {
-                      Navigator.pushNamed(context, '/preview', arguments: fileBytes);
+                      Navigator.pushNamed(context, '/result', arguments: fileBytes);
                     },
               child: const Text('Next'),
             ),
