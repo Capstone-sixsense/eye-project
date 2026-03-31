@@ -32,7 +32,7 @@ _preprocessor: FundusPreprocess | None = None
 def _process_one(args: tuple[str, Path, Path]) -> tuple[str, bool, str]:
     image_path_rel, raw_root, output_root = args
     src = raw_root / image_path_rel
-    dst = output_root / Path(image_path_rel).with_suffix(".png").name
+    dst = output_root / Path(image_path_rel).with_suffix(".png")
     if dst.exists():
         return image_path_rel, True, "skipped"
     try:
@@ -100,7 +100,7 @@ def main() -> None:
     # Update manifest to point to processed images
     updated = frame.copy()
     updated["image_path"] = updated["image_path"].apply(
-        lambda p: "processed/images/" + Path(p).with_suffix(".png").name
+        lambda p: "processed/images/" + Path(p).with_suffix(".png").as_posix()
     )
     out_manifest = MANIFEST_PATH.parent / "manifest_preprocessed.csv"
     updated.to_csv(out_manifest, index=False)

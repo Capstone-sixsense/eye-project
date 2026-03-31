@@ -66,6 +66,48 @@ def _binary_auroc(probabilities: np.ndarray, targets: np.ndarray) -> float | Non
     return float(auc)
 
 
+def find_optimal_threshold(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    min_sensitivity: float | None = None,
+) -> float:
+    """Find threshold maximising Youden's J (sensitivity + specificity - 1).
+
+    If min_sensitivity is given, instead finds the highest-specificity
+    threshold that still meets the sensitivity floor. Useful for medical
+    screening where missing disease (false negative) is the primary risk.
+    """
+    probs = torch.sigmoid(logits.detach().float().view(-1).cpu()).numpy()
+    tgts = targets.detach().long().view(-1).cpu().numpy()
+
+    best_threshold = 0.5
+    best_score = -np.inf
+
+    for t in np.linspace(0.05, 0.95, 91):
+        preds = (probs >= t).astype(int)
+        tp = int(((preds == 1) & (tgts == 1)).sum())
+        tn = int(((preds == 0) & (tgts == 0)).sum())
+        fp = int(((preds == 1) & (tgts == 0)).sum())
+        fn = int(((preds == 0) & (tgts == 1)).sum())
+
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+
+        if min_sensitivity is not None:
+            if sens < min_sensitivity:
+                continue
+            score = spec
+        else:
+            score = sens + spec - 1.0
+
+        if score > best_score:
+            best_score = score
+            best_threshold = float(t)
+
+    return round(best_threshold, 3)
+
+
 def compute_binary_classification_metrics(
     logits: torch.Tensor,
     targets: torch.Tensor,
