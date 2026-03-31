@@ -70,6 +70,10 @@ docker-data/
 docker-volume/
 *.log
 
+#volume
+storage/
+results/
+
 # WSL temp files
 .tmp/
 *.swp
