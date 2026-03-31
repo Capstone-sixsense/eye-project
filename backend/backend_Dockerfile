@@ -3,8 +3,7 @@ FROM python:3.11
 # 2. 작업 디렉토리 설정
 WORKDIR /app
 
-# 3. 시스템 패키지 설치 (이 레이어는 거의 바뀌지 않으므로 상단에 배치)
-# 폰트와 라이브러리 설치 후 캐시 삭제로 용량 최적화
+# 시스템 패키지 설치
 RUN apt-get update && apt-get install -y \
     fonts-noto-cjk \
     libgl1 \
@@ -12,16 +11,20 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. 패키지 설치 레이어 분리 (캐싱 활용 핵심)
-# backend_requirements가 수정되지 않는 한, 다음 빌드 시 pip install은 0초 만에 끝납니다.
+# 패키지 설치 레이어 분리
 COPY backend_requirements . 
+
+# 의존성 파일 복사 및 설치
+COPY backend_requirements .
 RUN pip install --no-cache-dir -r backend_requirements
 
-# 5. 디렉토리 구조 미리 생성
+# 디렉토리 구조 미리 생성
 RUN mkdir -p /app/data /app/storage /app/results
 
-# 6. 소스 코드 복사 (가장 마지막에 수행)
-# .dockerignore 덕분에 storage와 results 폴더는 제외됩니다.
+# AI 패키지 경로 등록 (/ai 는 docker-compose 볼륨으로 마운트)
+ENV PYTHONPATH=/ai
+
+# 소스 코드 복사 
 COPY . .
 
 EXPOSE 8000

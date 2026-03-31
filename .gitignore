@@ -1,19 +1,79 @@
-# Docker 데이터 및 로그
-backend/data/
-backend/storage/
-*.log
+# AI docs and agent instructions
+ai/docs/
+ai/AGENTS.md
+.omc/
 
-# Flutter 빌드 결과물 및 도구 [cite: 7]
+# AI datasets
+ai/data/
+
+# AI generated artifacts
+ai/artifacts/evaluations/
+ai/artifacts/predictions/
+ai/artifacts/heatmaps/
+ai/artifacts/quality/
+
+# AI checkpoints: keep only the active checkpoint pointer files
+ai/artifacts/checkpoints/**
+!ai/artifacts/checkpoints/
+!ai/artifacts/checkpoints/best.pt
+!ai/artifacts/checkpoints/current_version.txt
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
 frontend/build/
 frontend/.dart_tool/
 frontend/.packages
 frontend/linux/flutter/ephemeral/
 
-# Python/FastAPI
+# VSCode
+.vscode/
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# Android
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.podspec
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+Runner.generated.xcconfig
+
+# FastAPI / Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
 .venv/
+venv/
+.env
 
-# OS files
+# Docker / build outputs
+**/dist/
+**/out/
+**/target/
+docker-data/
+docker-volume/
+*.log
+
+# WSL temp files
+.tmp/
+*.swp
+
+# OS
 .DS_Store
 Thumbs.db

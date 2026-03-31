@@ -1,0 +1,34 @@
+data:
+  manifest_path: data/processed/messidor_manifest.csv
+  image_root: C:/Users/dg203/Desktop/messidor
+  resize_size: 448
+  image_size: 448
+  num_workers: 4
+  batch_size: 8
+  use_preprocessing: true
+  test_split: external_test
+
+labels:
+  mode: normal_vs_abnormal
+  names:
+    - normal
+    - abnormal
+  positive_index: 1
+
+model:
+  architecture: efficientnet_b5
+  pretrained: false
+  num_outputs: 1
+  use_attention: true
+
+train:
+  device: cuda
+  amp: true
+  seed: 42
+
+infer:
+  device: cuda
+  checkpoint_path: artifacts/checkpoints/last.pt
+
+eyeq:
+  weights_path: artifacts/eyeq/DenseNet121_v3_v1.tar
