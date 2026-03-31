@@ -78,8 +78,8 @@ def PassNonPass(result: dict):
     }
 
 
-#AI 모델에 적합한 사이즈로 이미지 크기 조절 함수(초기 설정값 : 1024x1024)
-def resize_image_high_quality(input_path: str, output_path: str, target_size=(1024, 1024)):
+#AI 모델에 적합한 사이즈로 이미지 크기 조절 함수
+def resize_image_high_quality(input_path: str, output_path: str, target_size):
     """
     고품질 리사이징: 가로세로 비율을 유지하며 LANCZOS 필터 적용
     """
