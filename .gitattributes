@@ -1,1 +1,2 @@
-*.sh text eol=lf
+﻿*.sh text eol=lf
+ai/artifacts/checkpoints/best.pt filter=lfs diff=lfs merge=lfs -text

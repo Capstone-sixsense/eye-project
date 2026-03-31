@@ -1,12 +1,34 @@
-# -------------------------
+# AI docs and agent instructions
+ai/docs/
+ai/AGENTS.md
+.omc/
+
+# AI datasets
+ai/data/
+
+# AI generated artifacts
+ai/artifacts/evaluations/
+ai/artifacts/predictions/
+ai/artifacts/heatmaps/
+ai/artifacts/quality/
+
+# AI checkpoints: keep only the active checkpoint pointer files
+ai/artifacts/checkpoints/**
+!ai/artifacts/checkpoints/
+!ai/artifacts/checkpoints/best.pt
+!ai/artifacts/checkpoints/current_version.txt
+
 # Flutter / Dart
-# -------------------------
 .dart_tool/
 .packages
 build/
 pubspec.lock
 .flutter-plugins
 .flutter-plugins-dependencies
+frontend/build/
+frontend/.dart_tool/
+frontend/.packages
+frontend/linux/flutter/ephemeral/
 
 # VSCode
 .vscode/
@@ -30,9 +52,7 @@ ios/Flutter/App.framework
 ios/Flutter/Flutter.framework
 Runner.generated.xcconfig
 
-# -------------------------
 # FastAPI / Python
-# -------------------------
 __pycache__/
 *.pyc
 *.pyo
@@ -42,9 +62,7 @@ __pycache__/
 venv/
 .env
 
-# -------------------------
-# Docker
-# -------------------------
+# Docker / build outputs
 **/dist/
 **/out/
 **/target/
@@ -56,8 +74,6 @@ docker-volume/
 .tmp/
 *.swp
 
-# -------------------------
 # OS
-# -------------------------
 .DS_Store
 Thumbs.db
