@@ -8,7 +8,6 @@ from PIL import Image
 #check_image_quality()에서 이미지 분석을 작업하고
 #PassNonPass()에서 임계값에 따른 통과 여부를 결정합니다
 
-
 def check_image_quality(data_path: str, target_filename: str):
     # 분석할 타겟 파일의 절대 경로만 구합니다.
     target_abs_path = os.path.abspath(os.path.join(data_path, target_filename))
@@ -78,8 +77,8 @@ def PassNonPass(result: dict):
     }
 
 
-#AI 모델에 적합한 사이즈로 이미지 크기 조절 함수(초기 설정값 : 1024x1024)
-def resize_image_high_quality(input_path: str, output_path: str, target_size=(1024, 1024)):
+#AI 모델에 적합한 사이즈로 이미지 크기 조절 함수
+def resize_image_high_quality(input_path: str, output_path: str, target_size):
     """
     고품질 리사이징: 가로세로 비율을 유지하며 LANCZOS 필터 적용
     """

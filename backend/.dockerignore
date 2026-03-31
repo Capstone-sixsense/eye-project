@@ -1,0 +1,6 @@
+storage/
+results/
+data/
+__pycache__/
+*.log
+.git/
