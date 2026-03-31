@@ -25,7 +25,7 @@ def create_medical_report_image(original_filename, ai_image, metrics):
     panel_width = 450
     canvas = Image.new("RGB", (img_width + panel_width, img_height), (255, 255, 255))
     canvas.paste(ai_image, (0, 0))
-
+    #이미지 그리기
     draw = ImageDraw.Draw(canvas)
     
     #폰트 로드 (경로는 사용자님의 환경에 맞춰 조정하세요)

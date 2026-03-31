@@ -8,7 +8,6 @@ from PIL import Image
 #check_image_quality()에서 이미지 분석을 작업하고
 #PassNonPass()에서 임계값에 따른 통과 여부를 결정합니다
 
-
 def check_image_quality(data_path: str, target_filename: str):
     # 분석할 타겟 파일의 절대 경로만 구합니다.
     target_abs_path = os.path.abspath(os.path.join(data_path, target_filename))
