@@ -28,7 +28,7 @@ def create_medical_report_image(original_filename, ai_image, metrics):
     #이미지 그리기
     draw = ImageDraw.Draw(canvas)
     
-    #폰트 로드 (경로는 사용자님의 환경에 맞춰 조정하세요)
+    #폰트 로드
     try:
         title_font = ImageFont.truetype("Roboto-Bold.ttf", 32)
         metric_font = ImageFont.truetype("Roboto-Bold.ttf", 24)
@@ -65,29 +65,45 @@ def create_medical_report_image(original_filename, ai_image, metrics):
 # ==========================================
 # 실행 예시 (테스트용)
 if __name__ == "__main__":
-    print("🚀 합성 이미지 생성 테스트를 시작합니다...")
+    print("🚀 storage 데이터를 이용한 리포트 생성 테스트를 시작합니다...")
 
-    # 가상의 AI 분석 결과 이미지 생성 (실제론 모델의 출력물)
-    # 안저 이미지 규격과 유사한 800x800 크기의 배경 생성
-    mock_ai_image = Image.new('RGB', (800, 800), color=(30, 30, 30))
-    test_draw = ImageDraw.Draw(mock_ai_image)
-    test_draw.ellipse((100, 100, 700, 700), outline="red", width=5) # 안저 영역 표시 가정
-    test_draw.text((300, 400), "Analyzed Fundus", fill="white")
+    # 테스트할 이미지 경로 설정
+    # storage 폴더에 실제로 존재하는 파일 이름
+    # 예: "raw_test_image.png"
+    target_filename = "normal_01.png" 
+    storage_path = os.path.join("storage", target_filename)
 
-    # 가상의 AI 분석 지표 데이터
-    mock_scores = {
-        'accuracy': 0.942,
-        'precision': 0.915,
-        'recall': 0.958,
-        'specificity': 0.920,
-        'f1': 0.936
-    }
+    # 2. 이미지 존재 여부 확인 및 로드
+    if not os.path.exists(storage_path):
+        print(f"❌ 에러: {storage_path} 경로에 파일이 없습니다.")
+        print("💡 storage 폴더에 테스트용 이미지를 먼저 넣어주세요!")
+    else:
+        try:
+            # 가상의 AI 분석 결과 대신 실제 이미지를 불러옵니다.
+            real_image = Image.open(storage_path).convert("RGB")
+            
+            # (선택 사항) AI가 분석한 것처럼 이미지 위에 표시를 남기고 싶다면?
+            # draw = ImageDraw.Draw(real_image)
+            # draw.ellipse((200, 200, 600, 600), outline="red", width=10)
 
-    # 함수 실행
-    test_filename = "sample_eye_image.png"
-    result_path = create_medical_report_image(test_filename, mock_ai_image, mock_scores)
+            # 가상의 AI 분석 지표 데이터
+            mock_scores = {
+                'accuracy': 0.942,
+                'precision': 0.915,
+                'recall': 0.958,
+                'specificity': 0.920,
+                'f1': 0.936
+            }
 
-    print("\n" + "="*40)
-    print(f"✅ 테스트 완료!")
-    print(f"파일 저장 위치: {result_path}")
-    print("="*40)
+            # 리포트 생성 함수 실행
+            # 결과물은 results/ 폴더에 저장됩니다.
+            result_path = create_medical_report_image(target_filename, real_image, mock_scores)
+
+            print("\n" + "="*40)
+            print(f"✅ 테스트 완료!")
+            print(f"원본 파일: {storage_path}")
+            print(f"결과 저장 위치: {result_path}")
+            print("="*40)
+
+        except Exception as e:
+            print(f"❌ 이미지 처리 중 오류 발생: {e}")

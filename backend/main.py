@@ -1,24 +1,26 @@
 from __future__ import annotations
 
-import os
+import os, shutil, logging, datetime
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 
 from drscreen.infer.service import InferenceSession
 
-os.makedirs("storage", exist_ok=True)
-os.makedirs("results", exist_ok=True)
-app.mount("/storage", StaticFiles(directory="storage"), name="storage") # 원본 접근용 추가
-app.mount("/results", StaticFiles(directory="results"), name="results") # 분석 결과 접근용
+from image_analyzer import check_image_quality, PassNonPass, resize_image_high_quality
+from make_result_img import create_medical_report_image
+
+
+
+
 
 _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 
 _session: InferenceSession | None = None
 _session_error: str | None = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,6 +28,8 @@ async def lifespan(app: FastAPI):
     global _session, _session_error
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
+    #checkpoint = torch.load(path, weights_only=False)  # 신뢰할 수 있는 모델인 경우 False 설정
+
     try:
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
@@ -37,35 +41,6 @@ async def lifespan(app: FastAPI):
         _session_error = str(exc)
     yield
     _session = None
-
-#테스트를 위한 가상의 AI 모델 인터페이스
-def run_ai_inference(image_path: str):
-    """
-    AI 모델 분석 시뮬레이션
-    Returns: label, probability, heatmap_image_object, metrics
-    """
-    # 실제 모델이 반환할 데이터 예시
-    predicted_label = "Abnormal (DR)" # 망막병증 의심
-    abnormal_probability = 0.88
-    quality_warning = "None"
-    quality_grade = "Good"
-    
-    # Grad-CAM 결과물이라고 가정하고 원본을 불러와 가공 (테스트용)
-    heatmap_img = Image.open(image_path).convert("RGB")
-    
-    # 가상의 성능 지표 (합성용)
-    mock_metrics = {
-        'accuracy': 0.95, 'precision': 0.92, 'recall': 0.96, 'specificity': 0.94, 'f1': 0.94
-    }
-    
-    return {
-        "label": predicted_label,
-        "probability": abnormal_probability,
-        "warning": quality_warning,
-        "grade": quality_grade,
-        "heatmap": heatmap_img,
-        "metrics": mock_metrics
-    }
 
 app = FastAPI(title="eye-project backend", lifespan=lifespan)
 
@@ -116,6 +91,67 @@ async def predict(image: UploadFile = File(...)) -> dict[str, Any]:
     return await _predict_from_upload(image)
 
 
+os.makedirs("storage", exist_ok=True)
+os.makedirs("results", exist_ok=True)
+app.mount("/storage", StaticFiles(directory="storage"), name="storage") # 원본 접근용 추가
+app.mount("/results", StaticFiles(directory="results"), name="results") # 분석 결과 접근용
+
+# 로그 설정
+logging.basicConfig(
+    filename='server_errors.log',
+    level=logging.ERROR,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
-    return await _predict_from_upload(image)
+    if _session is None:
+        raise HTTPException(status_code=503, detail="AI 모델 로딩 중입니다.")
+
+    UPLOAD_DIR = "storage"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    # 파일 경로 설정
+    raw_path = os.path.join(UPLOAD_DIR, f"raw_{image.filename}")
+    proc_path = os.path.join(UPLOAD_DIR, image.filename)
+
+    try:
+        # 전처리 및 저장
+        content = await image.read()
+        with open(raw_path, "wb") as f: f.write(content)
+        resize_image_high_quality(raw_path, proc_path, (448, 448))
+
+        # 품질 필터링 
+        q_res = check_image_quality(UPLOAD_DIR, image.filename)
+        if not PassNonPass(q_res)['is_acceptable']:
+            return {"status": "fail", "message": "이미지 품질 미달", "details": q_res}
+
+        # AI 추론 
+        # 반환값에 의료 데이터 메트릭스가 있다고 가정
+        # 만약 다른 형태라면 이후 이미지 합성과정 수정 필요
+        with open(proc_path, "rb") as f:
+            pred = _session.predict_image_bytes(f.read(), image_name=image.filename)
+     
+        # 리포트 이미지 합성
+        # AI의 반환값에 1. 이미지 이름 / 2.이미지 파일 / 3.의료데이터 메트릭스가 존재한다고 가정
+        # 만약 출력 데이터가 다르다면 이미지 합성함수의 전면적이 수정이 필요함
+        report_path = create_medical_report_image(
+            original_filename=image.filename,
+            ai_image=Image.open(proc_path), # 실제로는 모델의 Heatmap을 넣어야 함
+            metrics=pred.payload.get('metrics', {})
+        )
+        
+        return {
+            "status": "success",
+            "label": pred.payload.get("label"),
+            "report_url": report_path,
+            "original_url": raw_path
+        }
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="분석 실패")
+    finally:
+        if os.path.exists(proc_path): os.remove(proc_path) # 임시파일 정리
+
+    #return await pred
