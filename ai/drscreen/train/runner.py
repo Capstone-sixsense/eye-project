@@ -21,7 +21,7 @@ from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.models.profiles import get_model_profile
 from drscreen.settings import merge_dicts, resolve_project_path
 from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
-from drscreen.train.metrics import find_optimal_threshold
+from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
 from drscreen.utils.logging import get_logger
 from drscreen.utils.seed import set_seed
 
@@ -390,6 +390,22 @@ def run_training(
         classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
 
+    pretrained_backbone_path_str = str(config["train"].get("pretrained_backbone_path", "")).strip()
+    if pretrained_backbone_path_str:
+        pretrained_backbone_path = resolve_project_path(project_root, pretrained_backbone_path_str)
+        if pretrained_backbone_path.exists():
+            backbone_ckpt = torch.load(pretrained_backbone_path, map_location="cpu", weights_only=False)
+            backbone_state = backbone_ckpt.get("model_state_dict", backbone_ckpt)
+            missing, unexpected = model.load_state_dict(backbone_state, strict=False)
+            LOGGER.info(
+                "Loaded SSL pretrained backbone from %s (missing=%d unexpected=%d)",
+                pretrained_backbone_path,
+                len(missing),
+                len(unexpected),
+            )
+        else:
+            LOGGER.warning("pretrained_backbone_path not found: %s", pretrained_backbone_path)
+
     if bool(config["model"].get("zero_init_classifier", False)):
         classifier = get_classifier_module(architecture, model)
         for module in classifier.modules():
@@ -606,6 +622,23 @@ def run_split_evaluation(
         model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
     )
 
+    domain_breakdown: dict[str, Any] | None = None
+    if "domain" in dataset.frame.columns:
+        domain_breakdown = {}
+        domain_series = dataset.frame["domain"].tolist()
+        unique_domains = sorted({str(d) for d in domain_series if d is not None and str(d) != "nan"})
+        flat_logits = logits.view(-1)
+        flat_targets = targets.view(-1)
+        for domain in unique_domains:
+            indices = torch.tensor(
+                [i for i, d in enumerate(domain_series) if str(d) == domain],
+                dtype=torch.long,
+            )
+            domain_metrics = compute_binary_classification_metrics(
+                flat_logits[indices], flat_targets[indices], threshold=threshold
+            )
+            domain_breakdown[domain] = domain_metrics.to_dict()
+
     evaluation_dir = resolve_project_path(project_root, effective_config["project"]["output_root"])
     evaluation_dir = evaluation_dir / "evaluations"
     evaluation_dir.mkdir(parents=True, exist_ok=True)
@@ -614,7 +647,7 @@ def run_split_evaluation(
         f"{requested_split}_{checkpoint_parent}_{resolved_checkpoint_path.stem}_metrics.json"
     )
 
-    summary = {
+    summary: dict[str, Any] = {
         "project_root": str(project_root),
         "config_path": str(config_path),
         "manifest_path": str(manifest_path),
@@ -627,6 +660,8 @@ def run_split_evaluation(
         "optimal_threshold": optimal_threshold,
         "metrics_at_optimal_threshold": metrics_at_optimal.to_dict(),
     }
+    if domain_breakdown is not None:
+        summary["domain_breakdown"] = domain_breakdown
     output_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     summary["output_path"] = str(output_path)
     return summary

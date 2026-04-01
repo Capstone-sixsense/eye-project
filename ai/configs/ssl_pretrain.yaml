@@ -1,0 +1,31 @@
+project:
+  name: drscreen
+  version: ssl_v1
+
+# manifest_preprocessed.csv has Ben Graham already applied offline.
+# ssl.use_preprocessing: false skips redundant live FundusPreprocess per sample,
+# which is the main CPU bottleneck when using raw images.
+data:
+  manifest_path: data/processed/manifest_preprocessed.csv
+  image_root: data/raw
+  num_workers: 4
+
+model:
+  use_attention: true
+
+train:
+  seed: 42
+  device: cuda
+  amp: true
+
+ssl:
+  use_preprocessing: false
+  image_size: 224
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  temperature: 0.07
+  projection_dim: 128
+  checkpoint_interval: 10
+  output_dir: artifacts/ssl

@@ -1,6 +1,6 @@
 project:
   name: drscreen
-  version: v3
+  version: v4
   task: binary_dr_screening
   output_root: artifacts
 
@@ -62,10 +62,11 @@ train:
   min_checkpoint_sensitivity: 0.80
   amp: true
   checkpoint_dir: artifacts/checkpoints
+  pretrained_backbone_path: artifacts/ssl/backbone_best.pt
 
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/best.pt
+  checkpoint_path: artifacts/checkpoints/v4/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
