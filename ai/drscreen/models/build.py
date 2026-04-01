@@ -44,15 +44,18 @@ def build_model(
     num_outputs: int = 1,
     use_attention: bool = False,
     grad_checkpointing: bool = False,
+    classifier_dropout: float = 0.0,
 ) -> nn.Module:
     if model_name == "efficientnet_b5":
         # timm build: ECA replaces every SE block via se_layer=EcaModule.
         # num_classes sets the final Linear head to the correct output size.
+        # drop_rate applies dropout before the classifier during training.
         model = timm.create_model(
             "efficientnet_b5",
             pretrained=pretrained,
             se_layer=EcaModule,
             num_classes=num_outputs,
+            drop_rate=classifier_dropout,
         )
         if use_attention:
             _inject_spatial_attention(model)

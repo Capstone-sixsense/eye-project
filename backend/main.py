@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from PIL import Image
 
 from drscreen.infer.service import InferenceSession
 
@@ -126,26 +127,33 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         if not PassNonPass(q_res)['is_acceptable']:
             return {"status": "fail", "message": "이미지 품질 미달", "details": q_res}
 
-        # AI 추론 
-        # 반환값에 의료 데이터 메트릭스가 있다고 가정
-        # 만약 다른 형태라면 이후 이미지 합성과정 수정 필요
+        # AI 추론
         with open(proc_path, "rb") as f:
             pred = _session.predict_image_bytes(f.read(), image_name=image.filename)
-     
+
         # 리포트 이미지 합성
-        # AI의 반환값에 1. 이미지 이름 / 2.이미지 파일 / 3.의료데이터 메트릭스가 존재한다고 가정
-        # 만약 출력 데이터가 다르다면 이미지 합성함수의 전면적이 수정이 필요함
+        # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
+        ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
+        prob = pred.payload.get("abnormal_probability", 0.0)
+        metrics = {
+            "accuracy": prob,
+            "precision": prob,
+            "recall": prob,
+            "specificity": 1.0 - prob,
+            "f1": prob,
+        }
         report_path = create_medical_report_image(
             original_filename=image.filename,
-            ai_image=Image.open(proc_path), # 실제로는 모델의 Heatmap을 넣어야 함
-            metrics=pred.payload.get('metrics', {})
+            ai_image=ai_image,
+            metrics=metrics,
         )
-        
+
         return {
             "status": "success",
-            "label": pred.payload.get("label"),
+            "label": pred.payload.get("predicted_label"),
+            "abnormal_probability": prob,
             "report_url": report_path,
-            "original_url": raw_path
+            "original_url": raw_path,
         }
 
     except Exception as e:

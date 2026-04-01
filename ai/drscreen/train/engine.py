@@ -115,6 +115,28 @@ def train_one_epoch(
     )
 
 
+def collect_logits_and_targets(
+    model: torch.nn.Module,
+    loader,
+    device: torch.device,
+    *,
+    amp_enabled: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run inference and return raw (logits, targets) tensors without computing metrics."""
+    model.eval()
+    all_logits: list[torch.Tensor] = []
+    all_targets: list[torch.Tensor] = []
+    with torch.inference_mode():
+        for batch in loader:
+            images = batch["image"].to(device)
+            targets = batch["label"].float().to(device).view(-1, 1)
+            with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
+                logits = model(images)
+            all_logits.append(logits.detach().float().cpu().view(-1))
+            all_targets.append(targets.detach().long().cpu().view(-1))
+    return torch.cat(all_logits), torch.cat(all_targets)
+
+
 def evaluate_one_epoch(
     model: torch.nn.Module,
     loader,
@@ -122,6 +144,7 @@ def evaluate_one_epoch(
     device: torch.device,
     *,
     amp_enabled: bool = False,
+    threshold: float = 0.5,
 ) -> EpochMetrics:
     model.eval()
     total_loss = 0.0
@@ -146,6 +169,7 @@ def evaluate_one_epoch(
     binary_metrics = compute_binary_classification_metrics(
         logits=torch.cat(all_logits),
         targets=torch.cat(all_targets),
+        threshold=threshold,
     )
 
     return EpochMetrics(

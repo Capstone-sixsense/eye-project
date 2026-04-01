@@ -16,6 +16,12 @@ def parse_args() -> argparse.Namespace:
         "--checkpoint",
         help="Checkpoint path. Defaults to config.infer.checkpoint_path.",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Classification threshold (default: 0.5). Optimal threshold is always reported separately.",
+    )
     return parser.parse_args()
 
 
@@ -37,6 +43,7 @@ def main() -> None:
         project_root=project_root,
         split_name=args.split,
         checkpoint_path=Path(args.checkpoint).resolve() if args.checkpoint else None,
+        threshold=args.threshold,
     )
     print("Evaluation complete")
     pprint(summary)

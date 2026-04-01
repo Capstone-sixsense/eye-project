@@ -171,7 +171,7 @@ class InferenceSession:
             project_root,
             checkpoint_path or config["infer"]["checkpoint_path"],
         )
-        checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu", weights_only=False)
         effective_config = _build_effective_infer_config(config, checkpoint)
 
         device_name = str(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pickle
+import joblib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -55,8 +55,7 @@ class QuickQualAssessor:
         backbone = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
         backbone.classifier = torch.nn.Identity()
         self._backbone = backbone.to(self._device).eval()
-        with open(weights_path, "rb") as f:
-            self._svm = pickle.load(f)
+        self._svm = joblib.load(weights_path)
 
     def assess(self, image: np.ndarray) -> QuickQualResult:
         """Assess quality of an RGB numpy image (H x W x 3, uint8)."""

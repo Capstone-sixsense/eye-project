@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,8 @@ from drscreen.models.build import build_model, get_classifier_module, split_mode
 from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.models.profiles import get_model_profile
 from drscreen.settings import merge_dicts, resolve_project_path
-from drscreen.train.engine import evaluate_one_epoch, train_one_epoch
+from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
+from drscreen.train.metrics import find_optimal_threshold
 from drscreen.utils.logging import get_logger
 from drscreen.utils.seed import set_seed
 
@@ -385,7 +387,17 @@ def run_training(
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
+        classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
+
+    if bool(config["model"].get("zero_init_classifier", False)):
+        classifier = get_classifier_module(architecture, model)
+        for module in classifier.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.zeros_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     criterion = _build_criterion(config)
     version = str(config["project"].get("version", "")).strip()
     checkpoint_dir = resolve_project_path(project_root, config["train"]["checkpoint_dir"])
@@ -486,6 +498,29 @@ def run_training(
                 val_auroc,
             )
 
+    promoted_to_global_best = False
+    if version and best_epoch > 0:
+        global_best_path = resolve_project_path(project_root, config["train"]["checkpoint_dir"]) / "best.pt"
+        global_best_auroc = 0.0
+        if global_best_path.exists():
+            try:
+                global_ckpt = torch.load(global_best_path, map_location="cpu", weights_only=False)
+                global_best_auroc = float(
+                    global_ckpt.get("val_metrics", {}).get("auroc") or 0.0
+                )
+            except Exception:
+                global_best_auroc = 0.0
+        if best_val_auroc > global_best_auroc:
+            shutil.copy2(best_checkpoint_path, global_best_path)
+            promoted_to_global_best = True
+            LOGGER.info(
+                "New global best: %.4f > %.4f — copied %s → %s",
+                best_val_auroc,
+                global_best_auroc,
+                best_checkpoint_path,
+                global_best_path,
+            )
+
     summary = {
         "project_root": str(project_root),
         "config_path": str(config_path),
@@ -498,6 +533,7 @@ def run_training(
         "best_val_auroc": best_val_auroc,
         "best_checkpoint_path": str(best_checkpoint_path),
         "last_checkpoint_path": str(last_checkpoint_path),
+        "promoted_to_global_best": promoted_to_global_best,
         "history": history,
     }
     summary_path = checkpoint_dir / "training_summary.json"
@@ -513,13 +549,14 @@ def run_split_evaluation(
     project_root: Path,
     split_name: str | None = None,
     checkpoint_path: Path | None = None,
+    threshold: float = 0.5,
 ) -> dict[str, Any]:
     requested_split = split_name or str(config["data"]["test_split"])
     resolved_checkpoint_path = resolve_project_path(
         project_root,
         checkpoint_path or config["infer"]["checkpoint_path"],
     )
-    checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu", weights_only=False)
     effective_config = _build_effective_eval_config(config, checkpoint)
     _validate_training_scope(effective_config)
 
@@ -530,26 +567,9 @@ def run_split_evaluation(
     device = resolve_device(device_name)
     dataset, manifest_path = _build_eval_dataset(effective_config, project_root, requested_split)
 
-    quality_assessor = QuickQualAssessor.from_config(effective_config, project_root, device)
-    if quality_assessor is not None:
-        use_preprocessing = bool(effective_config["data"].get("use_preprocessing", False))
-        preprocessor = FundusPreprocess() if use_preprocessing else None
-        rejected_indices: list[int] = []
-        for i, row in dataset.frame.iterrows():
-            image_path = dataset.image_root / str(row["image_path"])
-            pil_img = PILImage.open(image_path).convert("RGB")
-            if preprocessor is not None:
-                pil_img = preprocessor(pil_img)
-            quality_result = quality_assessor.assess(np.asarray(pil_img))
-            if quality_result.is_reject:
-                rejected_indices.append(i)
-        if rejected_indices:
-            LOGGER.info(
-                "EyeQ pre-scan: %d/%d images rejected and excluded from evaluation.",
-                len(rejected_indices),
-                len(dataset),
-            )
-            dataset.frame = dataset.frame.drop(index=rejected_indices).reset_index(drop=True)
+    # QuickQual pre-scan is intentionally skipped during evaluation.
+    # Benchmark metrics must be computed on the full dataset to avoid
+    # selection bias. Quality filtering is applied only at inference time.
 
     loader = DataLoader(
         dataset,
@@ -564,6 +584,7 @@ def run_split_evaluation(
         pretrained=False,
         num_outputs=int(effective_config["model"]["num_outputs"]),
         use_attention=bool(effective_config["model"].get("use_attention", False)),
+        classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
@@ -575,6 +596,14 @@ def run_split_evaluation(
         criterion,
         device,
         amp_enabled=amp_enabled,
+        threshold=threshold,
+    )
+
+    # Compute optimal threshold via Youden's J on this split's predictions.
+    logits, targets = collect_logits_and_targets(model, loader, device, amp_enabled=amp_enabled)
+    optimal_threshold = find_optimal_threshold(logits, targets)
+    metrics_at_optimal = evaluate_one_epoch(
+        model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
     )
 
     evaluation_dir = resolve_project_path(project_root, effective_config["project"]["output_root"])
@@ -595,6 +624,8 @@ def run_split_evaluation(
         "checkpoint_path": str(resolved_checkpoint_path),
         "label_names": list(effective_config["labels"]["names"]),
         "metrics": metrics.to_dict(),
+        "optimal_threshold": optimal_threshold,
+        "metrics_at_optimal_threshold": metrics_at_optimal.to_dict(),
     }
     output_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     summary["output_path"] = str(output_path)

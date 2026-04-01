@@ -7,13 +7,13 @@ project:
 data:
   manifest_path: data/processed/manifest_preprocessed.csv
   image_root: data/raw
-  resize_size: 448
+  resize_size: 512
   image_size: 448
   num_workers: 4
   persistent_workers: false
   batch_size: 16
   use_preprocessing: false
-  preprocess_size: 448
+  preprocess_size: 512
   train_split: train
   val_split: val
   test_split: test
@@ -44,6 +44,8 @@ model:
   num_outputs: 1
   use_attention: true
   grad_checkpointing: false
+  classifier_dropout: 0.0
+  zero_init_classifier: true
 
 train:
   seed: 42
