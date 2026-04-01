@@ -3,6 +3,12 @@ ai/docs/
 ai/AGENTS.md
 .omc/
 
+# AI training-only modules (not needed for inference)
+ai/drscreen/ssl/
+ai/drscreen/cli/pretrain.py
+ai/configs/ssl_pretrain.yaml
+ai/configs/ssl_ablation.yaml
+
 # AI datasets
 ai/data/
 
