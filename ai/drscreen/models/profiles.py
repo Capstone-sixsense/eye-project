@@ -75,10 +75,10 @@ def get_model_profile(architecture: str) -> ModelProfile:
             use_attention=True,
             gradcam_target_layer="blocks.6",
             rationale=(
-                "timm EfficientNet-B5 with ECA (replaces SE, no dimensionality reduction) and "
-                "CBAM Spatial Attention injected after every MBConv block. Input 448x448 bicubic. "
-                "ECA reduces parameters by ~5M vs the torchvision SE variant while strengthening "
-                "inter-channel relationships via 1D convolution."
+                "timm EfficientNet-B5 with _EcaSpatialAttn as se_layer (ECA channel attention + "
+                "CBAM spatial attention integrated inside each MBConv at the SE position). "
+                "Input 448x448 bicubic. Attention lives inside the block so Grad-CAM target "
+                "blocks.6 reflects clean residual output, not an attention-modulated surface."
             ),
         )
 

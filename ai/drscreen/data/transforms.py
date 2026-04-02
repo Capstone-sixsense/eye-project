@@ -127,10 +127,11 @@ def build_train_transform(
         pil_steps.append(FundusPreprocess())
 
     aug = A.Compose([
-        # Resize to intermediate resolution before crop so that scale=(0.7, 1.0)
+        # Resize to intermediate resolution before crop so that scale=(0.8, 1.0)
         # crops from a higher-res image, avoiding quality degradation.
+        # Lower bound 0.8 (not 0.7) to avoid cropping out peripheral lesions.
         A.Resize(resize, resize),
-        A.RandomResizedCrop(size=(crop_size, crop_size), scale=(0.7, 1.0)),
+        A.RandomResizedCrop(size=(crop_size, crop_size), scale=(0.8, 1.0)),
 
         # Geometric: fundus lesions are rotation-invariant; all orientations valid.
         A.HorizontalFlip(p=0.5),

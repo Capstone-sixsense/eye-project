@@ -1,6 +1,6 @@
 project:
   name: drscreen
-  version: v4
+  version: v4.1
   task: binary_dr_screening
   output_root: artifacts
 
@@ -66,7 +66,7 @@ train:
 
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/v4/best.pt
+  checkpoint_path: artifacts/checkpoints/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true

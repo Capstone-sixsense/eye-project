@@ -10,32 +10,22 @@ from torchvision import models
 from drscreen.models.profiles import get_weights_enum
 
 
-class _SpatialAttnWrapper(nn.Module):
-    """Wraps a single MBConv block and applies spatial attention to its output."""
+class _EcaSpatialAttn(nn.Module):
+    """Combined ECA channel attention + CBAM spatial attention as a timm se_layer.
 
-    def __init__(self, block: nn.Module) -> None:
+    Passed via se_layer=_EcaSpatialAttn so attention is integrated inside each
+    MBConv block at the SE position, not applied externally on top of the block
+    output. This keeps Grad-CAM target layers clean -- model.blocks[-1] output
+    is the standard residual block output, not an attention-modulated surface.
+    """
+
+    def __init__(self, channels: int, **kwargs) -> None:
         super().__init__()
-        self.block = block
-        self.spatial_attn = SpatialAttn(kernel_size=7)
+        self.eca = EcaModule(channels, **kwargs)
+        self.spatial = SpatialAttn(kernel_size=7)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.spatial_attn(self.block(x))
-
-
-def _inject_spatial_attention(model: nn.Module) -> None:
-    """Replace every MBConv block in model.blocks with a spatially-attended wrapper.
-
-    timm EfficientNet has model.blocks: Sequential of 7 Sequential block groups.
-    Each group contains one or more MBConv blocks.  We wrap each individual block
-    so that spatial attention is applied after the block output (including its
-    skip connection), matching the paper's design.
-    """
-    for group_idx in range(len(model.blocks)):
-        group = model.blocks[group_idx]
-        new_group: nn.Sequential = nn.Sequential()
-        for block_idx in range(len(group)):
-            new_group.add_module(str(block_idx), _SpatialAttnWrapper(group[block_idx]))
-        model.blocks[group_idx] = new_group
+        return self.spatial(self.eca(x))
 
 
 def build_model(
@@ -47,18 +37,19 @@ def build_model(
     classifier_dropout: float = 0.0,
 ) -> nn.Module:
     if model_name == "efficientnet_b5":
-        # timm build: ECA replaces every SE block via se_layer=EcaModule.
-        # num_classes sets the final Linear head to the correct output size.
-        # drop_rate applies dropout before the classifier during training.
+        # timm build: se_layer controls the attention module inside each MBConv.
+        # use_attention=True swaps EcaModule for _EcaSpatialAttn (ECA + spatial),
+        # keeping attention integrated inside the block rather than wrapping it
+        # externally. num_classes sets the final Linear head; drop_rate applies
+        # dropout before the classifier during training.
+        se_layer = _EcaSpatialAttn if use_attention else EcaModule
         model = timm.create_model(
             "efficientnet_b5",
             pretrained=pretrained,
-            se_layer=EcaModule,
+            se_layer=se_layer,
             num_classes=num_outputs,
             drop_rate=classifier_dropout,
         )
-        if use_attention:
-            _inject_spatial_attention(model)
         if grad_checkpointing:
             model.set_grad_checkpointing(True)
         return model
