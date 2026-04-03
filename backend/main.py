@@ -29,7 +29,6 @@ async def lifespan(app: FastAPI):
     global _session, _session_error
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
-    #checkpoint = torch.load(path, weights_only=False)  # 신뢰할 수 있는 모델인 경우 False 설정
 
     try:
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
