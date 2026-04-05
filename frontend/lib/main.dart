@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-import 'screens/metrics_screen.dart';
+import 'models/result_screen_args.dart';
 import 'screens/result_screen.dart';
 import 'screens/upload_screen.dart';
 
@@ -15,10 +15,14 @@ void main() {
         '/upload': (_) => const UploadScreen(),
         '/result': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
-          final bytes = args is Uint8List ? args : null;
-          return ResultScreen(originalImageBytes: bytes);
+          if (args is ResultScreenArgs) {
+            return ResultScreen(args: args);
+          }
+          if (args is Uint8List) {
+            return ResultScreen(originalImageBytes: args);
+          }
+          return const ResultScreen();
         },
-        '/metrics': (_) => const MetricsScreen(),
       },
     ),
   );
