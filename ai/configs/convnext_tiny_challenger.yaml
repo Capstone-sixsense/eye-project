@@ -1,0 +1,19 @@
+data:
+  resize_size: 236
+  image_size: 224
+  batch_size: 8
+
+model:
+  architecture: convnext_tiny
+  pretrained: true
+  num_outputs: 1
+
+train:
+  optimizer: adamw
+  scheduler: cosine
+  head_epochs: 3
+  finetune_epochs: 15
+  warmup_epochs: 2
+  head_learning_rate: 0.0002
+  backbone_learning_rate: 0.00005
+  weight_decay: 0.01

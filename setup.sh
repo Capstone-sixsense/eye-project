@@ -2,8 +2,8 @@
 
 echo "⚙️  Eye-Project 환경 구축을 시작합니다..."
 
-# 1. 깃허브에 올리지 않는 데이터 폴더 생성 [cite: 3]
-mkdir -p backend/data backend/storage
+# 1. git 미추적 AI 폴더 생성
+mkdir -p ai/data ai/storage ai/artifacts/checkpoints ai/artifacts/predictions ai/artifacts/heatmaps ai/artifacts/quickqual
 
 # 2. Flutter 프로젝트가 없는 경우에만 자동 생성
 if [ ! -f "./frontend/pubspec.yaml" ]; then
