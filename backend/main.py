@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import os, shutil, logging, datetime
+import os, shutil, logging, datetime, time
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from PIL import Image
@@ -23,6 +24,22 @@ _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 _session: InferenceSession | None = None
 _session_error: str | None = None
 
+
+def _configure_cpu_threads() -> None:
+    """Docker CPU 추론 시 스레드 수 (OMP/MKL은 compose에서, PyTorch는 여기서)."""
+    try:
+        import torch
+
+        inter = os.environ.get("TORCH_NUM_INTEROP_THREADS", "").strip()
+        if inter.isdigit() and int(inter) > 0:
+            torch.set_num_interop_threads(int(inter))
+        raw = os.environ.get("TORCH_NUM_THREADS", "").strip()
+        if raw.isdigit() and int(raw) > 0:
+            torch.set_num_threads(int(raw))
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
@@ -31,6 +48,7 @@ async def lifespan(app: FastAPI):
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
 
     try:
+        _configure_cpu_threads()
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
     except FileNotFoundError as exc:
@@ -43,6 +61,19 @@ async def lifespan(app: FastAPI):
     _session = None
 
 app = FastAPI(title="eye-project backend", lifespan=lifespan)
+
+# Flutter 웹(예: localhost:8080) → API(8000) 교차 출처: 브라우저가 JSON·이미지 응답을 읽으려면 필요
+_cors_origins = os.environ.get(
+    "CORS_ALLOW_ORIGINS",
+    "http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _health_payload() -> dict[str, Any]:
@@ -105,8 +136,15 @@ logging.basicConfig(
 
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
+    print(
+        f"[analyze] 요청 도착 (filename={image.filename!r}, 업로드 수신·추론 시작)",
+        flush=True,
+    )
     if _session is None:
-        raise HTTPException(status_code=503, detail="AI 모델 로딩 중입니다.")
+        raise HTTPException(
+            status_code=503,
+            detail=_session_error or "AI 모델이 준비되지 않았습니다.",
+        )
 
     UPLOAD_DIR = "storage"
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -116,49 +154,15 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
     proc_path = os.path.join(UPLOAD_DIR, image.filename)
 
     try:
+        t0 = time.perf_counter()
         # 전처리 및 저장
         content = await image.read()
+        name = image.filename or "upload"
+        print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
         with open(raw_path, "wb") as f: f.write(content)
         resize_image_high_quality(raw_path, proc_path, (448, 448))
 
-        # 품질 필터링 
-        q_res = check_image_quality(UPLOAD_DIR, image.filename)
-        if not PassNonPass(q_res)['is_acceptable']:
-            return {"status": "fail", "message": "이미지 품질 미달", "details": q_res}
-
-        # AI 추론
-        with open(proc_path, "rb") as f:
-            pred = _session.predict_image_bytes(f.read(), image_name=image.filename)
-
-        # 리포트 이미지 합성
-        # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
-        ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
-        prob = pred.payload.get("abnormal_probability", 0.0)
-        metrics = {
-            "accuracy": prob,
-            "precision": prob,
-            "recall": prob,
-            "specificity": 1.0 - prob,
-            "f1": prob,
-        }
-        report_path = create_medical_report_image(
-            original_filename=image.filename,
-            ai_image=ai_image,
-            metrics=metrics,
-        )
-
-        return {
-            "status": "success",
-            "label": pred.payload.get("predicted_label"),
-            "abnormal_probability": prob,
-            "report_url": report_path,
-            "original_url": raw_path,
-        }
-
-    except Exception as e:
-        logging.error(f"Error: {e}")
-        raise HTTPException(status_code=500, detail="분석 실패")
-    finally:
-        if os.path.exists(proc_path): os.remove(proc_path) # 임시파일 정리
-
-    #return await pred
+        # CleanVision(Imagelab)은 이미지 1장도 수십 초~수 분 걸릴 수 있음 → 개발 시 SKIP_CLEANVISION=1
+        skip_cv = os.environ.get("SKIP_CLEANVISION", "").lower() in ("1", "true", "yes")
+        if not skip_cv:
+       
