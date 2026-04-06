@@ -274,7 +274,24 @@ def _build_scheduler(config: dict[str, Any], optimizer: Optimizer, epochs: int) 
 
 def _build_criterion(config: dict[str, Any]) -> nn.Module:
     _validate_training_scope(config)
-    return nn.BCEWithLogitsLoss()
+    loss_name = str(config["train"].get("loss", "bce")).lower()
+
+    if loss_name == "focal":
+        from drscreen.train.loss import BinaryFocalLoss
+        gamma = float(config["train"].get("focal_gamma", 2.0))
+        alpha_cfg = config["train"].get("focal_alpha")
+        alpha = float(alpha_cfg) if alpha_cfg is not None else None
+        return BinaryFocalLoss(gamma=gamma, alpha=alpha)
+
+    if loss_name == "bce":
+        pos_weight_cfg = config["train"].get("pos_weight")
+        if pos_weight_cfg is not None:
+            return nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([float(pos_weight_cfg)])
+            )
+        return nn.BCEWithLogitsLoss()
+
+    raise ValueError(f"Unsupported loss '{loss_name}'. Supported: 'bce', 'focal'.")
 
 
 def _checkpoint_payload(
@@ -386,6 +403,7 @@ def run_training(
         pretrained=bool(config["model"]["pretrained"]),
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
+        use_mixstyle=bool(config["model"].get("use_mixstyle", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
         classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
@@ -414,7 +432,7 @@ def run_training(
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-    criterion = _build_criterion(config)
+    criterion = _build_criterion(config).to(device)
     version = str(config["project"].get("version", "")).strip()
     checkpoint_dir = resolve_project_path(project_root, config["train"]["checkpoint_dir"])
     if version:
@@ -566,6 +584,7 @@ def run_split_evaluation(
     split_name: str | None = None,
     checkpoint_path: Path | None = None,
     threshold: float = 0.5,
+    tta: bool = False,
 ) -> dict[str, Any]:
     requested_split = split_name or str(config["data"]["test_split"])
     resolved_checkpoint_path = resolve_project_path(
@@ -600,27 +619,34 @@ def run_split_evaluation(
         pretrained=False,
         num_outputs=int(effective_config["model"]["num_outputs"]),
         use_attention=bool(effective_config["model"].get("use_attention", False)),
+        use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
         classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    criterion = _build_criterion(effective_config)
+    criterion = _build_criterion(effective_config).to(device)
     amp_enabled = bool(effective_config["train"].get("amp", False)) and device.type == "cuda"
-    metrics = evaluate_one_epoch(
-        model,
-        loader,
-        criterion,
-        device,
-        amp_enabled=amp_enabled,
-        threshold=threshold,
-    )
 
-    # Compute optimal threshold via Youden's J on this split's predictions.
-    logits, targets = collect_logits_and_targets(model, loader, device, amp_enabled=amp_enabled)
-    optimal_threshold = find_optimal_threshold(logits, targets)
-    metrics_at_optimal = evaluate_one_epoch(
-        model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
+    # Collect logits once; TTA averages across 4 flipped views per batch.
+    logits, targets = collect_logits_and_targets(
+        model, loader, device, amp_enabled=amp_enabled, tta=tta
     )
+    optimal_threshold = find_optimal_threshold(logits, targets)
+
+    if tta:
+        metrics = compute_binary_classification_metrics(
+            logits=logits, targets=targets.long(), threshold=threshold
+        )
+        metrics_at_optimal = compute_binary_classification_metrics(
+            logits=logits, targets=targets.long(), threshold=optimal_threshold
+        )
+    else:
+        metrics = evaluate_one_epoch(
+            model, loader, criterion, device, amp_enabled=amp_enabled, threshold=threshold,
+        )
+        metrics_at_optimal = evaluate_one_epoch(
+            model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
+        )
 
     domain_breakdown: dict[str, Any] | None = None
     if "domain" in dataset.frame.columns:
@@ -654,6 +680,7 @@ def run_split_evaluation(
         "split": requested_split,
         "rows": len(dataset),
         "device": str(device),
+        "tta": tta,
         "checkpoint_path": str(resolved_checkpoint_path),
         "label_names": list(effective_config["labels"]["names"]),
         "metrics": metrics.to_dict(),
