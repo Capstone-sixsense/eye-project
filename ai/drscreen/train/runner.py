@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
-from PIL import Image as PILImage
 from torch import nn
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, SequentialLR
@@ -17,9 +15,8 @@ from torch.utils.data import DataLoader
 from drscreen.data.datasets import ManifestDataset
 from drscreen.data.transforms import FundusPreprocess, build_eval_transform, build_train_transform
 from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
-from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.models.profiles import get_model_profile
-from drscreen.settings import merge_dicts, resolve_project_path
+from drscreen.settings import build_effective_checkpoint_config, merge_dicts, resolve_project_path
 from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
 from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
 from drscreen.utils.logging import get_logger
@@ -324,40 +321,6 @@ def _prefixed_metric_fields(prefix: str, metrics: Any) -> dict[str, Any]:
     return {f"{prefix}_{key}": value for key, value in metrics.to_dict().items()}
 
 
-def _build_effective_eval_config(
-    runtime_config: dict[str, Any],
-    checkpoint: dict[str, Any],
-) -> dict[str, Any]:
-    checkpoint_config = checkpoint.get("config")
-    effective_config = runtime_config
-    if isinstance(checkpoint_config, dict):
-        effective_config = merge_dicts(checkpoint_config, runtime_config)
-
-    effective_config = merge_dicts(
-        effective_config,
-        {
-            "model": {
-                "architecture": checkpoint.get(
-                    "architecture",
-                    effective_config["model"]["architecture"],
-                ),
-                "num_outputs": checkpoint.get(
-                    "num_outputs",
-                    effective_config["model"]["num_outputs"],
-                ),
-                "pretrained": False,
-            },
-            "labels": {
-                "names": checkpoint.get(
-                    "label_names",
-                    effective_config["labels"]["names"],
-                )
-            },
-        },
-    )
-    return effective_config
-
-
 def describe_training_setup(
     config: dict[str, Any],
     *,
@@ -423,14 +386,6 @@ def run_training(
             )
         else:
             LOGGER.warning("pretrained_backbone_path not found: %s", pretrained_backbone_path)
-
-    if bool(config["model"].get("zero_init_classifier", False)):
-        classifier = get_classifier_module(architecture, model)
-        for module in classifier.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.zeros_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
 
     criterion = _build_criterion(config).to(device)
     version = str(config["project"].get("version", "")).strip()
@@ -584,7 +539,6 @@ def run_split_evaluation(
     split_name: str | None = None,
     checkpoint_path: Path | None = None,
     threshold: float = 0.5,
-    tta: bool = False,
 ) -> dict[str, Any]:
     requested_split = split_name or str(config["data"]["test_split"])
     resolved_checkpoint_path = resolve_project_path(
@@ -592,7 +546,7 @@ def run_split_evaluation(
         checkpoint_path or config["infer"]["checkpoint_path"],
     )
     checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu", weights_only=False)
-    effective_config = _build_effective_eval_config(config, checkpoint)
+    effective_config = build_effective_checkpoint_config(config, checkpoint)
     _validate_training_scope(effective_config)
 
     device_name = str(
@@ -627,26 +581,15 @@ def run_split_evaluation(
     criterion = _build_criterion(effective_config).to(device)
     amp_enabled = bool(effective_config["train"].get("amp", False)) and device.type == "cuda"
 
-    # Collect logits once; TTA averages across 4 flipped views per batch.
-    logits, targets = collect_logits_and_targets(
-        model, loader, device, amp_enabled=amp_enabled, tta=tta
-    )
+    logits, targets = collect_logits_and_targets(model, loader, device, amp_enabled=amp_enabled)
     optimal_threshold = find_optimal_threshold(logits, targets)
 
-    if tta:
-        metrics = compute_binary_classification_metrics(
-            logits=logits, targets=targets.long(), threshold=threshold
-        )
-        metrics_at_optimal = compute_binary_classification_metrics(
-            logits=logits, targets=targets.long(), threshold=optimal_threshold
-        )
-    else:
-        metrics = evaluate_one_epoch(
-            model, loader, criterion, device, amp_enabled=amp_enabled, threshold=threshold,
-        )
-        metrics_at_optimal = evaluate_one_epoch(
-            model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
-        )
+    metrics = evaluate_one_epoch(
+        model, loader, criterion, device, amp_enabled=amp_enabled, threshold=threshold,
+    )
+    metrics_at_optimal = evaluate_one_epoch(
+        model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
+    )
 
     domain_breakdown: dict[str, Any] | None = None
     if "domain" in dataset.frame.columns:
@@ -680,7 +623,6 @@ def run_split_evaluation(
         "split": requested_split,
         "rows": len(dataset),
         "device": str(device),
-        "tta": tta,
         "checkpoint_path": str(resolved_checkpoint_path),
         "label_names": list(effective_config["labels"]["names"]),
         "metrics": metrics.to_dict(),

@@ -1,5 +1,4 @@
 project:
-  name: drscreen
   version: v5
   task: binary_dr_screening
   output_root: artifacts
@@ -20,11 +19,9 @@ data:
   external_test_split: external_test
 
 labels:
-  mode: normal_vs_abnormal
   names:
     - normal
     - abnormal
-  positive_index: 1
 
 quality:
   blur_score_min: 248.929
@@ -37,6 +34,7 @@ quality:
 
 quickqual:
   weights_path: artifacts/quickqual/quickqual_dn121_512.pkl
+  backbone_weights_path: artifacts/quickqual/densenet121-a639ec97.pth
 
 model:
   architecture: efficientnet_b5
@@ -46,8 +44,6 @@ model:
   use_mixstyle: true
   grad_checkpointing: false
   classifier_dropout: 0.0
-  zero_init_classifier: false
-
 train:
   seed: 42
   device: cuda
@@ -63,12 +59,9 @@ train:
   min_checkpoint_sensitivity: 0.80
   amp: true
   checkpoint_dir: artifacts/checkpoints
-  # pretrained_backbone_path: artifacts/ssl/backbone_best.pt
-
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/v6_alpha_only/best.pt
-  tta: false
+  checkpoint_path: artifacts/checkpoints/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true

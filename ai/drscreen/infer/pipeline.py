@@ -36,10 +36,6 @@ class InferenceResult:
         return data
 
 
-def load_rgb_image(image_path: str | Path) -> np.ndarray:
-    return np.asarray(Image.open(image_path).convert("RGB"))
-
-
 def run_single_image_inference(
     model: torch.nn.Module,
     image_tensor: torch.Tensor,

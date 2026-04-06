@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import joblib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -50,9 +51,24 @@ class QuickQualAssessor:
     Performance: EyeQ accuracy 88.50%, AUC 0.9687 (vs MCF-Net 88.00%, 0.9588).
     """
 
-    def __init__(self, weights_path: str | Path, device: str | torch.device = "cpu") -> None:
+    def __init__(
+        self,
+        weights_path: str | Path,
+        backbone_weights_path: str | Path,
+        device: str | torch.device = "cpu",
+    ) -> None:
         self._device = torch.device(device) if isinstance(device, str) else device
-        backbone = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
+        backbone = models.densenet121(weights=None)
+        state_dict = torch.load(backbone_weights_path, map_location="cpu", weights_only=False)
+        pattern = re.compile(
+            r"^(.*denselayer\d+\.(?:norm|relu|conv))\.((?:[12])\.(?:weight|bias|running_mean|running_var))$"
+        )
+        for key in list(state_dict.keys()):
+            match = pattern.match(key)
+            if match:
+                state_dict[match.group(1) + match.group(2)] = state_dict[key]
+                del state_dict[key]
+        backbone.load_state_dict(state_dict)
         backbone.classifier = torch.nn.Identity()
         self._backbone = backbone.to(self._device).eval()
         self._svm = joblib.load(weights_path)
@@ -83,12 +99,26 @@ class QuickQualAssessor:
         project_root: Path,
         device: str | torch.device = "cpu",
     ) -> QuickQualAssessor | None:
-        """Load assessor from config. Returns None if weights_path absent or file missing."""
+        """Load assessor from config.
+
+        Returns None only when QuickQual is not configured. If configured, all
+        required artifacts must exist so inference cannot silently degrade.
+        """
         cfg = config.get("quickqual") or {}
         weights_str = cfg.get("weights_path")
         if not weights_str:
             return None
         weights_path = project_root / weights_str
         if not weights_path.exists():
-            return None
-        return cls(weights_path, device=device)
+            raise FileNotFoundError(f"QuickQual SVM weights not found: {weights_path}")
+
+        backbone_weights_str = cfg.get("backbone_weights_path")
+        if not backbone_weights_str:
+            raise FileNotFoundError("quickqual.backbone_weights_path is required for inference")
+        backbone_weights_path = project_root / backbone_weights_str
+        if not backbone_weights_path.exists():
+            raise FileNotFoundError(
+                f"QuickQual backbone weights not found: {backbone_weights_path}"
+            )
+
+        return cls(weights_path, backbone_weights_path, device=device)
