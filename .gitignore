@@ -17,12 +17,20 @@ ai/artifacts/evaluations/
 ai/artifacts/predictions/
 ai/artifacts/heatmaps/
 ai/artifacts/quality/
+ai/artifacts/quickqual/**
+!ai/artifacts/quickqual/
+!ai/artifacts/quickqual/quickqual_dn121_512.pkl
+!ai/artifacts/quickqual/densenet121-a639ec97.pth
 
 # AI checkpoints: keep only the active checkpoint pointer files
 ai/artifacts/checkpoints/**
 !ai/artifacts/checkpoints/
 !ai/artifacts/checkpoints/best.pt
 !ai/artifacts/checkpoints/current_version.txt
+
+# Archived AI artifacts/data: keep only archived code/config files in git
+ai/archive/artifacts/
+ai/archive/data/
 
 # Flutter / Dart
 .dart_tool/

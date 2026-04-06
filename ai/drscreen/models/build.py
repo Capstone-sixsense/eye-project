@@ -7,6 +7,7 @@ from timm.layers import EcaModule
 from timm.layers.cbam import SpatialAttn
 from torchvision import models
 
+from drscreen.models.mixstyle import MixStyle
 from drscreen.models.profiles import get_weights_enum
 
 
@@ -28,11 +29,32 @@ class _EcaSpatialAttn(nn.Module):
         return self.spatial(self.eca(x))
 
 
+def _inject_mixstyle(model: nn.Module, num_blocks: int = 3) -> None:
+    """Attach MixStyle to the first *num_blocks* block groups via forward hooks.
+
+    Uses ``register_forward_hook`` so state_dict keys stay unchanged --
+    pretrained / SSL checkpoints load without key remapping.  MixStyle is
+    registered as a submodule on each block group (not on the top-level
+    model) so ``model.train()`` / ``model.eval()`` propagates correctly
+    without polluting ``model.children()`` iteration.
+    """
+    def _make_hook(ms: MixStyle):
+        def hook(_module: nn.Module, _inp: tuple, out: torch.Tensor) -> torch.Tensor:
+            return ms(out)
+        return hook
+
+    for i in range(min(num_blocks, len(model.blocks))):
+        ms = MixStyle()
+        model.blocks[i].add_module("_mixstyle", ms)
+        model.blocks[i].register_forward_hook(_make_hook(ms))
+
+
 def build_model(
     model_name: str,
     pretrained: bool = True,
     num_outputs: int = 1,
     use_attention: bool = False,
+    use_mixstyle: bool = False,
     grad_checkpointing: bool = False,
     classifier_dropout: float = 0.0,
 ) -> nn.Module:
@@ -50,6 +72,8 @@ def build_model(
             num_classes=num_outputs,
             drop_rate=classifier_dropout,
         )
+        if use_mixstyle:
+            _inject_mixstyle(model)
         if grad_checkpointing:
             model.set_grad_checkpointing(True)
         return model

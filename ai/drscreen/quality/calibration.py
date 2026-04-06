@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -211,5 +211,3 @@ def format_report_excerpt(report: Mapping[str, Any]) -> str:
     )
 
 
-def calibration_to_dict(config: CalibrationConfig) -> dict[str, Any]:
-    return asdict(config)

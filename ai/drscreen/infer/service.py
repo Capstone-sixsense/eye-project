@@ -19,9 +19,9 @@ from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
 from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.settings import (
+    build_effective_checkpoint_config,
     ensure_runtime_directories,
     load_app_config,
-    merge_dicts,
     resolve_project_path,
 )
 from drscreen.train.runner import resolve_device
@@ -38,40 +38,6 @@ def _resolve_config_context(config_path: str | Path) -> tuple[Path, Path, dict[s
     config = load_app_config(resolved_config_path, base_path=base_path)
     ensure_runtime_directories(config, project_root)
     return resolved_config_path, project_root, config
-
-
-def _build_effective_infer_config(
-    runtime_config: dict[str, Any],
-    checkpoint: dict[str, Any],
-) -> dict[str, Any]:
-    checkpoint_config = checkpoint.get("config")
-    effective_config = runtime_config
-    if isinstance(checkpoint_config, dict):
-        effective_config = merge_dicts(checkpoint_config, runtime_config)
-
-    effective_config = merge_dicts(
-        effective_config,
-        {
-            "model": {
-                "architecture": checkpoint.get(
-                    "architecture",
-                    effective_config["model"]["architecture"],
-                ),
-                "num_outputs": checkpoint.get(
-                    "num_outputs",
-                    effective_config["model"]["num_outputs"],
-                ),
-                "pretrained": False,
-            },
-            "labels": {
-                "names": checkpoint.get(
-                    "label_names",
-                    effective_config["labels"]["names"],
-                )
-            },
-        },
-    )
-    return effective_config
 
 
 def _sanitize_stem(name: str) -> str:
@@ -172,7 +138,7 @@ class InferenceSession:
             checkpoint_path or config["infer"]["checkpoint_path"],
         )
         checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu", weights_only=False)
-        effective_config = _build_effective_infer_config(config, checkpoint)
+        effective_config = build_effective_checkpoint_config(config, checkpoint)
 
         device_name = str(
             effective_config.get("infer", {}).get("device")
@@ -208,7 +174,6 @@ class InferenceSession:
         preprocess_size = int(data_cfg.get("preprocess_size", 0)) or None
         preprocessor = FundusPreprocess(output_size=preprocess_size) if use_preprocessing else None
         quality_assessor = QuickQualAssessor.from_config(effective_config, project_root, device)
-
         prediction_dir = resolve_project_path(project_root, effective_config["infer"]["prediction_dir"])
         heatmap_dir = resolve_project_path(project_root, effective_config["infer"]["heatmap_dir"])
         prediction_dir.mkdir(parents=True, exist_ok=True)

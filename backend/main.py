@@ -19,7 +19,7 @@ from make_result_img import create_medical_report_image
 
 
 
-_DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
+_DEFAULT_CONFIG_PATH = "/ai/configs/v6_alpha_only.yaml"
 
 _session: InferenceSession | None = None
 _session_error: str | None = None

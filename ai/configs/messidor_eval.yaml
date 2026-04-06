@@ -9,11 +9,9 @@ data:
   test_split: external_test
 
 labels:
-  mode: normal_vs_abnormal
   names:
     - normal
     - abnormal
-  positive_index: 1
 
 model:
   architecture: efficientnet_b5
@@ -30,5 +28,3 @@ infer:
   device: cuda
   checkpoint_path: artifacts/checkpoints/last.pt
 
-eyeq:
-  weights_path: artifacts/eyeq/DenseNet121_v3_v1.tar
