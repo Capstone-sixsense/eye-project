@@ -165,4 +165,46 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         # CleanVision(Imagelab)은 이미지 1장도 수십 초~수 분 걸릴 수 있음 → 개발 시 SKIP_CLEANVISION=1
         skip_cv = os.environ.get("SKIP_CLEANVISION", "").lower() in ("1", "true", "yes")
         if not skip_cv:
-       
+            q_res = check_image_quality(UPLOAD_DIR, name)
+            if not PassNonPass(q_res)["is_acceptable"]:
+                return {"status": "fail", "message": "이미지 품질 미달", "details": q_res}
+        else:
+            print("[analyze] SKIP_CLEANVISION=1 — CleanVision 품질 검사 생략", flush=True)
+
+        # AI 추론 (CPU + EfficientNet 등은 여기서 대부분의 시간 소요)
+        with open(proc_path, "rb") as f:
+            pred = _session.predict_image_bytes(f.read(), image_name=name)
+
+        # 리포트 이미지 합성
+        # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
+        ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
+        prob = pred.payload.get("abnormal_probability", 0.0)
+        metrics = {
+            "accuracy": prob,
+            "precision": prob,
+            "recall": prob,
+            "specificity": 1.0 - prob,
+            "f1": prob,
+        }
+        report_path = create_medical_report_image(
+            original_filename=name,
+            ai_image=ai_image,
+            metrics=metrics,
+        )
+
+        print(f"[analyze] 완료: {time.perf_counter() - t0:.1f}s", flush=True)
+        return {
+            "status": "success",
+            "label": pred.payload.get("predicted_label"),
+            "abnormal_probability": prob,
+            "report_url": report_path.replace("\\", "/"),
+            "original_url": raw_path.replace("\\", "/"),
+        }
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="분석 실패")
+    finally:
+        if os.path.exists(proc_path): os.remove(proc_path) # 임시파일 정리
+
+    #return await pred
