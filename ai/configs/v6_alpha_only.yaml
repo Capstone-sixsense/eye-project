@@ -14,4 +14,4 @@ train:
   pretrained_backbone_path: artifacts/checkpoints/v4.1/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v6_alpha_only/best.pt
+  checkpoint_path: artifacts/checkpoints/best.pt
