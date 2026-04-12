@@ -1,20 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset
-
-
-@dataclass(slots=True)
-class FundusSample:
-    image_path: Path
-    label: int
-    split: str
-
 
 class ManifestDataset(Dataset):
     def __init__(

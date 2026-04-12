@@ -9,7 +9,7 @@ from torchvision import transforms
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from drscreen.models.profiles import get_model_profile, resolve_interpolation_mode
+from drscreen.models.profiles import resolve_interpolation_mode
 
 
 class FundusPreprocess:
@@ -180,26 +180,3 @@ def build_eval_transform(
     return transforms.Compose(steps)
 
 
-def build_transforms_for_model(model_name: str) -> tuple:
-    profile = get_model_profile(model_name)
-    train_transform = build_train_transform(
-        crop_size=profile.crop_size,
-        resize_size=profile.resize_size,
-        interpolation=profile.interpolation,
-        mean=profile.mean,
-        std=profile.std,
-    )
-    eval_transform = build_eval_transform(
-        crop_size=profile.crop_size,
-        resize_size=profile.resize_size,
-        interpolation=profile.interpolation,
-        mean=profile.mean,
-        std=profile.std,
-    )
-    return train_transform, eval_transform
-
-
-def denormalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    mean = torch.tensor((0.485, 0.456, 0.406), device=tensor.device).view(-1, 1, 1)
-    std = torch.tensor((0.229, 0.224, 0.225), device=tensor.device).view(-1, 1, 1)
-    return (tensor * std) + mean

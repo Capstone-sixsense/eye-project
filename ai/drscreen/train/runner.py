@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
-from PIL import Image as PILImage
 from torch import nn
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, SequentialLR
@@ -17,9 +15,8 @@ from torch.utils.data import DataLoader
 from drscreen.data.datasets import ManifestDataset
 from drscreen.data.transforms import FundusPreprocess, build_eval_transform, build_train_transform
 from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
-from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.models.profiles import get_model_profile
-from drscreen.settings import merge_dicts, resolve_project_path
+from drscreen.settings import build_effective_checkpoint_config, merge_dicts, resolve_project_path
 from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
 from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
 from drscreen.utils.logging import get_logger
@@ -274,7 +271,24 @@ def _build_scheduler(config: dict[str, Any], optimizer: Optimizer, epochs: int) 
 
 def _build_criterion(config: dict[str, Any]) -> nn.Module:
     _validate_training_scope(config)
-    return nn.BCEWithLogitsLoss()
+    loss_name = str(config["train"].get("loss", "bce")).lower()
+
+    if loss_name == "focal":
+        from drscreen.train.loss import BinaryFocalLoss
+        gamma = float(config["train"].get("focal_gamma", 2.0))
+        alpha_cfg = config["train"].get("focal_alpha")
+        alpha = float(alpha_cfg) if alpha_cfg is not None else None
+        return BinaryFocalLoss(gamma=gamma, alpha=alpha)
+
+    if loss_name == "bce":
+        pos_weight_cfg = config["train"].get("pos_weight")
+        if pos_weight_cfg is not None:
+            return nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([float(pos_weight_cfg)])
+            )
+        return nn.BCEWithLogitsLoss()
+
+    raise ValueError(f"Unsupported loss '{loss_name}'. Supported: 'bce', 'focal'.")
 
 
 def _checkpoint_payload(
@@ -305,40 +319,6 @@ def _checkpoint_payload(
 
 def _prefixed_metric_fields(prefix: str, metrics: Any) -> dict[str, Any]:
     return {f"{prefix}_{key}": value for key, value in metrics.to_dict().items()}
-
-
-def _build_effective_eval_config(
-    runtime_config: dict[str, Any],
-    checkpoint: dict[str, Any],
-) -> dict[str, Any]:
-    checkpoint_config = checkpoint.get("config")
-    effective_config = runtime_config
-    if isinstance(checkpoint_config, dict):
-        effective_config = merge_dicts(checkpoint_config, runtime_config)
-
-    effective_config = merge_dicts(
-        effective_config,
-        {
-            "model": {
-                "architecture": checkpoint.get(
-                    "architecture",
-                    effective_config["model"]["architecture"],
-                ),
-                "num_outputs": checkpoint.get(
-                    "num_outputs",
-                    effective_config["model"]["num_outputs"],
-                ),
-                "pretrained": False,
-            },
-            "labels": {
-                "names": checkpoint.get(
-                    "label_names",
-                    effective_config["labels"]["names"],
-                )
-            },
-        },
-    )
-    return effective_config
 
 
 def describe_training_setup(
@@ -386,6 +366,7 @@ def run_training(
         pretrained=bool(config["model"]["pretrained"]),
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
+        use_mixstyle=bool(config["model"].get("use_mixstyle", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
         classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
@@ -406,15 +387,7 @@ def run_training(
         else:
             LOGGER.warning("pretrained_backbone_path not found: %s", pretrained_backbone_path)
 
-    if bool(config["model"].get("zero_init_classifier", False)):
-        classifier = get_classifier_module(architecture, model)
-        for module in classifier.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.zeros_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-    criterion = _build_criterion(config)
+    criterion = _build_criterion(config).to(device)
     version = str(config["project"].get("version", "")).strip()
     checkpoint_dir = resolve_project_path(project_root, config["train"]["checkpoint_dir"])
     if version:
@@ -573,7 +546,7 @@ def run_split_evaluation(
         checkpoint_path or config["infer"]["checkpoint_path"],
     )
     checkpoint = torch.load(resolved_checkpoint_path, map_location="cpu", weights_only=False)
-    effective_config = _build_effective_eval_config(config, checkpoint)
+    effective_config = build_effective_checkpoint_config(config, checkpoint)
     _validate_training_scope(effective_config)
 
     device_name = str(
@@ -600,24 +573,20 @@ def run_split_evaluation(
         pretrained=False,
         num_outputs=int(effective_config["model"]["num_outputs"]),
         use_attention=bool(effective_config["model"].get("use_attention", False)),
+        use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
         classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    criterion = _build_criterion(effective_config)
+    criterion = _build_criterion(effective_config).to(device)
     amp_enabled = bool(effective_config["train"].get("amp", False)) and device.type == "cuda"
-    metrics = evaluate_one_epoch(
-        model,
-        loader,
-        criterion,
-        device,
-        amp_enabled=amp_enabled,
-        threshold=threshold,
-    )
 
-    # Compute optimal threshold via Youden's J on this split's predictions.
     logits, targets = collect_logits_and_targets(model, loader, device, amp_enabled=amp_enabled)
     optimal_threshold = find_optimal_threshold(logits, targets)
+
+    metrics = evaluate_one_epoch(
+        model, loader, criterion, device, amp_enabled=amp_enabled, threshold=threshold,
+    )
     metrics_at_optimal = evaluate_one_epoch(
         model, loader, criterion, device, amp_enabled=amp_enabled, threshold=optimal_threshold,
     )
