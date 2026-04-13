@@ -122,7 +122,7 @@ def _resolve_messidor_image_path(image_dir: Path, image_id: str) -> Path | None:
     return None
 
 
-def _build_messidor_rows(raw_root: Path) -> list[dict[str, object]]:
+def _build_messidor_rows(raw_root: Path, *, split: str = "external_test") -> list[dict[str, object]]:
     dataset_root = raw_root / "Messidor"
     csv_path = dataset_root / "messidor_data.csv"
     if not csv_path.exists():
@@ -155,7 +155,7 @@ def _build_messidor_rows(raw_root: Path) -> list[dict[str, object]]:
                 "image_path": relative_image_path.as_posix(),
                 "label": binary_label_from_grade(original_grade),
                 "original_grade": original_grade,
-                "split": "external_test",
+                "split": split,
                 "domain": "Messidor",
                 "source_split": "messidor",
             }
@@ -163,11 +163,80 @@ def _build_messidor_rows(raw_root: Path) -> list[dict[str, object]]:
     return rows
 
 
-def build_manifest_frame(raw_root: str | Path, *, include_messidor: bool = False) -> pd.DataFrame:
+_DDR_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+
+
+def _build_ddr_rows(raw_root: Path) -> list[dict[str, object]]:
+    dataset_root = raw_root / "ddr"
+    csv_path = dataset_root / "DR_grading.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"DDR annotation file not found: {csv_path}\n"
+            "Expected layout: data/raw/ddr/DR_grading.csv with columns "
+            "'id_code', 'diagnosis', and images in data/raw/ddr/DR_grading/DR_grading/"
+        )
+
+    frame = _normalize_columns(pd.read_csv(csv_path))
+    _ensure_columns(frame, {"id_code", "diagnosis"}, csv_path)
+
+    image_dir = dataset_root / "DR_grading" / "DR_grading"
+    if not image_dir.is_dir():
+        raise FileNotFoundError(f"DDR image directory not found: {image_dir}")
+
+    rows: list[dict[str, object]] = []
+    missing: list[str] = []
+    for row in frame.itertuples(index=False):
+        image_id = str(row.id_code)
+        original_grade = int(row.diagnosis)
+        candidate = image_dir / image_id
+        if not candidate.exists():
+            missing.append(image_id)
+            continue
+        relative_image_path = candidate.relative_to(raw_root)
+        rows.append(
+            {
+                "image_id": image_id,
+                "image_path": relative_image_path.as_posix(),
+                "label": binary_label_from_grade(original_grade),
+                "original_grade": original_grade,
+                "split": "external_test",
+                "domain": "DDR",
+                "source_split": "ddr",
+            }
+        )
+    if missing:
+        raise FileNotFoundError(
+            f"DDR: {len(missing)} images not found in {image_dir}. "
+            f"First missing: {missing[0]}"
+        )
+    return rows
+
+
+def build_manifest_frame(
+    raw_root: str | Path,
+    *,
+    include_messidor: bool = False,
+    messidor_as_train: bool = False,
+    include_ddr: bool = False,
+) -> pd.DataFrame:
+    """Build a manifest DataFrame from the raw dataset root.
+
+    Args:
+        raw_root: Path to data/raw/.
+        include_messidor: Include Messidor images. When ``messidor_as_train`` is
+            False (default), Messidor rows go to ``external_test``; when True
+            they go to ``train``.
+        messidor_as_train: Move Messidor from external_test into the train split.
+            Requires ``include_messidor=True``.
+        include_ddr: Include DDR images as ``external_test``.
+    """
     raw_root = Path(raw_root)
     rows = [*_build_aptos_rows(raw_root), *_build_idrid_rows(raw_root)]
     if include_messidor:
-        rows.extend(_build_messidor_rows(raw_root))
+        messidor_split = "train" if messidor_as_train else "external_test"
+        rows.extend(_build_messidor_rows(raw_root, split=messidor_split))
+    if include_ddr:
+        rows.extend(_build_ddr_rows(raw_root))
     frame = pd.DataFrame(rows)
     if frame.empty:
         raise ValueError("No dataset rows were collected.")
@@ -193,9 +262,16 @@ def write_manifest(
     output_path: str | Path,
     *,
     include_messidor: bool = False,
+    messidor_as_train: bool = False,
+    include_ddr: bool = False,
 ) -> ManifestSummary:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    frame = build_manifest_frame(raw_root, include_messidor=include_messidor)
+    frame = build_manifest_frame(
+        raw_root,
+        include_messidor=include_messidor,
+        messidor_as_train=messidor_as_train,
+        include_ddr=include_ddr,
+    )
     frame.to_csv(output_path, index=False)
     return summarize_manifest(frame)

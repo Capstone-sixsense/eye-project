@@ -96,6 +96,11 @@ def _build_datasets(
     manifest_path = resolve_project_path(project_root, data_cfg["manifest_path"])
     image_root = resolve_project_path(project_root, data_cfg["image_root"])
     train_transform, eval_transform = _build_transforms(config)
+    excluded_domains = {
+        str(domain).strip()
+        for domain in data_cfg.get("train_exclude_domains", [])
+        if str(domain).strip()
+    }
 
     train_dataset = ManifestDataset(
         manifest_path=manifest_path,
@@ -109,6 +114,17 @@ def _build_datasets(
         split=data_cfg["val_split"],
         transform=eval_transform,
     )
+    if excluded_domains:
+        for split_name, dataset in (("train", train_dataset), ("val", val_dataset)):
+            if "domain" not in dataset.frame.columns:
+                raise ValueError(
+                    f"Cannot apply data.train_exclude_domains on {split_name} split: "
+                    "manifest has no 'domain' column."
+                )
+            dataset.frame = dataset.frame[
+                ~dataset.frame["domain"].astype(str).isin(excluded_domains)
+            ].reset_index(drop=True)
+
     if len(train_dataset) == 0:
         raise ValueError("Training split is empty.")
     if len(val_dataset) == 0:
@@ -200,6 +216,14 @@ def _prepare_model_for_head_only_training(model: nn.Module, architecture: str) -
     for module in model.children():
         module.eval()
     classifier.train()
+    # Keep BN layers in train mode so they use batch statistics.
+    # When backbone starts from ImageNet weights, the running stats are
+    # calibrated for ImageNet distribution. Fundus images at 448px are
+    # out-of-distribution, causing activation explosion in eval() mode.
+    # Using batch stats (train mode) avoids this without unfreezing parameters.
+    for module in model.modules():
+        if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+            module.train()
 
 
 def _build_optimizer(
@@ -214,10 +238,11 @@ def _build_optimizer(
     if optimizer_name != "adamw":
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
-    backbone_parameters, head_parameters = split_model_parameters(architecture, model)
     weight_decay = float(train_cfg["weight_decay"])
     head_learning_rate = float(train_cfg["head_learning_rate"])
     backbone_learning_rate = float(train_cfg["backbone_learning_rate"])
+
+    backbone_parameters, head_parameters = split_model_parameters(architecture, model)
 
     if head_only:
         parameter_groups = [
@@ -379,7 +404,7 @@ def run_training(
             backbone_state = backbone_ckpt.get("model_state_dict", backbone_ckpt)
             missing, unexpected = model.load_state_dict(backbone_state, strict=False)
             LOGGER.info(
-                "Loaded SSL pretrained backbone from %s (missing=%d unexpected=%d)",
+                "Loaded pretrained backbone from %s (missing=%d unexpected=%d)",
                 pretrained_backbone_path,
                 len(missing),
                 len(unexpected),
@@ -410,7 +435,15 @@ def run_training(
     history: list[dict[str, Any]] = []
     global_epoch = 0
 
+    es_patience = int(config["train"].get("early_stopping_patience", 0))
+    es_min_delta = float(config["train"].get("early_stopping_min_delta", 0.0))
+    es_best_auroc = 0.0
+    es_no_improve = 0
+    should_stop = False
+
     for phase in _build_training_phases(config):
+        if should_stop:
+            break
         _set_phase_trainability(model, architecture, head_only=phase.head_only)
         optimizer = _build_optimizer(
             config,
@@ -475,6 +508,20 @@ def run_training(
                 best_val_auroc = val_auroc
                 best_epoch = global_epoch
                 torch.save(checkpoint_payload, best_checkpoint_path)
+
+            if es_patience > 0 and not phase.head_only:
+                if val_auroc > es_best_auroc + es_min_delta:
+                    es_best_auroc = val_auroc
+                    es_no_improve = 0
+                else:
+                    es_no_improve += 1
+                    if es_no_improve >= es_patience:
+                        LOGGER.info(
+                            "Early stopping at epoch %d — val AUROC did not improve by %.4f for %d epochs",
+                            global_epoch, es_min_delta, es_patience,
+                        )
+                        should_stop = True
+                        break
 
             LOGGER.info(
                 "phase=%s epoch=%s/%s train_loss=%.4f val_loss=%.4f val_sensitivity=%.4f val_auroc=%.4f",
