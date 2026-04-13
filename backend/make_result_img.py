@@ -2,6 +2,8 @@ import datetime
 import os
 from PIL import Image, ImageDraw, ImageFont
 
+FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+
 def create_medical_report_image(original_filename, ai_image, metrics):
     """
     시간 정보와 원본 파일명으로 분석 보고서를 생성 및 저장합니다.
@@ -22,18 +24,20 @@ def create_medical_report_image(original_filename, ai_image, metrics):
 
     #이미지 합성 로직 (AI 이미지 + 지표 패널)
     img_width, img_height = ai_image.size
-    panel_width = 450
+    panel_width = 300 # 패널 너비
     canvas = Image.new("RGB", (img_width + panel_width, img_height), (255, 255, 255))
     canvas.paste(ai_image, (0, 0))
     #이미지 그리기
     draw = ImageDraw.Draw(canvas)
     
     #폰트 로드
-    try:
-        title_font = ImageFont.truetype("Roboto-Bold.ttf", 32)
-        metric_font = ImageFont.truetype("Roboto-Bold.ttf", 24)
-        desc_font = ImageFont.truetype("Roboto-Regular.ttf", 16)
-    except:
+   try:
+        # 시스템에 설치된 Noto Sans 폰트를 사용
+        title_font = ImageFont.truetype(FONT_PATH, 28)
+        metric_font = ImageFont.truetype(FONT_PATH, 20)
+        desc_font = ImageFont.truetype(FONT_PATH, 14)
+    except OSError:
+        # 경로가 다르거나 파일이 없을 경우를 대비한 예외 처리
         title_font = metric_font = desc_font = ImageFont.load_default()
 
     x_offset = img_width + 40
