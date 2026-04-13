@@ -238,6 +238,7 @@ class InferenceSession:
         image_tensor = self.eval_transform(original_image).to(self.device)
 
         quality_cfg = self.config["quality"]
+        infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
@@ -247,6 +248,7 @@ class InferenceSession:
             brightness_threshold=float(quality_cfg["brightness_mean_min"]),
             low_quality_action=str(quality_cfg["action_on_low_quality"]),
             quality_assessor=self.quality_assessor,
+            threshold=float(infer_cfg.get("threshold", 0.5)),
         )
 
         heatmap_overlay = None

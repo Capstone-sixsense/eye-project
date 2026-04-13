@@ -69,3 +69,4 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
+  threshold: 0.5

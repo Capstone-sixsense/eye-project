@@ -14,3 +14,4 @@ train:
 
 infer:
   checkpoint_path: artifacts/checkpoints/v7_messidor_train/best.pt
+  threshold: 0.09
