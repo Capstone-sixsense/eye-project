@@ -12,7 +12,7 @@ from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 
-from drscreen.data.datasets import ManifestDataset
+from drscreen.data.datasets import FDAManifestDataset, ManifestDataset
 from drscreen.data.transforms import FundusPreprocess, build_eval_transform, build_train_transform
 from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
 from drscreen.models.profiles import get_model_profile
@@ -102,12 +102,23 @@ def _build_datasets(
         if str(domain).strip()
     }
 
-    train_dataset = ManifestDataset(
-        manifest_path=manifest_path,
-        image_root=image_root,
-        split=data_cfg["train_split"],
-        transform=train_transform,
-    )
+    use_fda = bool(data_cfg.get("use_fda", False))
+    if use_fda:
+        fda_alpha = float(data_cfg.get("fda_alpha", 0.05))
+        train_dataset: ManifestDataset = FDAManifestDataset(
+            manifest_path=manifest_path,
+            image_root=image_root,
+            split=data_cfg["train_split"],
+            transform=train_transform,
+            fda_alpha=fda_alpha,
+        )
+    else:
+        train_dataset = ManifestDataset(
+            manifest_path=manifest_path,
+            image_root=image_root,
+            split=data_cfg["train_split"],
+            transform=train_transform,
+        )
     val_dataset = ManifestDataset(
         manifest_path=manifest_path,
         image_root=image_root,
@@ -124,6 +135,8 @@ def _build_datasets(
             dataset.frame = dataset.frame[
                 ~dataset.frame["domain"].astype(str).isin(excluded_domains)
             ].reset_index(drop=True)
+        if isinstance(train_dataset, FDAManifestDataset):
+            train_dataset.rebuild_domain_indices()
 
     if len(train_dataset) == 0:
         raise ValueError("Training split is empty.")
