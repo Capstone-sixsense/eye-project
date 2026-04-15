@@ -17,6 +17,8 @@ data:
   val_split: val
   test_split: test
   external_test_split: external_test
+  train_exclude_domains:
+    - Messidor
 
 labels:
   names:
@@ -41,7 +43,7 @@ model:
   pretrained: true
   num_outputs: 1
   use_attention: true
-  use_mixstyle: true
+  use_mixstyle: false
   grad_checkpointing: false
   classifier_dropout: 0.0
 train:
@@ -57,6 +59,8 @@ train:
   weight_decay: 0.0001
   gradient_clip_norm: 1.0
   min_checkpoint_sensitivity: 0.80
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.001
   amp: true
   checkpoint_dir: artifacts/checkpoints
 infer:
@@ -65,3 +69,4 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
+  threshold: 0.5

@@ -238,6 +238,7 @@ class InferenceSession:
         image_tensor = self.eval_transform(original_image).to(self.device)
 
         quality_cfg = self.config["quality"]
+        infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
@@ -247,14 +248,17 @@ class InferenceSession:
             brightness_threshold=float(quality_cfg["brightness_mean_min"]),
             low_quality_action=str(quality_cfg["action_on_low_quality"]),
             quality_assessor=self.quality_assessor,
+            threshold=float(infer_cfg.get("threshold", 0.5)),
         )
 
         heatmap_overlay = None
+        xai_error_code = None
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
             heatmap_overlay = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
+            xai_error_code = "XAI_001"
 
         saved = SavedInferenceArtifacts(prediction_path=None, heatmap_path=None)
         if save_outputs:
@@ -268,6 +272,7 @@ class InferenceSession:
         payload["checkpoint_path"] = str(self.checkpoint_path)
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
+        payload["xai_error_code"] = xai_error_code
 
         return SingleImagePrediction(
             result=result,
