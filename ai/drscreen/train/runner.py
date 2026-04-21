@@ -575,7 +575,10 @@ def run_training(
             num_workers=int(config["data"].get("num_workers", 0)),
             pin_memory=device.type == "cuda",
         )
-        model.train()
+        model.eval()
+        for module in model.modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                module.train()
         with torch.no_grad():
             for batch in _bn_loader:
                 model(batch["image"].to(device))
