@@ -17,7 +17,7 @@ from drscreen.data.transforms import FundusPreprocess, build_eval_transform, bui
 from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
 from drscreen.models.profiles import get_model_profile
 from drscreen.settings import build_effective_checkpoint_config, merge_dicts, resolve_project_path
-from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
+from drscreen.train.engine import SWADBuffer, collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
 from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
 from drscreen.utils.logging import get_logger
 from drscreen.utils.seed import set_seed
@@ -405,6 +405,7 @@ def run_training(
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
         use_mixstyle=bool(config["model"].get("use_mixstyle", False)),
+        use_ibn=bool(config["model"].get("use_ibn", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
         classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
@@ -447,6 +448,10 @@ def run_training(
     last_checkpoint_path = checkpoint_dir / "last.pt"
     history: list[dict[str, Any]] = []
     global_epoch = 0
+    optimizer: Optimizer | None = None
+    scheduler: LRScheduler | None = None
+    swad_last_n = int(config["train"].get("swad_last_n_epochs", 0))
+    swad_buffer: SWADBuffer | None = SWADBuffer(swad_last_n) if swad_last_n > 0 else None
 
     es_patience = int(config["train"].get("early_stopping_patience", 0))
     es_min_delta = float(config["train"].get("early_stopping_min_delta", 0.0))
@@ -522,6 +527,9 @@ def run_training(
                 best_epoch = global_epoch
                 torch.save(checkpoint_payload, best_checkpoint_path)
 
+            if swad_buffer is not None and not phase.head_only:
+                swad_buffer.update(model)
+
             if es_patience > 0 and not phase.head_only:
                 if val_auroc > es_best_auroc + es_min_delta:
                     es_best_auroc = val_auroc
@@ -546,6 +554,57 @@ def run_training(
                 val_sensitivity,
                 val_auroc,
             )
+
+    if swad_buffer is not None and len(swad_buffer) > 0:
+        LOGGER.info("Applying SWAD: averaging last %d epoch snapshots.", len(swad_buffer))
+        avg_state = swad_buffer.get_averaged_state_dict()
+        assert avg_state is not None
+        model.load_state_dict(avg_state)
+        model.to(device)
+        # Update BatchNorm running statistics with the averaged weights.
+        # Use a plain (non-FDA) eval-transform dataloader so that running stats
+        # reflect the real image distribution seen at inference time, not
+        # FDA-mixed images which only exist during training.
+        _bn_dataset, _ = _build_eval_dataset(
+            config, project_root, str(config["data"]["train_split"])
+        )
+        _bn_loader = DataLoader(
+            _bn_dataset,
+            batch_size=int(config["data"]["batch_size"]),
+            shuffle=False,
+            num_workers=int(config["data"].get("num_workers", 0)),
+            pin_memory=device.type == "cuda",
+        )
+        model.train()
+        with torch.no_grad():
+            for batch in _bn_loader:
+                model(batch["image"].to(device))
+        swad_val = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
+        swad_sensitivity = swad_val.sensitivity or 0.0
+        swad_auroc = swad_val.auroc or 0.0
+        min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", _DEFAULT_MIN_SENSITIVITY))
+        LOGGER.info(
+            "SWAD val: sensitivity=%.4f auroc=%.4f (best_before_swad=%.4f)",
+            swad_sensitivity,
+            swad_auroc,
+            best_val_auroc,
+        )
+        if swad_sensitivity >= min_sensitivity and swad_auroc > best_val_auroc:
+            best_val_auroc = swad_auroc
+            best_epoch = global_epoch
+            assert optimizer is not None
+            swad_payload = _checkpoint_payload(
+                config=config,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=global_epoch,
+                phase="swad",
+                train_metrics={},
+                val_metrics=swad_val.to_dict(),
+            )
+            torch.save(swad_payload, best_checkpoint_path)
+            LOGGER.info("SWAD model saved as best: val_auroc=%.4f", swad_auroc)
 
     promoted_to_global_best = False
     if version and best_epoch > 0:
@@ -634,6 +693,7 @@ def run_split_evaluation(
         num_outputs=int(effective_config["model"]["num_outputs"]),
         use_attention=bool(effective_config["model"].get("use_attention", False)),
         use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
+        use_ibn=bool(effective_config["model"].get("use_ibn", False)),
         classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])

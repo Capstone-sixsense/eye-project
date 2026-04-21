@@ -1,0 +1,31 @@
+project:
+  version: ssl_effnet_clean
+
+model:
+  architecture: efficientnet_b5
+  pretrained: true
+  use_attention: true
+  grad_checkpointing: false
+
+train:
+  seed: 42
+  device: cuda
+  amp: true
+
+ssl:
+  splits:
+    - train
+    - val
+    - test
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  temperature: 0.07
+  feature_dim: 2048
+  proj_hidden_dim: 2048
+  proj_out_dim: 128
+  max_samples: 0
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.005
+  output_path: artifacts/checkpoints/ssl/effnet_simclr_clean.pth

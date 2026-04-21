@@ -153,6 +153,9 @@ class InferenceSession:
             pretrained=False,
             num_outputs=num_outputs,
             use_attention=bool(effective_config["model"].get("use_attention", False)),
+            use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
+            use_ibn=bool(effective_config["model"].get("use_ibn", False)),
+            classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
         ).to(device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
