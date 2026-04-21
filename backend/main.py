@@ -18,6 +18,8 @@ from make_result_img import create_medical_report_image
 from models.edsr_wrapper import EDSRWrapper
 import traceback
 
+from fastapi.concurrency import run_in_threadpool
+
 
 
 
@@ -66,7 +68,7 @@ async def lifespan(app: FastAPI):
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
 
-        _edsr = EDSRWrapper(model_name="EDSR_x4.pt", scale=4)
+        _edsr = EDSRWrapper(model_name="edsr_baseline_x2-1bc95232.pt", scale=2)
     except FileNotFoundError as exc:
         _session = None
         _session_error = str(exc)
@@ -172,7 +174,9 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 
         t_sr_start = time.perf_counter()
         if _edsr is not None:
-            enhanced_img = _edsr.upscale(raw_img)
+            print("[analyze] EDSR 업스케일 시작...", flush=True)
+            #enhanced_img = _edsr.upscale(raw_img)
+            enhanced_img = await run_in_threadpool(_edsr.upscale, raw_img)
         else:
             enhanced_img = raw_img # 모델 로드 실패 시 원본 사용
         t_sr_end = time.perf_counter()
