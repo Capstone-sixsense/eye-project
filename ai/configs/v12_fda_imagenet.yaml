@@ -1,0 +1,22 @@
+project:
+  version: v12_fda_imagenet
+
+data:
+  train_exclude_domains: []
+  use_fda: true
+  fda_alpha: 0.05
+
+model:
+  use_mixstyle: false
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+  head_epochs: 5
+  finetune_epochs: 20
+  backbone_learning_rate: 0.00004
+
+infer:
+  checkpoint_path: artifacts/checkpoints/v12_fda_imagenet/best.pt
+  threshold: 0.5

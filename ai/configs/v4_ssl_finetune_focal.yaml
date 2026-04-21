@@ -1,0 +1,19 @@
+project:
+  version: effnet_ssl_clean_focal
+
+model:
+  use_mixstyle: false
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  pretrained_backbone_path: artifacts/checkpoints/effnet_ssl_clean/best.pt
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.001
+
+infer:
+  checkpoint_path: artifacts/checkpoints/effnet_ssl_clean_focal/best.pt

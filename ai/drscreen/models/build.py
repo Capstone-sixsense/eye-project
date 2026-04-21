@@ -13,6 +13,40 @@ from drscreen.models.mixstyle import MixStyle
 from drscreen.models.profiles import get_weights_enum
 
 
+class IBN(nn.Module):
+    """IBN-a: per-channel split into InstanceNorm (first half) + BatchNorm (second half).
+
+    Applied to BN layers in shallow EfficientNet-B5 blocks to remove domain
+    style statistics while preserving discriminative features in the BN half.
+    Reference: Pan et al., ECCV 2018 -- IBN-Net.
+    """
+
+    def __init__(self, num_features: int) -> None:
+        super().__init__()
+        half = num_features // 2
+        self.in_norm = nn.InstanceNorm2d(half, affine=True)
+        self.bn_norm = nn.BatchNorm2d(num_features - half)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        half = x.size(1) // 2
+        return torch.cat([self.in_norm(x[:, :half]), self.bn_norm(x[:, half:])], dim=1)
+
+
+def _inject_ibn(model: nn.Module, num_blocks: int = 3) -> None:
+    """Replace BatchNorm2d with IBN-a in the first *num_blocks* block groups.
+
+    State dict keys change after injection (e.g. bn1.weight -> bn1.in_norm.weight +
+    bn1.bn_norm.weight), so pretrained checkpoints must be loaded with strict=False.
+    Deep blocks (num_blocks and beyond) keep standard BN to preserve discriminative
+    features needed for DR lesion classification.
+    """
+    for i in range(min(num_blocks, len(model.blocks))):
+        for block in model.blocks[i]:
+            for name, module in list(block.named_children()):
+                if isinstance(module, nn.BatchNorm2d):
+                    setattr(block, name, IBN(module.num_features))
+
+
 class _EcaSpatialAttn(nn.Module):
     """Combined ECA channel attention + CBAM spatial attention as a timm se_layer.
 
@@ -57,6 +91,7 @@ def build_model(
     num_outputs: int = 1,
     use_attention: bool = False,
     use_mixstyle: bool = False,
+    use_ibn: bool = False,
     grad_checkpointing: bool = False,
     classifier_dropout: float = 0.0,
 ) -> nn.Module:
@@ -76,6 +111,8 @@ def build_model(
         )
         if use_mixstyle:
             _inject_mixstyle(model)
+        if use_ibn:
+            _inject_ibn(model)
         if grad_checkpointing:
             model.set_grad_checkpointing(True)
         return model

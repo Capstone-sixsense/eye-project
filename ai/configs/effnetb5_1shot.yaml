@@ -1,0 +1,14 @@
+project:
+  version: effnet_1shot
+
+model:
+  pretrained: true
+  use_mixstyle: false
+
+train:
+  head_epochs: 3
+  finetune_epochs: 15
+  loss: bce
+
+infer:
+  checkpoint_path: artifacts/checkpoints/effnet_1shot/best.pt
