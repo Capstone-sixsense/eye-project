@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'models/result_screen_args.dart';
+import 'screens/history_screen.dart';
 import 'screens/result_screen.dart';
 import 'screens/upload_screen.dart';
 
@@ -13,6 +14,7 @@ void main() {
       initialRoute: '/upload',
       routes: {
         '/upload': (_) => const UploadScreen(),
+        '/history': (_) => const HistoryScreen(),
         '/result': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
           if (args is ResultScreenArgs) {
