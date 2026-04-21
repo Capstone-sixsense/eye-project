@@ -31,7 +31,7 @@ def create_medical_report_image(original_filename, ai_image, metrics):
     draw = ImageDraw.Draw(canvas)
     
     #폰트 로드
-   try:
+    try:
         # 시스템에 설치된 Noto Sans 폰트를 사용
         title_font = ImageFont.truetype(FONT_PATH, 28)
         metric_font = ImageFont.truetype(FONT_PATH, 20)
