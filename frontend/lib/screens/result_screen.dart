@@ -7,6 +7,9 @@ import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
 
+/// 원본·설명 이미지 타일 높이를 맞추기 위한 공통 상한.
+const double _kResultImageMaxHeight = 280;
+
 class ResultScreen extends StatelessWidget {
   const ResultScreen({
     super.key,
@@ -39,32 +42,84 @@ class ResultScreen extends StatelessWidget {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _SectionTitle('Original image'),
-                    const SizedBox(height: 8),
-                    _ImageBox(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 720;
+                    final originalBox = _ImageBox(
                       child: original != null
                           ? Image.memory(original, fit: BoxFit.contain)
                           : const Center(child: Text('No image')),
-                    ),
-                    const SizedBox(height: 24),
-                    _SectionTitle('Judgment'),
-                    const SizedBox(height: 8),
-                    _JudgmentCard(response: res),
-                    const SizedBox(height: 24),
-                    _SectionTitle('Anomaly probability & quality'),
-                    const SizedBox(height: 8),
-                    _ScoreQualityCard(response: res),
-                    const SizedBox(height: 24),
-                    _SectionTitle('Explanation image'),
-                    const SizedBox(height: 8),
-                    _ExplanationPanel(
+                    );
+                    final aiPanel = _ExplanationPanel(
                       absoluteUrl: explanationAbsoluteUrl,
                       response: res,
-                    ),
-                  ],
+                    );
+                    final judgment = _JudgmentCard(response: res);
+                    final probQuality = _ScoreQualityCard(response: res);
+
+                    if (wide) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    const _SectionTitle('Original image'),
+                                    const SizedBox(height: 8),
+                                    originalBox,
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 20),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    const _SectionTitle('Explanation image'),
+                                    const SizedBox(height: 8),
+                                    aiPanel,
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          const _SectionTitle('Judgment'),
+                          const SizedBox(height: 8),
+                          judgment,
+                          const SizedBox(height: 20),
+                          const _SectionTitle('Anomaly probability & quality'),
+                          const SizedBox(height: 8),
+                          probQuality,
+                        ],
+                      );
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const _SectionTitle('Original image'),
+                        const SizedBox(height: 8),
+                        originalBox,
+                        const SizedBox(height: 20),
+                        const _SectionTitle('Explanation image'),
+                        const SizedBox(height: 8),
+                        aiPanel,
+                        const SizedBox(height: 20),
+                        const _SectionTitle('Judgment'),
+                        const SizedBox(height: 8),
+                        judgment,
+                        const SizedBox(height: 20),
+                        const _SectionTitle('Anomaly probability & quality'),
+                        const SizedBox(height: 8),
+                        probQuality,
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -127,7 +182,7 @@ class _ImageBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 280),
+      constraints: const BoxConstraints(maxHeight: _kResultImageMaxHeight),
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: Border.all(color: Theme.of(context).dividerColor),
@@ -270,7 +325,7 @@ class _ExplanationPanel extends StatelessWidget {
 
     if (absoluteUrl != null && absoluteUrl!.isNotEmpty) {
       return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
+        constraints: const BoxConstraints(maxHeight: _kResultImageMaxHeight),
         child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(color: Theme.of(context).dividerColor),
