@@ -45,6 +45,7 @@ def run_single_image_inference(
     brightness_threshold: float = 40.0,
     low_quality_action: str = "warn",
     quality_assessor: QuickQualAssessor | None = None,
+    threshold: float = 0.5,
 ) -> InferenceResult:
     quality = assess_image_quality(
         raw_image,
@@ -65,7 +66,7 @@ def run_single_image_inference(
         logits = model(image_tensor.unsqueeze(0))
         if logits.shape[-1] == 1:
             abnormal_probability = torch.sigmoid(logits[0, 0]).item()
-            predicted_index = int(abnormal_probability >= 0.5)
+            predicted_index = int(abnormal_probability >= threshold)
         else:
             probabilities = torch.softmax(logits[0], dim=0)
             predicted_index = int(torch.argmax(probabilities).item())

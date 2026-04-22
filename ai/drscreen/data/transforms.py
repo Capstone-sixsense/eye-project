@@ -99,6 +99,55 @@ class FundusPreprocess:
         return result
 
 
+def fda_mix(source: np.ndarray, reference: np.ndarray, alpha: float) -> np.ndarray:
+    """Exchange low-frequency Fourier amplitude from reference into source.
+
+    Transfers the global color/illumination style of ``reference`` into
+    ``source`` while preserving high-frequency content (lesion edges, vessel
+    structures). Operates channel-wise in the spatial frequency domain.
+
+    The swap region is a centered square of half-side b = floor(alpha * min(H, W)).
+    With alpha=0.05 and 512px images, b=25 pixels -- enough to capture global
+    illumination without touching structural detail.
+
+    Reference: Yang & Soatto, "FDA: Fourier Domain Adaptation for Semantic
+    Segmentation", CVPR 2020.  Domain generalization application: DRGen,
+    MICCAI 2022.
+
+    Args:
+        source: H x W x C uint8 image array.
+        reference: H x W x C uint8 image array. Resized to match source if
+            shapes differ.
+        alpha: Fraction of the spectrum to swap, relative to min(H, W).
+
+    Returns:
+        Mixed uint8 array with the same shape as ``source``.
+    """
+    src = source.astype(np.float32)
+    H, W = src.shape[:2]
+
+    if reference.shape[:2] != (H, W):
+        reference = cv2.resize(reference, (W, H), interpolation=cv2.INTER_LINEAR)
+    ref = reference.astype(np.float32)
+
+    b = max(1, int(np.floor(alpha * min(H, W))))
+    cy, cx = H // 2, W // 2
+
+    result = np.empty_like(src)
+    for c in range(src.shape[2]):
+        fft_src = np.fft.fftshift(np.fft.fft2(src[:, :, c]))
+        fft_ref = np.fft.fftshift(np.fft.fft2(ref[:, :, c]))
+
+        amp_src = np.abs(fft_src)
+        pha_src = np.angle(fft_src)
+        amp_src[cy - b : cy + b, cx - b : cx + b] = np.abs(fft_ref)[cy - b : cy + b, cx - b : cx + b]
+
+        fft_mixed = np.fft.ifftshift(amp_src * np.exp(1j * pha_src))
+        result[:, :, c] = np.fft.ifft2(fft_mixed).real
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
 class _TrainTransform:
     """PIL-compatible wrapper for the albumentations-based training pipeline."""
 

@@ -73,6 +73,10 @@ def build_effective_checkpoint_config(
                     "use_mixstyle",
                     effective_config["model"].get("use_mixstyle", False),
                 ),
+                "use_ibn": checkpoint_model_config.get(
+                    "use_ibn",
+                    effective_config["model"].get("use_ibn", False),
+                ),
                 "grad_checkpointing": checkpoint_model_config.get(
                     "grad_checkpointing",
                     effective_config["model"].get("grad_checkpointing", False),

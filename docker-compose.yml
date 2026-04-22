@@ -7,13 +7,18 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # 소스 코드 동기화 (Hot Reload 핵심)
+      # 내 컴퓨터의 backend 폴더를 컨테이너의 /app과 연결합니다.
+      - ./backend:/app
+
+      # AI 모델 및 프로젝트 루트 데이터 연결
+      # PYTHONPATH=/ai 설정을 위해 프로젝트 루트의 ai 폴더를 연결합니다.
+      - ./ai:/ai
+
+      # 데이터 저장 영역 (명시적 관리)
       - ./backend/data:/app/data
       - ./backend/storage:/app/storage
       - ./backend/results:/app/results
-      # drscreen 등 (PYTHONPATH=/ai) — 프로젝트 루트의 ai 폴더
-      - ./ai:/ai
-      # 개발 편의를 위해 소스 코드 동기화 (Hot Reload 대용)
-      - ./backend:/app
     environment:
       - PYTHONUNBUFFERED=1
       # CPU 추론 속도 (호스트 코어 수에 맞게 조절)

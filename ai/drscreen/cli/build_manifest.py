@@ -28,9 +28,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help=(
-            "Include Messidor external test set (split=external_test). "
-            "Expects data/raw/Messidor/messidor_data.csv and images in "
-            "data/raw/Messidor/images/."
+            "Include Messidor images. By default placed in external_test. "
+            "Use --messidor-as-train to include in train split instead."
+        ),
+    )
+    parser.add_argument(
+        "--messidor-as-train",
+        action="store_true",
+        default=False,
+        help=(
+            "Move Messidor from external_test into the train split. "
+            "Requires --include-messidor."
+        ),
+    )
+    parser.add_argument(
+        "--include-ddr",
+        action="store_true",
+        default=False,
+        help=(
+            "Include DDR dataset as external_test. "
+            "Expects data/raw/ddr/DR_grading.csv and images in "
+            "data/raw/ddr/DR_grading/DR_grading/."
         ),
     )
     return parser.parse_args()
@@ -46,6 +64,8 @@ def main() -> None:
         raw_root=raw_root,
         output_path=output_path,
         include_messidor=args.include_messidor,
+        messidor_as_train=args.messidor_as_train,
+        include_ddr=args.include_ddr,
     )
 
     print("Manifest created")

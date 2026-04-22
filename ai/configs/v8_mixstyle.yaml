@@ -1,0 +1,17 @@
+project:
+  version: v8_mixstyle
+
+data:
+  train_exclude_domains: []
+
+model:
+  use_mixstyle: true
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+
+infer:
+  checkpoint_path: artifacts/checkpoints/v8_mixstyle/best.pt
+  threshold: 0.09

@@ -1,11 +1,65 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass
 from typing import Callable
 
 import torch
 
 from drscreen.train.metrics import compute_binary_classification_metrics
+
+
+class SWADBuffer:
+    """Rolling buffer for Stochastic Weight Averaging Dense (SWAD).
+
+    Maintains the last ``n`` model state dicts and computes their
+    parameter-wise mean. Non-floating-point buffers (e.g. BatchNorm
+    ``num_batches_tracked``) are taken from the most recent snapshot.
+
+    Args:
+        n: Window size. Only the last n model snapshots are retained.
+    """
+
+    def __init__(self, n: int) -> None:
+        if n < 1:
+            raise ValueError(f"SWADBuffer requires n >= 1, got {n}")
+        self._buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=n)
+
+    def update(self, model: torch.nn.Module) -> None:
+        """Append a snapshot of the current model weights to the buffer."""
+        self._buffer.append({k: v.cpu().clone() for k, v in model.state_dict().items()})
+
+    def get_averaged_state_dict(self) -> dict[str, torch.Tensor] | None:
+        """Return the parameter-wise mean of all buffered snapshots.
+
+        Floating-point tensors are averaged. Non-floating-point tensors
+        (e.g. BatchNorm num_batches_tracked) are taken from the latest snapshot.
+        Returns None if the buffer is empty.
+        """
+        if not self._buffer:
+            return None
+        latest = self._buffer[-1]
+        avg: dict[str, torch.Tensor] = {}
+        for key in latest:
+            tensors = [s[key] for s in self._buffer if key in s]
+            if tensors[0].is_floating_point():
+                avg[key] = (
+                    torch.stack([t.float() for t in tensors])
+                    .mean(0)
+                    .to(tensors[0].dtype)
+                )
+            else:
+                avg[key] = latest[key].clone()
+        return avg
+
+    def __len__(self) -> int:
+        return len(self._buffer)
+
+
+def _unpack_batch(
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return batch["image"].to(device), batch["label"].float().to(device).view(-1, 1)
 
 
 def _amp_dtype(device: torch.device) -> torch.dtype:
@@ -63,8 +117,7 @@ def train_one_epoch(
     all_targets: list[torch.Tensor] = []
 
     for batch in loader:
-        images = batch["image"].to(device)
-        targets = batch["label"].float().to(device).view(-1, 1)
+        images, targets = _unpack_batch(batch, device)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -128,8 +181,7 @@ def collect_logits_and_targets(
     all_targets: list[torch.Tensor] = []
     with torch.inference_mode():
         for batch in loader:
-            images = batch["image"].to(device)
-            targets = batch["label"].float().to(device).view(-1, 1)
+            images, targets = _unpack_batch(batch, device)
             with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
                 logits = model(images)
             all_logits.append(logits.detach().float().cpu().view(-1))
@@ -154,8 +206,7 @@ def evaluate_one_epoch(
 
     with torch.inference_mode():
         for batch in loader:
-            images = batch["image"].to(device)
-            targets = batch["label"].float().to(device).view(-1, 1)
+            images, targets = _unpack_batch(batch, device)
             with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
                 logits = model(images)
                 loss = criterion(logits, targets)

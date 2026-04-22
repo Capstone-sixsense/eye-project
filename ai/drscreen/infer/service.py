@@ -18,6 +18,7 @@ from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
 from drscreen.quality.quickqual import QuickQualAssessor
+from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
     ensure_runtime_directories,
@@ -153,8 +154,11 @@ class InferenceSession:
             pretrained=False,
             num_outputs=num_outputs,
             use_attention=bool(effective_config["model"].get("use_attention", False)),
+            use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
+            use_ibn=bool(effective_config["model"].get("use_ibn", False)),
+            classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
         ).to(device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        load_state_from_checkpoint(model, checkpoint)
         model.eval()
 
         profile = get_model_profile(architecture)
@@ -238,6 +242,7 @@ class InferenceSession:
         image_tensor = self.eval_transform(original_image).to(self.device)
 
         quality_cfg = self.config["quality"]
+        infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
@@ -247,14 +252,17 @@ class InferenceSession:
             brightness_threshold=float(quality_cfg["brightness_mean_min"]),
             low_quality_action=str(quality_cfg["action_on_low_quality"]),
             quality_assessor=self.quality_assessor,
+            threshold=float(infer_cfg.get("threshold", 0.5)),
         )
 
         heatmap_overlay = None
+        xai_error_code = None
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
             heatmap_overlay = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
+            xai_error_code = "XAI_001"
 
         saved = SavedInferenceArtifacts(prediction_path=None, heatmap_path=None)
         if save_outputs:
@@ -268,6 +276,7 @@ class InferenceSession:
         payload["checkpoint_path"] = str(self.checkpoint_path)
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
+        payload["xai_error_code"] = xai_error_code
 
         return SingleImagePrediction(
             result=result,
