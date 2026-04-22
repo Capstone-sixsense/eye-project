@@ -1,6 +1,6 @@
 # eye-project
 
-당뇨망막병증(Diabetic Retinopathy) 스크리닝 시스템. 안저(眼底) 이미지를 업로드하면 AI가 이상 여부를 분류하고, GradCAM 히트맵과 의료 리포트를 함께 제공한다.
+안저(眼底) 이미지 기반 당뇨병성 망막병증 보조 판별 AI 시스템. 이미지를 업로드하면 AI가 이상 여부를 분류하고, GradCAM 히트맵과 의료 리포트를 함께 제공한다. 본 시스템의 결과는 의료 전문가의 판단을 보조하는 용도로만 사용되어야 한다.
 
 ---
 
@@ -21,9 +21,10 @@ main
 
 | 항목 | 내용 |
 |---|---|
-| 목적 | 안저 이미지 기반 당뇨망막병증 자동 스크리닝 |
+| 목적 | 안저 이미지 기반 당뇨병성 망막병증 자동 스크리닝 |
 | 출력 | 이상 여부 분류, 이상 확률, GradCAM 히트맵, 의료 리포트 |
-| 배포 | Docker Compose (로컬 단일 명령 실행) |
+| 배포 | Docker Compose 기반 로컬 실행형 클라이언트 |
+| 설계 원칙 | 의료 시스템 특성상 속도보다 신뢰성과 정확성을 우선한다 |
 
 ---
 
@@ -83,6 +84,19 @@ docker compose up -d
 | `POST` | `/analyze` | 전체 분석 (품질 검사 + GradCAM + 리포트) |
 | `GET` | `/storage/<path>` | 업로드 이미지 조회 |
 | `GET` | `/results/<path>` | 생성된 리포트 조회 |
+
+---
+
+## 데이터셋 출처
+
+학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 표기.
+
+| 데이터셋 | 출처 | 라이선스 |
+|---|---|---|
+| APTOS 2019 | [Kaggle — APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Aravind Eye Hospital) | Kaggle Competition Terms |
+| IDRiD | [IEEE DataPort — Indian Diabetic Retinopathy Image Dataset](https://ieee-dataport.org/open-access/indian-diabetic-retinopathy-image-dataset-idrid) | CC BY 4.0 |
+| Messidor | [ADCIS — Messidor](https://www.adcis.net/en/third-party/messidor/) | 비상업적 연구 목적 |
+| DDR | [GitHub — nkicsl/DDR-dataset](https://github.com/nkicsl/DDR-dataset) | 연구 목적 |
 
 ---
 
