@@ -56,6 +56,12 @@ class SWADBuffer:
         return len(self._buffer)
 
 
+def _unpack_batch(
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return batch["image"].to(device), batch["label"].float().to(device).view(-1, 1)
+
+
 def _amp_dtype(device: torch.device) -> torch.dtype:
     """Return BF16 on Ampere/Blackwell (SM >= 8.0) where BF16 is hardware-supported
     and avoids FP16 overflow. Fall back to FP16 for older GPUs."""
@@ -111,8 +117,7 @@ def train_one_epoch(
     all_targets: list[torch.Tensor] = []
 
     for batch in loader:
-        images = batch["image"].to(device)
-        targets = batch["label"].float().to(device).view(-1, 1)
+        images, targets = _unpack_batch(batch, device)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -176,8 +181,7 @@ def collect_logits_and_targets(
     all_targets: list[torch.Tensor] = []
     with torch.inference_mode():
         for batch in loader:
-            images = batch["image"].to(device)
-            targets = batch["label"].float().to(device).view(-1, 1)
+            images, targets = _unpack_batch(batch, device)
             with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
                 logits = model(images)
             all_logits.append(logits.detach().float().cpu().view(-1))
@@ -202,8 +206,7 @@ def evaluate_one_epoch(
 
     with torch.inference_mode():
         for batch in loader:
-            images = batch["image"].to(device)
-            targets = batch["label"].float().to(device).view(-1, 1)
+            images, targets = _unpack_batch(batch, device)
             with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
                 logits = model(images)
                 loss = criterion(logits, targets)

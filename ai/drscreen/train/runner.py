@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from drscreen.models.profiles import get_model_profile
 from drscreen.settings import build_effective_checkpoint_config, merge_dicts, resolve_project_path
 from drscreen.train.engine import SWADBuffer, collect_logits_and_targets, evaluate_one_epoch, train_one_epoch
 from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
+from drscreen.utils.checkpoint import load_state_from_checkpoint, read_checkpoint_auroc
 from drscreen.utils.logging import get_logger
 from drscreen.utils.seed import set_seed
 
@@ -38,11 +38,9 @@ class TrainingPhase:
 def resolve_device(device_name: str) -> torch.device:
     if device_name == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     if device_name.startswith("cuda") and not torch.cuda.is_available():
         LOGGER.warning("CUDA was requested but is not available. Falling back to CPU.")
         return torch.device("cpu")
-
     return torch.device(device_name)
 
 
@@ -56,7 +54,6 @@ def _validate_training_scope(config: dict[str, Any]) -> None:
             "The training loop currently supports only the binary_dr_screening task with "
             "model.num_outputs == 1."
         )
-
     if len(label_names) != 2:
         raise ValueError("Binary training expects exactly two label names.")
 
@@ -67,23 +64,14 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
     data_cfg = config["data"]
     image_size = int(data_cfg["image_size"])
     resize_size = int(data_cfg["resize_size"])
-
     use_preprocessing = bool(data_cfg.get("use_preprocessing", False))
     train_transform = build_train_transform(
-        crop_size=image_size,
-        resize_size=resize_size,
-        interpolation=profile.interpolation,
-        mean=profile.mean,
-        std=profile.std,
-        use_preprocessing=use_preprocessing,
+        crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
+        mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
     )
     eval_transform = build_eval_transform(
-        crop_size=image_size,
-        resize_size=resize_size,
-        interpolation=profile.interpolation,
-        mean=profile.mean,
-        std=profile.std,
-        use_preprocessing=use_preprocessing,
+        crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
+        mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
     )
     return train_transform, eval_transform
 
@@ -106,25 +94,19 @@ def _build_datasets(
     if use_fda:
         fda_alpha = float(data_cfg.get("fda_alpha", 0.05))
         train_dataset: ManifestDataset = FDAManifestDataset(
-            manifest_path=manifest_path,
-            image_root=image_root,
-            split=data_cfg["train_split"],
-            transform=train_transform,
-            fda_alpha=fda_alpha,
+            manifest_path=manifest_path, image_root=image_root,
+            split=data_cfg["train_split"], transform=train_transform, fda_alpha=fda_alpha,
         )
     else:
         train_dataset = ManifestDataset(
-            manifest_path=manifest_path,
-            image_root=image_root,
-            split=data_cfg["train_split"],
-            transform=train_transform,
+            manifest_path=manifest_path, image_root=image_root,
+            split=data_cfg["train_split"], transform=train_transform,
         )
     val_dataset = ManifestDataset(
-        manifest_path=manifest_path,
-        image_root=image_root,
-        split=data_cfg["val_split"],
-        transform=eval_transform,
+        manifest_path=manifest_path, image_root=image_root,
+        split=data_cfg["val_split"], transform=eval_transform,
     )
+
     if excluded_domains:
         for split_name, dataset in (("train", train_dataset), ("val", val_dataset)):
             if "domain" not in dataset.frame.columns:
@@ -154,12 +136,9 @@ def _build_eval_dataset(
     manifest_path = resolve_project_path(project_root, data_cfg["manifest_path"])
     image_root = resolve_project_path(project_root, data_cfg["image_root"])
     _, eval_transform = _build_transforms(config)
-
     dataset = ManifestDataset(
-        manifest_path=manifest_path,
-        image_root=image_root,
-        split=split_name,
-        transform=eval_transform,
+        manifest_path=manifest_path, image_root=image_root,
+        split=split_name, transform=eval_transform,
     )
     if len(dataset) == 0:
         raise ValueError(f"Evaluation split is empty: {split_name}")
@@ -177,22 +156,14 @@ def _build_dataloaders(
     num_workers = int(data_cfg.get("num_workers", 0))
     persistent_workers = bool(data_cfg.get("persistent_workers", num_workers > 0)) and num_workers > 0
     generator = torch.Generator().manual_seed(int(config["train"]["seed"]))
-
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=persistent_workers,
-        generator=generator,
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=device.type == "cuda",
+        persistent_workers=persistent_workers, generator=generator,
     )
     val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=device.type == "cuda",
+        val_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=device.type == "cuda",
         persistent_workers=persistent_workers,
     )
     return train_loader, val_loader, manifest_path
@@ -201,18 +172,14 @@ def _build_dataloaders(
 def _build_training_phases(config: dict[str, Any]) -> list[TrainingPhase]:
     train_cfg = config["train"]
     phases: list[TrainingPhase] = []
-
     head_epochs = int(train_cfg.get("head_epochs", 0))
     if head_epochs > 0:
         phases.append(TrainingPhase(name="head", epochs=head_epochs, head_only=True))
-
     finetune_epochs = int(train_cfg.get("finetune_epochs", 0))
     if finetune_epochs > 0:
         phases.append(TrainingPhase(name="finetune", epochs=finetune_epochs, head_only=False))
-
     if not phases:
         raise ValueError("At least one training epoch is required.")
-
     return phases
 
 
@@ -254,38 +221,25 @@ def _build_optimizer(
     weight_decay = float(train_cfg["weight_decay"])
     head_learning_rate = float(train_cfg["head_learning_rate"])
     backbone_learning_rate = float(train_cfg["backbone_learning_rate"])
-
     backbone_parameters, head_parameters = split_model_parameters(architecture, model)
 
     if head_only:
         parameter_groups = [
-            {
-                "params": [parameter for parameter in head_parameters if parameter.requires_grad],
-                "lr": head_learning_rate,
-            }
+            {"params": [p for p in head_parameters if p.requires_grad], "lr": head_learning_rate}
         ]
     else:
         parameter_groups = []
         if head_parameters:
             parameter_groups.append(
-                {
-                    "params": [parameter for parameter in head_parameters if parameter.requires_grad],
-                    "lr": head_learning_rate,
-                }
+                {"params": [p for p in head_parameters if p.requires_grad], "lr": head_learning_rate}
             )
         if backbone_parameters:
             parameter_groups.append(
-                {
-                    "params": [
-                        parameter for parameter in backbone_parameters if parameter.requires_grad
-                    ],
-                    "lr": backbone_learning_rate,
-                }
+                {"params": [p for p in backbone_parameters if p.requires_grad], "lr": backbone_learning_rate}
             )
 
     if not any(group["params"] for group in parameter_groups):
         raise ValueError("No trainable parameters were available for the requested phase.")
-
     return AdamW(parameter_groups, weight_decay=weight_decay)
 
 
@@ -293,15 +247,12 @@ def _build_scheduler(config: dict[str, Any], optimizer: Optimizer, epochs: int) 
     scheduler_name = str(config["train"]["scheduler"]).lower()
     if scheduler_name != "cosine":
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
-
     if epochs <= 1:
         return None
-
     warmup_epochs = int(config["train"].get("warmup_epochs", 0))
     warmup_epochs = min(warmup_epochs, max(epochs - 1, 0))
     if warmup_epochs <= 0:
         return CosineAnnealingLR(optimizer, T_max=epochs)
-
     warmup = LinearLR(optimizer, start_factor=0.2, end_factor=1.0, total_iters=warmup_epochs)
     cosine = CosineAnnealingLR(optimizer, T_max=max(epochs - warmup_epochs, 1))
     return SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[warmup_epochs])
@@ -310,22 +261,17 @@ def _build_scheduler(config: dict[str, Any], optimizer: Optimizer, epochs: int) 
 def _build_criterion(config: dict[str, Any]) -> nn.Module:
     _validate_training_scope(config)
     loss_name = str(config["train"].get("loss", "bce")).lower()
-
     if loss_name == "focal":
         from drscreen.train.loss import BinaryFocalLoss
         gamma = float(config["train"].get("focal_gamma", 2.0))
         alpha_cfg = config["train"].get("focal_alpha")
         alpha = float(alpha_cfg) if alpha_cfg is not None else None
         return BinaryFocalLoss(gamma=gamma, alpha=alpha)
-
     if loss_name == "bce":
         pos_weight_cfg = config["train"].get("pos_weight")
         if pos_weight_cfg is not None:
-            return nn.BCEWithLogitsLoss(
-                pos_weight=torch.tensor([float(pos_weight_cfg)])
-            )
+            return nn.BCEWithLogitsLoss(pos_weight=torch.tensor([float(pos_weight_cfg)]))
         return nn.BCEWithLogitsLoss()
-
     raise ValueError(f"Unsupported loss '{loss_name}'. Supported: 'bce', 'focal'.")
 
 
@@ -359,6 +305,117 @@ def _prefixed_metric_fields(prefix: str, metrics: Any) -> dict[str, Any]:
     return {f"{prefix}_{key}": value for key, value in metrics.to_dict().items()}
 
 
+def _load_pretrained_backbone(
+    model: nn.Module,
+    config: dict[str, Any],
+    project_root: Path,
+) -> None:
+    path_str = str(config["train"].get("pretrained_backbone_path", "")).strip()
+    if not path_str:
+        return
+    path = resolve_project_path(project_root, path_str)
+    if not path.exists():
+        LOGGER.warning("pretrained_backbone_path not found: %s", path)
+        return
+    backbone_ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    missing, unexpected = load_state_from_checkpoint(model, backbone_ckpt, strict=False)
+    LOGGER.info(
+        "Loaded pretrained backbone from %s (missing=%d unexpected=%d)",
+        path, len(missing), len(unexpected),
+    )
+
+
+def _apply_swad(
+    *,
+    swad_buffer: SWADBuffer,
+    model: nn.Module,
+    config: dict[str, Any],
+    project_root: Path,
+    device: torch.device,
+    val_loader: DataLoader,
+    criterion: nn.Module,
+    amp_enabled: bool,
+    best_val_auroc: float,
+    best_epoch: int,
+    global_epoch: int,
+    best_checkpoint_path: Path,
+    optimizer: Optimizer,
+    scheduler: LRScheduler | None,
+) -> tuple[float, int]:
+    LOGGER.info("Applying SWAD: averaging last %d epoch snapshots.", len(swad_buffer))
+    avg_state = swad_buffer.get_averaged_state_dict()
+    assert avg_state is not None
+    model.load_state_dict(avg_state)
+    model.to(device)
+
+    # Update BN running statistics with the averaged weights.
+    # Use a plain (non-FDA) eval-transform dataloader so that running stats
+    # reflect the real image distribution seen at inference time, not
+    # FDA-mixed images which only exist during training.
+    _bn_dataset, _ = _build_eval_dataset(config, project_root, str(config["data"]["train_split"]))
+    _bn_loader = DataLoader(
+        _bn_dataset,
+        batch_size=int(config["data"]["batch_size"]),
+        shuffle=False,
+        num_workers=int(config["data"].get("num_workers", 0)),
+        pin_memory=device.type == "cuda",
+    )
+    model.eval()
+    for module in model.modules():
+        if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+            module.train()
+    with torch.no_grad():
+        for batch in _bn_loader:
+            model(batch["image"].to(device))
+
+    swad_val = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
+    swad_sensitivity = swad_val.sensitivity or 0.0
+    swad_auroc = swad_val.auroc or 0.0
+    min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", _DEFAULT_MIN_SENSITIVITY))
+    LOGGER.info(
+        "SWAD val: sensitivity=%.4f auroc=%.4f (best_before_swad=%.4f)",
+        swad_sensitivity, swad_auroc, best_val_auroc,
+    )
+    if swad_sensitivity >= min_sensitivity and swad_auroc > best_val_auroc:
+        best_val_auroc = swad_auroc
+        best_epoch = global_epoch
+        swad_payload = _checkpoint_payload(
+            config=config, model=model, optimizer=optimizer, scheduler=scheduler,
+            epoch=global_epoch, phase="swad", train_metrics={}, val_metrics=swad_val.to_dict(),
+        )
+        torch.save(swad_payload, best_checkpoint_path)
+        LOGGER.info("SWAD model saved as best: val_auroc=%.4f", swad_auroc)
+
+    return best_val_auroc, best_epoch
+
+
+def _check_promotion_candidate(
+    *,
+    version: str,
+    best_val_auroc: float,
+    best_epoch: int,
+    project_root: Path,
+    config: dict[str, Any],
+    best_checkpoint_path: Path,
+) -> tuple[bool, float]:
+    if not version or best_epoch == 0:
+        return False, 0.0
+    global_best_path = resolve_project_path(project_root, config["train"]["checkpoint_dir"]) / "best.pt"
+    global_best_auroc = read_checkpoint_auroc(global_best_path) if global_best_path.exists() else 0.0
+    if best_val_auroc > global_best_auroc:
+        LOGGER.info(
+            "Promotion candidate: val_auroc=%.4f > current global best=%.4f. "
+            "Manual promotion required — review results before running: cp %s %s",
+            best_val_auroc, global_best_auroc, best_checkpoint_path, global_best_path,
+        )
+        return True, global_best_auroc
+    LOGGER.info(
+        "No promotion: val_auroc=%.4f <= current global best=%.4f",
+        best_val_auroc, global_best_auroc,
+    )
+    return False, global_best_auroc
+
+
 def describe_training_setup(
     config: dict[str, Any],
     *,
@@ -369,7 +426,6 @@ def describe_training_setup(
     train_dataset, val_dataset, manifest_path = _build_datasets(config, project_root)
     profile = get_model_profile(str(config["model"]["architecture"]))
     phases = _build_training_phases(config)
-
     return {
         "project_root": str(project_root),
         "config_path": str(config_path),
@@ -409,22 +465,7 @@ def run_training(
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
         classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
-
-    pretrained_backbone_path_str = str(config["train"].get("pretrained_backbone_path", "")).strip()
-    if pretrained_backbone_path_str:
-        pretrained_backbone_path = resolve_project_path(project_root, pretrained_backbone_path_str)
-        if pretrained_backbone_path.exists():
-            backbone_ckpt = torch.load(pretrained_backbone_path, map_location="cpu", weights_only=False)
-            backbone_state = backbone_ckpt.get("model_state_dict", backbone_ckpt)
-            missing, unexpected = model.load_state_dict(backbone_state, strict=False)
-            LOGGER.info(
-                "Loaded pretrained backbone from %s (missing=%d unexpected=%d)",
-                pretrained_backbone_path,
-                len(missing),
-                len(unexpected),
-            )
-        else:
-            LOGGER.warning("pretrained_backbone_path not found: %s", pretrained_backbone_path)
+    _load_pretrained_backbone(model, config, project_root)
 
     criterion = _build_criterion(config).to(device)
     version = str(config["project"].get("version", "")).strip()
@@ -463,62 +504,38 @@ def run_training(
         if should_stop:
             break
         _set_phase_trainability(model, architecture, head_only=phase.head_only)
-        optimizer = _build_optimizer(
-            config,
-            model,
-            architecture=architecture,
-            head_only=phase.head_only,
-        )
+        optimizer = _build_optimizer(config, model, architecture=architecture, head_only=phase.head_only)
         scheduler = _build_scheduler(config, optimizer, phase.epochs)
 
         for phase_epoch in range(1, phase.epochs + 1):
             global_epoch += 1
             train_metrics = train_one_epoch(
-                model,
-                train_loader,
-                criterion,
-                optimizer,
-                device,
+                model, train_loader, criterion, optimizer, device,
                 model_train_setup=(
-                    (lambda current_model: _prepare_model_for_head_only_training(current_model, architecture))
-                    if phase.head_only
-                    else None
+                    (lambda m: _prepare_model_for_head_only_training(m, architecture))
+                    if phase.head_only else None
                 ),
-                amp_enabled=amp_enabled,
-                scaler=scaler,
-                gradient_clip_norm=gradient_clip_norm,
+                amp_enabled=amp_enabled, scaler=scaler, gradient_clip_norm=gradient_clip_norm,
             )
-            val_metrics = evaluate_one_epoch(
-                model,
-                val_loader,
-                criterion,
-                device,
-                amp_enabled=amp_enabled,
-            )
+            val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
             if scheduler is not None:
                 scheduler.step()
 
             epoch_record = {
-                "epoch": global_epoch,
-                "phase": phase.name,
-                "phase_epoch": phase_epoch,
-                "learning_rates": [float(group["lr"]) for group in optimizer.param_groups],
+                "epoch": global_epoch, "phase": phase.name, "phase_epoch": phase_epoch,
+                "learning_rates": [float(g["lr"]) for g in optimizer.param_groups],
             }
             epoch_record.update(_prefixed_metric_fields("train", train_metrics))
             epoch_record.update(_prefixed_metric_fields("val", val_metrics))
             history.append(epoch_record)
 
             checkpoint_payload = _checkpoint_payload(
-                config=config,
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                epoch=global_epoch,
-                phase=phase.name,
-                train_metrics=train_metrics.to_dict(),
-                val_metrics=val_metrics.to_dict(),
+                config=config, model=model, optimizer=optimizer, scheduler=scheduler,
+                epoch=global_epoch, phase=phase.name,
+                train_metrics=train_metrics.to_dict(), val_metrics=val_metrics.to_dict(),
             )
             torch.save(checkpoint_payload, last_checkpoint_path)
+
             val_sensitivity = val_metrics.sensitivity or 0.0
             val_auroc = val_metrics.auroc or 0.0
             min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", _DEFAULT_MIN_SENSITIVITY))
@@ -546,98 +563,22 @@ def run_training(
 
             LOGGER.info(
                 "phase=%s epoch=%s/%s train_loss=%.4f val_loss=%.4f val_sensitivity=%.4f val_auroc=%.4f",
-                phase.name,
-                phase_epoch,
-                phase.epochs,
-                train_metrics.loss,
-                val_metrics.loss,
-                val_sensitivity,
-                val_auroc,
+                phase.name, phase_epoch, phase.epochs,
+                train_metrics.loss, val_metrics.loss, val_sensitivity, val_auroc,
             )
 
     if swad_buffer is not None and len(swad_buffer) > 0:
-        LOGGER.info("Applying SWAD: averaging last %d epoch snapshots.", len(swad_buffer))
-        avg_state = swad_buffer.get_averaged_state_dict()
-        assert avg_state is not None
-        model.load_state_dict(avg_state)
-        model.to(device)
-        # Update BatchNorm running statistics with the averaged weights.
-        # Use a plain (non-FDA) eval-transform dataloader so that running stats
-        # reflect the real image distribution seen at inference time, not
-        # FDA-mixed images which only exist during training.
-        _bn_dataset, _ = _build_eval_dataset(
-            config, project_root, str(config["data"]["train_split"])
+        best_val_auroc, best_epoch = _apply_swad(
+            swad_buffer=swad_buffer, model=model, config=config, project_root=project_root,
+            device=device, val_loader=val_loader, criterion=criterion, amp_enabled=amp_enabled,
+            best_val_auroc=best_val_auroc, best_epoch=best_epoch, global_epoch=global_epoch,
+            best_checkpoint_path=best_checkpoint_path, optimizer=optimizer, scheduler=scheduler,
         )
-        _bn_loader = DataLoader(
-            _bn_dataset,
-            batch_size=int(config["data"]["batch_size"]),
-            shuffle=False,
-            num_workers=int(config["data"].get("num_workers", 0)),
-            pin_memory=device.type == "cuda",
-        )
-        model.eval()
-        for module in model.modules():
-            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                module.train()
-        with torch.no_grad():
-            for batch in _bn_loader:
-                model(batch["image"].to(device))
-        swad_val = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
-        swad_sensitivity = swad_val.sensitivity or 0.0
-        swad_auroc = swad_val.auroc or 0.0
-        min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", _DEFAULT_MIN_SENSITIVITY))
-        LOGGER.info(
-            "SWAD val: sensitivity=%.4f auroc=%.4f (best_before_swad=%.4f)",
-            swad_sensitivity,
-            swad_auroc,
-            best_val_auroc,
-        )
-        if swad_sensitivity >= min_sensitivity and swad_auroc > best_val_auroc:
-            best_val_auroc = swad_auroc
-            best_epoch = global_epoch
-            assert optimizer is not None
-            swad_payload = _checkpoint_payload(
-                config=config,
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                epoch=global_epoch,
-                phase="swad",
-                train_metrics={},
-                val_metrics=swad_val.to_dict(),
-            )
-            torch.save(swad_payload, best_checkpoint_path)
-            LOGGER.info("SWAD model saved as best: val_auroc=%.4f", swad_auroc)
 
-    promotion_candidate = False
-    global_best_auroc_at_run = 0.0
-    if version and best_epoch > 0:
-        global_best_path = resolve_project_path(project_root, config["train"]["checkpoint_dir"]) / "best.pt"
-        if global_best_path.exists():
-            try:
-                global_ckpt = torch.load(global_best_path, map_location="cpu", weights_only=False)
-                global_best_auroc_at_run = float(
-                    global_ckpt.get("val_metrics", {}).get("auroc") or 0.0
-                )
-            except Exception:
-                global_best_auroc_at_run = 0.0
-        if best_val_auroc > global_best_auroc_at_run:
-            promotion_candidate = True
-            LOGGER.info(
-                "Promotion candidate: val_auroc=%.4f > current global best=%.4f. "
-                "Manual promotion required — review results before running: "
-                "cp %s %s",
-                best_val_auroc,
-                global_best_auroc_at_run,
-                best_checkpoint_path,
-                global_best_path,
-            )
-        else:
-            LOGGER.info(
-                "No promotion: val_auroc=%.4f <= current global best=%.4f",
-                best_val_auroc,
-                global_best_auroc_at_run,
-            )
+    promotion_candidate, global_best_auroc_at_run = _check_promotion_candidate(
+        version=version, best_val_auroc=best_val_auroc, best_epoch=best_epoch,
+        project_root=project_root, config=config, best_checkpoint_path=best_checkpoint_path,
+    )
 
     summary = {
         "project_root": str(project_root),
@@ -690,7 +631,6 @@ def run_split_evaluation(
     # QuickQual pre-scan is intentionally skipped during evaluation.
     # Benchmark metrics must be computed on the full dataset to avoid
     # selection bias. Quality filtering is applied only at inference time.
-
     loader = DataLoader(
         dataset,
         batch_size=int(effective_config["data"]["batch_size"]),
@@ -708,7 +648,7 @@ def run_split_evaluation(
         use_ibn=bool(effective_config["model"].get("use_ibn", False)),
         classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    load_state_from_checkpoint(model, checkpoint)
 
     criterion = _build_criterion(effective_config).to(device)
     amp_enabled = bool(effective_config["train"].get("amp", False)) and device.type == "cuda"
