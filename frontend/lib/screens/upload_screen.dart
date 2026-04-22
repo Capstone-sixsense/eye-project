@@ -56,6 +56,25 @@ class _UploadScreenState extends State<UploadScreen> {
     });
   }
 
+  Future<void> _showInputChannelUnsupportedDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('지원하지 않는 이미지 형식'),
+        content: SelectableText(
+          '4채널·CMYK 등은 분석할 수 없습니다.\n\n${ApiErrorCodes.inputChannelUnsupported}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _uploadAndAnalyze() async {
     final bytes = fileBytes;
     final name = fileName;
@@ -92,21 +111,7 @@ class _UploadScreenState extends State<UploadScreen> {
       if (!mounted) return;
 
       if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('지원하지 않는 이미지 형식'),
-            content: SelectableText(
-              '4채널·CMYK 등은 분석할 수 없습니다.\n\n${ApiErrorCodes.inputChannelUnsupported}',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('확인'),
-              ),
-            ],
-          ),
-        );
+        await _showInputChannelUnsupportedDialog();
         return;
       }
 
@@ -132,21 +137,7 @@ class _UploadScreenState extends State<UploadScreen> {
       final isInputCh = e.errorCode == ApiErrorCodes.inputChannelUnsupported ||
           e.body.contains(ApiErrorCodes.inputChannelUnsupported);
       if (isInputCh) {
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('지원하지 않는 이미지 형식'),
-            content: SelectableText(
-              '4채널·CMYK 등은 분석할 수 없습니다.\n\n${ApiErrorCodes.inputChannelUnsupported}',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('확인'),
-              ),
-            ],
-          ),
-        );
+        await _showInputChannelUnsupportedDialog();
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
