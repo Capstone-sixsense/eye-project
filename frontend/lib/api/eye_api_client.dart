@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -8,14 +7,42 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/analyze_response.dart';
 
+/// 백엔드/게이트웨이가 돌려주는 HTTP 오류 본문에서 코드 추출 (가능할 때만).
+String? parseErrorCodeFromBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) {
+      final direct = decoded['error_code'] as String?;
+      if (direct != null && direct.isNotEmpty) return direct;
+      final detail = decoded['detail'];
+      if (detail is String && detail.isNotEmpty) {
+        if (RegExp(r'^[A-Z0-9_]+$').hasMatch(detail.trim())) {
+          return detail.trim();
+        }
+      }
+      if (detail is List && detail.isNotEmpty) {
+        final first = detail.first;
+        if (first is Map && first['msg'] is String) {
+          final msg = (first['msg'] as String).trim();
+          final m = RegExp(r'\b([A-Z][A-Z0-9_]+)\b').firstMatch(msg);
+          if (m != null) return m.group(1);
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 class EyeApiException implements Exception {
-  EyeApiException(this.statusCode, this.body);
+  EyeApiException(this.statusCode, this.body, {this.errorCode});
 
   final int statusCode;
   final String body;
+  final String? errorCode;
 
   @override
-  String toString() => 'EyeApiException($statusCode): $body';
+  String toString() =>
+      'EyeApiException($statusCode)${errorCode != null ? '[$errorCode]' : ''}: $body';
 }
 
 /// `POST /analyze` — 백엔드 파라미터명 `image`와 일치.
@@ -86,13 +113,14 @@ class EyeApiClient {
       '[EyeApi] 비정상 응답 ${response.statusCode}, body(앞 200자): '
       '${response.body.length > 200 ? "${response.body.substring(0, 200)}..." : response.body}',
     );
+    final code = parseErrorCodeFromBody(response.body);
     final detail = jsonMap?['detail'];
     final msg = detail is String
         ? detail
         : detail is List
             ? detail.map((e) => e.toString()).join(', ')
             : response.body;
-    throw EyeApiException(response.statusCode, msg);
+    throw EyeApiException(response.statusCode, msg, errorCode: code);
   }
 
   void close() => _client.close();

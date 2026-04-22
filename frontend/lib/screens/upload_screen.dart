@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../api/eye_api_client.dart';
 import '../config/api_config.dart';
+import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
 
@@ -55,6 +56,25 @@ class _UploadScreenState extends State<UploadScreen> {
     });
   }
 
+  Future<void> _showInputChannelUnsupportedDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('지원하지 않는 이미지 형식'),
+        content: SelectableText(
+          '4채널·CMYK 등은 분석할 수 없습니다.\n\n${ApiErrorCodes.inputChannelUnsupported}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _uploadAndAnalyze() async {
     final bytes = fileBytes;
     final name = fileName;
@@ -90,19 +110,8 @@ class _UploadScreenState extends State<UploadScreen> {
       final AnalyzeResponse res = await _api.analyze(bytes, name);
       if (!mounted) return;
 
-      if (res.isFail) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.message ?? '이미지 품질 미달')),
-        );
-        return;
-      }
-
-      if (!res.isSuccess) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(res.message ?? '분석 응답이 올바르지 않습니다. (status: ${res.status})'),
-          ),
-        );
+      if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
+        await _showInputChannelUnsupportedDialog();
         return;
       }
 
@@ -125,6 +134,12 @@ class _UploadScreenState extends State<UploadScreen> {
       );
     } on EyeApiException catch (e) {
       if (!mounted) return;
+      final isInputCh = e.errorCode == ApiErrorCodes.inputChannelUnsupported ||
+          e.body.contains(ApiErrorCodes.inputChannelUnsupported);
+      if (isInputCh) {
+        await _showInputChannelUnsupportedDialog();
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('서버 오류 (${e.statusCode}): ${e.body}')),
       );
