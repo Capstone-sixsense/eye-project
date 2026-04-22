@@ -609,27 +609,34 @@ def run_training(
             torch.save(swad_payload, best_checkpoint_path)
             LOGGER.info("SWAD model saved as best: val_auroc=%.4f", swad_auroc)
 
-    promoted_to_global_best = False
+    promotion_candidate = False
+    global_best_auroc_at_run = 0.0
     if version and best_epoch > 0:
         global_best_path = resolve_project_path(project_root, config["train"]["checkpoint_dir"]) / "best.pt"
-        global_best_auroc = 0.0
         if global_best_path.exists():
             try:
                 global_ckpt = torch.load(global_best_path, map_location="cpu", weights_only=False)
-                global_best_auroc = float(
+                global_best_auroc_at_run = float(
                     global_ckpt.get("val_metrics", {}).get("auroc") or 0.0
                 )
             except Exception:
-                global_best_auroc = 0.0
-        if best_val_auroc > global_best_auroc:
-            shutil.copy2(best_checkpoint_path, global_best_path)
-            promoted_to_global_best = True
+                global_best_auroc_at_run = 0.0
+        if best_val_auroc > global_best_auroc_at_run:
+            promotion_candidate = True
             LOGGER.info(
-                "New global best: %.4f > %.4f — copied %s → %s",
+                "Promotion candidate: val_auroc=%.4f > current global best=%.4f. "
+                "Manual promotion required — review results before running: "
+                "cp %s %s",
                 best_val_auroc,
-                global_best_auroc,
+                global_best_auroc_at_run,
                 best_checkpoint_path,
                 global_best_path,
+            )
+        else:
+            LOGGER.info(
+                "No promotion: val_auroc=%.4f <= current global best=%.4f",
+                best_val_auroc,
+                global_best_auroc_at_run,
             )
 
     summary = {
@@ -644,7 +651,9 @@ def run_training(
         "best_val_auroc": best_val_auroc,
         "best_checkpoint_path": str(best_checkpoint_path),
         "last_checkpoint_path": str(last_checkpoint_path),
-        "promoted_to_global_best": promoted_to_global_best,
+        "promoted_to_global_best": False,
+        "promotion_candidate": promotion_candidate,
+        "global_best_auroc_at_run": global_best_auroc_at_run,
         "history": history,
     }
     summary_path = checkpoint_dir / "training_summary.json"
