@@ -18,6 +18,7 @@ from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
 from drscreen.quality.quickqual import QuickQualAssessor
+from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
     ensure_runtime_directories,
@@ -157,7 +158,7 @@ class InferenceSession:
             use_ibn=bool(effective_config["model"].get("use_ibn", False)),
             classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
         ).to(device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        load_state_from_checkpoint(model, checkpoint)
         model.eval()
 
         profile = get_model_profile(architecture)
