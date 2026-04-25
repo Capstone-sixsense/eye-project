@@ -32,20 +32,13 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: frontend_Dockerfile.dev
-    container_name: flutter-web-client
+      dockerfile: frontend_Dockerfile
+    container_name: eye-frontend-web
     ports:
-      - "8080:80" # 브라우저에서 localhost:8080 접속 가능
+      - "8080:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app # 소스 동기화
-      # 호스트에서 pub get 한 .dart_tool(WSL 절대경로)이 컨테이너와 충돌하므로 분리
-      - frontend_dart_tool:/app/.dart_tool
     restart: always
-
-volumes:
-  frontend_dart_tool:
 
 networks:
   default:

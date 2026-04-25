@@ -224,6 +224,6 @@ flutter test
 | `pubspec.yaml` | 패키지 메타데이터, `http` / `file_picker` / `cupertino_icons` 의존성 |
 | `analysis_options.yaml` | `flutter_lints` 기반 정적 분석 규칙 |
 | `web/index.html`, `web/manifest.json` | 웹 빌드 진입점 |
-| `frontend_Dockerfile`, `frontend_Dockerfile.dev` | 이미지 빌드·개발용 |
+| `frontend_Dockerfile`, `docker-web.nginx.conf` | 컨테이너용 Web 릴리스 빌드 + nginx |
 
 ---

@@ -224,7 +224,7 @@ flutter test
 | `pubspec.yaml` | 패키지 메타데이터, `http` / `file_picker` / `cupertino_icons` 의존성 |
 | `analysis_options.yaml` | `flutter_lints` 기반 정적 분석 규칙 |
 | `web/index.html`, `web/manifest.json` | 웹 빌드 진입점 |
-| `frontend_Dockerfile`, `frontend_Dockerfile.dev` | 이미지 빌드·개발용 |
+| `frontend_Dockerfile`, `docker-web.nginx.conf` | 컨테이너용 Web 릴리스 빌드 + nginx |
 
 ---
 # eye-project
@@ -303,14 +303,28 @@ main
 git clone https://github.com/Capstone-sixsense/eye-project.git
 cd eye-project
 
-# 2. 디렉토리 및 의존성 초기화
+# 2. 디렉토리·의존성 초기화 + Docker 기동 + 브라우저 자동 오픈
 ./setup.sh
-
-# 3. 서비스 실행
-docker compose up -d
 ```
 
-실행 후 브라우저에서 `http://localhost:8080` 접속.
+**맥**
+
+- **Docker Desktop** 실행 후, 터미널에서 저장소 **`eye-project` 루트**로 이동해 `./setup.sh` 한 번이면 됩니다.
+- **Apple Silicon(M1/M2/M3)** 은 스크립트가 자동으로 `docker-compose-mac.yml` 을 붙입니다. (기본 백엔드 이미지는 ARM용 CUDA 휠이 맞지 않아 빌드가 실패할 수 있음 — 터미널에 나온 것과 같은 이유입니다.)
+- 브라우저는 준비되면 `http://127.0.0.1:8080` 을 엽니다.
+
+**Windows**
+
+- **Docker Desktop**(WSL2 백엔드 권장)을 켠 뒤, **Git Bash**에서 저장소 `eye-project` 루트로 이동해 `./setup.sh` 를 실행합니다. (CMD만 쓰는 경우 Bash가 없으므로 Git Bash 설치가 필요합니다.)
+- 브라우저 자동 열기는 Git Bash에서 `cmd.exe` 경로가 잡힐 때 `start` 로 열립니다.
+
+**공통**
+
+- `setup.sh` 는 `docker compose up --build -d` 까지 포함합니다. 다시 실행해도 compose 를 재기동하고, 8080이 뜨면 브라우저를 엽니다.
+- **종료**: 맥 Apple Silicon은  
+  `docker compose -f docker-compose.yml -f docker-compose-mac.yml down`  
+  그 외는 `docker compose down`  
+  (`setup.sh` 성공 시 터미널에도 같은 안내가 출력됩니다.)
 
 ---
 
@@ -341,6 +355,6 @@ docker compose up -d
 
 ## 환경구축
 
-1. git clone을 통해서 setup.sh 실행
-2. docker hub를 이용 → 폴더 생성 후 docker-compose.yml 파일을 위치시킨 후 `docker compose up -d` 명령어 입력
+1. 저장소 클론 후 `./setup.sh` 실행 (Flutter 준비 + `docker compose up --build -d` + 브라우저 열기)
+2. Docker Desktop(또는 동등한 환경)이 실행 중인지 확인
 
