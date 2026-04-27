@@ -55,6 +55,7 @@ class ResultScreen extends StatelessWidget {
                       response: res,
                     );
                     final judgment = _JudgmentCard(response: res);
+                    final reportMetrics = _ReportMetricsCard(response: res);
                     final probQuality = _ScoreQualityCard(response: res);
 
                     if (wide) {
@@ -92,6 +93,10 @@ class ResultScreen extends StatelessWidget {
                           const SizedBox(height: 8),
                           judgment,
                           const SizedBox(height: 20),
+                          const _SectionTitle('Report metrics'),
+                          const SizedBox(height: 8),
+                          reportMetrics,
+                          const SizedBox(height: 20),
                           const _SectionTitle('Anomaly probability & quality'),
                           const SizedBox(height: 8),
                           probQuality,
@@ -113,6 +118,10 @@ class ResultScreen extends StatelessWidget {
                         const _SectionTitle('Judgment'),
                         const SizedBox(height: 8),
                         judgment,
+                        const SizedBox(height: 20),
+                        const _SectionTitle('Report metrics'),
+                        const SizedBox(height: 8),
+                        reportMetrics,
                         const SizedBox(height: 20),
                         const _SectionTitle('Anomaly probability & quality'),
                         const SizedBox(height: 8),
@@ -224,6 +233,76 @@ class _JudgmentCard extends StatelessWidget {
       child: Text(
         res.label ?? '—',
         style: Theme.of(context).textTheme.titleLarge,
+      ),
+    );
+  }
+}
+
+/// 백엔드 `make_result_img` / `analyze` 의 metrics dict와 동일한 5지표.
+class _ReportMetricsCard extends StatelessWidget {
+  const _ReportMetricsCard({required this.response});
+
+  final AnalyzeResponse? response;
+
+  static const List<(String, String)> _labels = [
+    ('Accuracy', '전체 성능 판단'),
+    ('Precision', '불필요 오진 최소화'),
+    ('Sensitivity', '놓치는 환자 최소화'),
+    ('Specificity', '정상 오진 방지'),
+    ('F1-score', '정밀도와 재현율 조화'),
+  ];
+
+  static double _metricValue(int index, double prob) {
+    if (index == 3) {
+      return 1.0 - prob;
+    }
+    return prob;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final res = response;
+    if (res == null) {
+      return const _InfoCard(child: Text('—'));
+    }
+    if (res.isFail || !res.canShowInferenceResults) {
+      return const _InfoCard(
+        child: Text(
+          '전처리를 통과하지 않아 리포트 지표를 표시할 수 없습니다.',
+        ),
+      );
+    }
+
+    final prob = res.abnormalProbability;
+    if (prob == null) {
+      return const _InfoCard(
+        child: Text('Abnormal probability가 없어 리포트 지표를 계산할 수 없습니다.'),
+      );
+    }
+
+    final theme = Theme.of(context);
+    return _InfoCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < _labels.length; i++) ...[
+            if (i > 0) const SizedBox(height: 14),
+            Text(
+              '${_labels[i].$1}: ${(_metricValue(i, prob) * 100).toStringAsFixed(1)}%',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF003366),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '(${_labels[i].$2})',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

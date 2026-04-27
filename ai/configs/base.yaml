@@ -12,6 +12,7 @@ data:
   persistent_workers: false
   batch_size: 16
   use_preprocessing: false
+  use_align: false
   preprocess_size: 512
   train_split: train
   val_split: val
@@ -25,18 +26,6 @@ labels:
     - normal
     - abnormal
 
-quality:
-  blur_score_min: 248.929
-  brightness_mean_min: 126.870
-  action_on_low_quality: warn
-  calibration:
-    blur_percentile: 5.0
-    brightness_percentile: 5.0
-    output_dir: artifacts/quality
-
-quickqual:
-  weights_path: artifacts/quickqual/quickqual_dn121_512.pkl
-  backbone_weights_path: artifacts/quickqual/densenet121-a639ec97.pth
 
 model:
   architecture: efficientnet_b5
@@ -66,7 +55,7 @@ train:
   checkpoint_dir: artifacts/checkpoints
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/best.pt
+  checkpoint_path: artifacts/checkpoints/v17_focal_g2/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true

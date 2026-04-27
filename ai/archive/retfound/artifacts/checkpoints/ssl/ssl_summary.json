@@ -1,0 +1,139 @@
+{
+  "config_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\configs\\retfound_simclr.yaml",
+  "manifest_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\processed\\manifest_preprocessed.csv",
+  "num_ssl_images": 5378,
+  "epochs": 32,
+  "batch_size": 64,
+  "temperature": 0.07,
+  "output_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\artifacts\\checkpoints\\ssl\\retfound_simclr.pth",
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 2.6892218376908983
+    },
+    {
+      "epoch": 2,
+      "loss": 0.8538719358898345
+    },
+    {
+      "epoch": 3,
+      "loss": 0.5613286165254456
+    },
+    {
+      "epoch": 4,
+      "loss": 0.4404477400793916
+    },
+    {
+      "epoch": 5,
+      "loss": 0.35501239927751677
+    },
+    {
+      "epoch": 6,
+      "loss": 0.30937176658993676
+    },
+    {
+      "epoch": 7,
+      "loss": 0.26716473432523863
+    },
+    {
+      "epoch": 8,
+      "loss": 0.25333677879756406
+    },
+    {
+      "epoch": 9,
+      "loss": 0.2173583973199129
+    },
+    {
+      "epoch": 10,
+      "loss": 0.20041856027784802
+    },
+    {
+      "epoch": 11,
+      "loss": 0.19904729191746032
+    },
+    {
+      "epoch": 12,
+      "loss": 0.19637912715829553
+    },
+    {
+      "epoch": 13,
+      "loss": 0.1597661773807236
+    },
+    {
+      "epoch": 14,
+      "loss": 0.15454965581496558
+    },
+    {
+      "epoch": 15,
+      "loss": 0.15643641312739678
+    },
+    {
+      "epoch": 16,
+      "loss": 0.14074611091720207
+    },
+    {
+      "epoch": 17,
+      "loss": 0.13682838604741154
+    },
+    {
+      "epoch": 18,
+      "loss": 0.12698388454459963
+    },
+    {
+      "epoch": 19,
+      "loss": 0.13587916979477518
+    },
+    {
+      "epoch": 20,
+      "loss": 0.12258445830749613
+    },
+    {
+      "epoch": 21,
+      "loss": 0.11949844321324712
+    },
+    {
+      "epoch": 22,
+      "loss": 0.11946854367852211
+    },
+    {
+      "epoch": 23,
+      "loss": 0.1132202706344071
+    },
+    {
+      "epoch": 24,
+      "loss": 0.1123893435689665
+    },
+    {
+      "epoch": 25,
+      "loss": 0.10152032026754958
+    },
+    {
+      "epoch": 26,
+      "loss": 0.10142539408324021
+    },
+    {
+      "epoch": 27,
+      "loss": 0.08696028368458861
+    },
+    {
+      "epoch": 28,
+      "loss": 0.0885839689345587
+    },
+    {
+      "epoch": 29,
+      "loss": 0.0896274745464325
+    },
+    {
+      "epoch": 30,
+      "loss": 0.08877374058855432
+    },
+    {
+      "epoch": 31,
+      "loss": 0.09383832703211478
+    },
+    {
+      "epoch": 32,
+      "loss": 0.08831660205587036
+    }
+  ]
+}

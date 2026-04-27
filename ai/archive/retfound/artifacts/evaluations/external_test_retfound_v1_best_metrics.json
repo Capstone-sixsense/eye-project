@@ -1,0 +1,66 @@
+{
+  "project_root": "C:\\Users\\dg203\\Desktop\\eye-project\\ai",
+  "config_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\configs\\retfound.yaml",
+  "manifest_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\processed\\manifest_preprocessed.csv",
+  "split": "external_test",
+  "rows": 1200,
+  "device": "cuda",
+  "checkpoint_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\artifacts\\checkpoints\\retfound_v1\\best.pt",
+  "label_names": [
+    "normal",
+    "abnormal"
+  ],
+  "metrics": {
+    "loss": 1.1599865149458248,
+    "accuracy": 0.6233333333333333,
+    "auroc": 0.6721821756225426,
+    "f1": 0.6570561456752656,
+    "sensitivity": 0.6620795107033639,
+    "specificity": 0.5769230769230769,
+    "precision": 0.6521084337349398,
+    "threshold": 0.5,
+    "true_positive": 433,
+    "true_negative": 315,
+    "false_positive": 231,
+    "false_negative": 221,
+    "num_examples": 1200,
+    "positive_examples": 654,
+    "negative_examples": 546
+  },
+  "optimal_threshold": 0.82,
+  "metrics_at_optimal_threshold": {
+    "loss": 1.1599865149458248,
+    "accuracy": 0.6325,
+    "auroc": 0.6721821756225426,
+    "f1": 0.5763688760806917,
+    "sensitivity": 0.45871559633027525,
+    "specificity": 0.8406593406593407,
+    "precision": 0.7751937984496124,
+    "threshold": 0.82,
+    "true_positive": 300,
+    "true_negative": 459,
+    "false_positive": 87,
+    "false_negative": 354,
+    "num_examples": 1200,
+    "positive_examples": 654,
+    "negative_examples": 546
+  },
+  "domain_breakdown": {
+    "Messidor": {
+      "accuracy": 0.6233333333333333,
+      "auroc": 0.6721821756225426,
+      "f1": 0.6570561456752656,
+      "sensitivity": 0.6620795107033639,
+      "specificity": 0.5769230769230769,
+      "precision": 0.6521084337349398,
+      "threshold": 0.5,
+      "true_positive": 433,
+      "true_negative": 315,
+      "false_positive": 231,
+      "false_negative": 221,
+      "num_examples": 1200,
+      "positive_examples": 654,
+      "negative_examples": 546
+    }
+  }
+}

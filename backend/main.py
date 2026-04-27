@@ -23,7 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 
 
 
-_DEFAULT_CONFIG_PATH = "/ai/configs/v6_alpha_only.yaml"
+_DEFAULT_CONFIG_PATH = "/ai/configs/v17_focal_g2.yaml"
 UPLOAD_DIR = "storage"
 RESULTS_DIR = "results"
 

@@ -21,6 +21,7 @@ services:
       - ./backend/results:/app/results
     environment:
       - PYTHONUNBUFFERED=1
+      - FUNDUS_CONFIG_PATH=/ai/configs/v17_focal_g2.yaml
       # CPU 추론 속도 (호스트 코어 수에 맞게 조절)
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
@@ -32,20 +33,13 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: frontend_Dockerfile.dev
-    container_name: flutter-web-client
+      dockerfile: frontend_Dockerfile
+    container_name: eye-frontend-web
     ports:
-      - "8080:80" # 브라우저에서 localhost:8080 접속 가능
+      - "8080:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app # 소스 동기화
-      # 호스트에서 pub get 한 .dart_tool(WSL 절대경로)이 컨테이너와 충돌하므로 분리
-      - frontend_dart_tool:/app/.dart_tool
     restart: always
-
-volumes:
-  frontend_dart_tool:
 
 networks:
   default:

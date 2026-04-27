@@ -1,0 +1,66 @@
+{
+  "project_root": "C:\\Users\\dg203\\Desktop\\eye-project\\ai",
+  "config_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\configs\\retfound.yaml",
+  "manifest_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\processed\\manifest_preprocessed.csv",
+  "split": "external_test",
+  "rows": 1200,
+  "device": "cuda",
+  "checkpoint_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\artifacts\\checkpoints\\retfound_v2\\best.pt",
+  "label_names": [
+    "normal",
+    "abnormal"
+  ],
+  "metrics": {
+    "loss": 0.7358510088672241,
+    "accuracy": 0.6225,
+    "auroc": 0.6611441565570005,
+    "f1": 0.6170752324598479,
+    "sensitivity": 0.5581039755351682,
+    "specificity": 0.6996336996336996,
+    "precision": 0.6899810964083176,
+    "threshold": 0.5,
+    "true_positive": 365,
+    "true_negative": 382,
+    "false_positive": 164,
+    "false_negative": 289,
+    "num_examples": 1200,
+    "positive_examples": 654,
+    "negative_examples": 546
+  },
+  "optimal_threshold": 0.72,
+  "metrics_at_optimal_threshold": {
+    "loss": 0.7358510088672241,
+    "accuracy": 0.6216666666666667,
+    "auroc": 0.6611441565570005,
+    "f1": 0.5414141414141415,
+    "sensitivity": 0.40978593272171254,
+    "specificity": 0.8754578754578755,
+    "precision": 0.7976190476190477,
+    "threshold": 0.72,
+    "true_positive": 268,
+    "true_negative": 478,
+    "false_positive": 68,
+    "false_negative": 386,
+    "num_examples": 1200,
+    "positive_examples": 654,
+    "negative_examples": 546
+  },
+  "domain_breakdown": {
+    "Messidor": {
+      "accuracy": 0.6225,
+      "auroc": 0.6611441565570005,
+      "f1": 0.6170752324598479,
+      "sensitivity": 0.5581039755351682,
+      "specificity": 0.6996336996336996,
+      "precision": 0.6899810964083176,
+      "threshold": 0.5,
+      "true_positive": 365,
+      "true_negative": 382,
+      "false_positive": 164,
+      "false_negative": 289,
+      "num_examples": 1200,
+      "positive_examples": 654,
+      "negative_examples": 546
+    }
+  }
+}
