@@ -1,5 +1,8 @@
 # AI docs and agent instructions
 ai/docs/
+!ai/docs/
+ai/docs/*
+!ai/docs/SPRINT2_Devlog.md
 ai/AGENTS.md
 .omc/
 
