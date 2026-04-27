@@ -233,7 +233,9 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         original_image = image.convert("RGB")
+        display_image = original_image
         if self.preprocessor is not None:
+            display_image = self.preprocessor.preprocess_for_display(original_image)
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
@@ -249,7 +251,7 @@ class InferenceSession:
         xai_error_code = None
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
-            heatmap_overlay = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+            heatmap_overlay = _render_gradcam_overlay(display_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
             xai_error_code = "XAI_001"

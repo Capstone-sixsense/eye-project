@@ -34,11 +34,11 @@ services:
       - ./backend/storage:/app/storage
       - ./backend/results:/app/results
 
-      # DenseNet121 pretrained weights 캐시 (재시작 시 재다운로드 방지)
-      - ./backend/.cache:/app/.cache
+      # DenseNet121 pretrained weights 캐시 (Windows symlink checkout 문제 방지)
+      - backend-cache:/app/.cache
     environment:
       - PYTHONUNBUFFERED=1
-      - FUNDUS_CONFIG_PATH=/ai/configs/v17_focal_g2.yaml
+      - FUNDUS_CONFIG_PATH=/ai/configs/base.yaml
       # CPU 추론 속도 (호스트 코어 수에 맞게 조절)
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
@@ -64,3 +64,6 @@ services:
 networks:
   default:
     name: eye-project-network
+
+volumes:
+  backend-cache:

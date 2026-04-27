@@ -19,5 +19,4 @@ train:
   pretrained_backbone_path: artifacts/checkpoints/v7_messidor_train/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v17_focal_g2/best.pt
   threshold: 0.5

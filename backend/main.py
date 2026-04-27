@@ -21,12 +21,9 @@ from fastapi.concurrency import run_in_threadpool
 
 
 
-_DEFAULT_CONFIG_PATH = "/ai/configs/v17_focal_g2.yaml"
+_DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 UPLOAD_DIR = "storage"
 RESULTS_DIR = "results"
-
-# 진단 모델이 받는 입력 사이즈
-MODEL_INPUT_SIZE = 448
 
 # 'bad' 확률이 이 값을 넘으면 경고 (응답에 포함). 거부하려면 REJECT_BAD_QUALITY=True
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
@@ -229,13 +226,8 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
                     },
                 )
 
-        # 모델 입력 사이즈($448 \times 448$)로 최종 조정
-        # 고해상도로 복원된 이미지에서 모델이 필요한 크기로 리사이즈합니다.
-        # 이렇게 하면 단순 리사이즈보다 훨씬 선명한 특징(Feature)을 얻을 수 있습니다.
-        final_img = preprocessed_img.resize(
-            (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.Resampling.LANCZOS
-        )
-        final_img.save(proc_path)
+        # 진단 모델의 resize/crop은 AI InferenceSession 내부 transform에서 처리합니다.
+        preprocessed_img.save(proc_path)
         
         #타이머 종료
         print(

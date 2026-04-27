@@ -1,6 +1,7 @@
 storage/
 results/
 data/
+.cache/
 __pycache__/
 *.log
 .git/
