@@ -12,10 +12,8 @@ from PIL import Image
 
 from drscreen.infer.service import InferenceSession
 
-from image_analyzer import check_image_quality, PassNonPass, resize_image_high_quality
 from make_result_img import create_medical_report_image
-
-from models.edsr_wrapper import EDSRWrapper
+from models.quickqual_wrapper import QuickQualWrapper
 import traceback
 
 from fastapi.concurrency import run_in_threadpool
@@ -27,9 +25,17 @@ _DEFAULT_CONFIG_PATH = "/ai/configs/v17_focal_g2.yaml"
 UPLOAD_DIR = "storage"
 RESULTS_DIR = "results"
 
+# 진단 모델이 받는 입력 사이즈
+MODEL_INPUT_SIZE = 448
+
+# 'bad' 확률이 이 값을 넘으면 경고 (응답에 포함). 거부하려면 REJECT_BAD_QUALITY=True
+QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
+REJECT_BAD_QUALITY = os.environ.get("REJECT_BAD_QUALITY", "false").lower() == "true"
+
 _session: InferenceSession | None = None
 _session_error: str | None = None
-_edsr: EDSRWrapper | None = None
+_quickqual: QuickQualWrapper | None = None
+_quickqual_error: str | None = None
 
 logging.basicConfig(
     filename="server_errors.log",
@@ -58,25 +64,37 @@ def _configure_cpu_threads() -> None:
 async def lifespan(app: FastAPI):
     """서버 시작/종료 시 모델 로드/해제."""
     del app
-    global _session, _session_error , _edsr
+    global _session, _session_error, _quickqual, _quickqual_error
 
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
-
+    #개발중인 AI 모델
     try:
         _configure_cpu_threads()
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
-
-        _edsr = EDSRWrapper(model_name="edsr_baseline_x2-1bc95232.pt", scale=2)
     except FileNotFoundError as exc:
         _session = None
         _session_error = str(exc)
     except Exception as exc:
         _session = None
         _session_error = str(exc)
+        
+    #QuickQual 모델
+    try:
+        svm_filename = os.environ.get(
+            "QUICKQUAL_SVM_FILENAME", "quickqual_dn121_512.pkl"
+        )
+        _quickqual = QuickQualWrapper(svm_filename=svm_filename)
+        _quickqual_error = None
+    except Exception as exc:
+        _quickqual = None
+        _quickqual_error = f"{type(exc).__name__}: {exc}"
+        logger.error(f"[lifespan] QuickQual load failed:\n{traceback.format_exc()}")
+
     yield
     _session = None
+    _quickqual = None
 
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -134,35 +152,48 @@ def read_root() -> dict[str, str]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    if _session is not None:
-        return _health_payload()
-    return JSONResponse(
-        status_code=503,
-        content={"status": "model_not_ready", "detail": _session_error},
-    )
+    payload: dict[str, Any] = {
+        "diagnosis_model": "ok" if _session else "not_ready",
+        "quickqual": "ok" if _quickqual else "not_ready",
+    }
+    if _session is None:
+        payload["diagnosis_error"] = _session_error
+    if _quickqual is None:
+        payload["quickqual_error"] = _quickqual_error
+    status = 200 if (_session and _quickqual) else 503
+    return JSONResponse(status_code=status, content=payload)
 
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
+    name = image.filename or "upload.png"
+
     print(
         f"[analyze] 요청 도착 (filename={image.filename!r}, 업로드 수신·추론 시작)",
         flush=True,
     )
+
     if _session is None:
         raise HTTPException(
             status_code=503,
             detail=_session_error or "AI 모델이 준비되지 않았습니다.",
+        )
+    if _quickqual is None:
+        raise HTTPException(
+            status_code=503,
+            detail=_quickqual_error or "QuickQual 모델이 준비되지 않았습니다.",
         )
     
     # 파일 경로 설정
     raw_path = os.path.join(UPLOAD_DIR, f"raw_{image.filename}")
     proc_path = os.path.join(UPLOAD_DIR, image.filename)
 
+    #타이머 시작
     t0 = time.perf_counter()
 
     try:
         # 이미지 수신 및 원본 저장
         content = await image.read()
-        name = image.filename or "upload"
+
         print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
         with open(raw_path, "wb") as f: 
             f.write(content)
@@ -172,38 +203,45 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         # 원본 이미지를 그대로 EDSR에 넣어 디테일을 살립니다.
         raw_img = Image.open(raw_path).convert("RGB")
 
-        t_sr_start = time.perf_counter()
-        if _edsr is not None:
-            print("[analyze] EDSR 업스케일 시작...", flush=True)
-            #enhanced_img = _edsr.upscale(raw_img)
-            enhanced_img = await run_in_threadpool(_edsr.upscale, raw_img)
-        else:
-            enhanced_img = raw_img # 모델 로드 실패 시 원본 사용
-        t_sr_end = time.perf_counter()
-        
-        print(f"[analyze] EDSR 변환 완료: {t_sr_end - t_sr_start:.4f}s", flush=True)
+        #QuickQual 전처리 + 품질 평가
+        t_qq = time.perf_counter()
+        preprocessed_img, quality = _quickqual.preprocess_and_score(raw_img)
+        print(
+            f"[analyze] QuickQual 완료 ({time.perf_counter() - t_qq:.2f}s) "
+            f"label={quality['label']} bad={quality['bad']:.3f}",
+            flush=True,
+        )
+
+        #품질 게이트 ----
+        quality_warning = None
+        if quality["bad"] >= QUICKQUAL_BAD_THRESHOLD:
+            quality_warning = (
+                f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). "
+                "결과 신뢰도가 떨어질 수 있습니다."
+            )
+            if REJECT_BAD_QUALITY:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "low_image_quality",
+                        "message": quality_warning,
+                        "quality": quality,
+                    },
+                )
 
         # 모델 입력 사이즈($448 \times 448$)로 최종 조정
         # 고해상도로 복원된 이미지에서 모델이 필요한 크기로 리사이즈합니다.
         # 이렇게 하면 단순 리사이즈보다 훨씬 선명한 특징(Feature)을 얻을 수 있습니다.
-        final_img = enhanced_img.resize((448, 448), Image.Resampling.LANCZOS)
+        final_img = preprocessed_img.resize(
+            (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.Resampling.LANCZOS
+        )
         final_img.save(proc_path)
-
-        print(f"[analyze] 전처리 최종 완료 (총 소요시간: {time.perf_counter() - t0:.4f}s)", flush=True)
-
-
-        """
-        resize_image_high_quality(raw_path, proc_path, (448, 448))
         
-        # CleanVision(Imagelab)은 이미지 1장도 수십 초~수 분 걸릴 수 있음 → 개발 시 SKIP_CLEANVISION=1
-        skip_cv = os.environ.get("SKIP_CLEANVISION", "").lower() in ("1", "true", "yes")
-        if not skip_cv:
-            q_res = check_image_quality(UPLOAD_DIR, name)
-            if not PassNonPass(q_res)["is_acceptable"]:
-                return {"status": "fail", "message": "이미지 품질 미달", "details": q_res}
-        else:
-            print("[analyze] SKIP_CLEANVISION=1 — CleanVision 품질 검사 생략", flush=True)
-        """
+        #타이머 종료
+        print(
+            f"[analyze] 전처리 완료 (총 {time.perf_counter() - t0:.2f}s)",
+            flush=True,
+        )
 
         # AI 추론 (CPU + EfficientNet 등은 여기서 대부분의 시간 소요)
         with open(proc_path, "rb") as f:

@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+python-multipart
 
 # AI/ML
 scikit-learn==1.2.2
@@ -9,10 +10,8 @@ PyYAML>=6.0
 pandas>=2.2
 Pillow>=10.0
 opencv-python-headless>=4.
-# EDSR
-scipy
-scikit-image
-imageio
+scipy # QuickQual 연산에 필요
+joblib  # SVM 로드용
 
 
 --extra-index-url https://download.pytorch.org/whl/cu130
@@ -21,7 +20,5 @@ torchvision==0.24.1+cu130
 
 timm
 albumentations
-cleanvision
 grad-cam
 captum
-python-multipart
