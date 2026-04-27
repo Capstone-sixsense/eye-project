@@ -19,6 +19,9 @@ services:
       - ./backend/data:/app/data
       - ./backend/storage:/app/storage
       - ./backend/results:/app/results
+
+      # DenseNet121 pretrained weights 캐시 (재시작 시 재다운로드 방지)
+      - ./backend/.cache:/app/.cache
     environment:
       - PYTHONUNBUFFERED=1
       - FUNDUS_CONFIG_PATH=/ai/configs/v17_focal_g2.yaml
@@ -26,8 +29,11 @@ services:
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
       - TORCH_NUM_THREADS=8
-      # CleanVision(Imagelab) 1장도 매우 느림 — 로컬/개발에서만 1 권장. 운영 품질 검사 필요 시 0 또는 제거
-      - SKIP_CLEANVISION=0
+
+      # QuickQual 설정
+      - QUICKQUAL_SVM_FILENAME=quickqual_dn121_512.pkl
+      - QUICKQUAL_BAD_THRESHOLD=0.7
+      - REJECT_BAD_QUALITY=false   # true로 바꾸면 bad 이미지 422로 거부
     restart: always
 
   frontend:
