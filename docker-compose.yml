@@ -4,6 +4,20 @@ services:
       context: ./backend
       dockerfile: backend_Dockerfile
     container_name: eye-backend-service
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app
+      --reload-include "*.py"
+      --reload-include "*.yaml"
+      --reload-include "*.yml"
+      --reload-exclude "storage/*"
+      --reload-exclude "results/*"
+      --reload-exclude "data/*"
+      --reload-exclude ".cache/*"
+      --reload-exclude "*.log"
     ports:
       - "8000:8000"
     volumes:
