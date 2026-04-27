@@ -12,6 +12,7 @@ data:
   persistent_workers: false
   batch_size: 16
   use_preprocessing: false
+  use_align: false
   preprocess_size: 512
   train_split: train
   val_split: val
@@ -26,8 +27,8 @@ labels:
     - abnormal
 
 quality:
-  blur_score_min: 248.929
-  brightness_mean_min: 126.870
+  blur_score_min: 8.182
+  brightness_mean_min: 35.990
   action_on_low_quality: warn
   calibration:
     blur_percentile: 5.0
@@ -66,7 +67,7 @@ train:
   checkpoint_dir: artifacts/checkpoints
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/best.pt
+  checkpoint_path: artifacts/checkpoints/v17_focal_g2/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true

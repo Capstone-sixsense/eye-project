@@ -17,7 +17,6 @@ from drscreen.data.transforms import FundusPreprocess, build_eval_transform
 from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
-from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
@@ -123,7 +122,6 @@ class InferenceSession:
     label_names: tuple[str, ...]
     prediction_dir: Path
     heatmap_dir: Path
-    quality_assessor: QuickQualAssessor | None
     preprocessor: FundusPreprocess | None
 
     @classmethod
@@ -176,8 +174,8 @@ class InferenceSession:
             use_preprocessing=False,
         )
         preprocess_size = int(data_cfg.get("preprocess_size", 0)) or None
-        preprocessor = FundusPreprocess(output_size=preprocess_size) if use_preprocessing else None
-        quality_assessor = QuickQualAssessor.from_config(effective_config, project_root, device)
+        use_align = bool(infer_cfg.get("use_align", data_cfg.get("use_align", False)))
+        preprocessor = FundusPreprocess(output_size=preprocess_size, align=use_align) if use_preprocessing else None
         prediction_dir = resolve_project_path(project_root, effective_config["infer"]["prediction_dir"])
         heatmap_dir = resolve_project_path(project_root, effective_config["infer"]["heatmap_dir"])
         prediction_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +192,6 @@ class InferenceSession:
             label_names=tuple(effective_config["labels"]["names"]),
             prediction_dir=prediction_dir,
             heatmap_dir=heatmap_dir,
-            quality_assessor=quality_assessor,
             preprocessor=preprocessor,
         )
 
@@ -236,22 +233,15 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         original_image = image.convert("RGB")
-        raw_image = np.asarray(original_image)
         if self.preprocessor is not None:
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
-        quality_cfg = self.config["quality"]
         infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
-            raw_image=raw_image,
             label_names=self.label_names,
-            blur_threshold=float(quality_cfg["blur_score_min"]),
-            brightness_threshold=float(quality_cfg["brightness_mean_min"]),
-            low_quality_action=str(quality_cfg["action_on_low_quality"]),
-            quality_assessor=self.quality_assessor,
             threshold=float(infer_cfg.get("threshold", 0.5)),
         )
 
@@ -273,6 +263,11 @@ class InferenceSession:
             )
 
         payload = result.to_dict()
+        payload["should_block"] = False
+        payload["quality_warning"] = None
+        payload["quality"] = None
+        payload["quality_grade"] = None
+        payload["quality_grade_confidence"] = None
         payload["checkpoint_path"] = str(self.checkpoint_path)
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
