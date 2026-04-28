@@ -13,10 +13,11 @@ services:
       --reload-include "*.py"
       --reload-include "*.yaml"
       --reload-include "*.yml"
-      --reload-exclude "storage/*"
-      --reload-exclude "results/*"
-      --reload-exclude "data/*"
-      --reload-exclude ".cache/*"
+
+      --reload-exclude "/app/storage/*"
+      --reload-exclude "/app/results/*"
+      --reload-exclude "/app/data/*"
+      --reload-exclude "/app/.cache/*"
       --reload-exclude "*.log"
     ports:
       - "8000:8000"
@@ -28,11 +29,6 @@ services:
       # AI 모델 및 프로젝트 루트 데이터 연결
       # PYTHONPATH=/ai 설정을 위해 프로젝트 루트의 ai 폴더를 연결합니다.
       - ./ai:/ai
-
-      # 데이터 저장 영역 (명시적 관리)
-      - ./backend/data:/app/data
-      - ./backend/storage:/app/storage
-      - ./backend/results:/app/results
 
       # DenseNet121 pretrained weights 캐시 (Windows symlink checkout 문제 방지)
       - backend-cache:/app/.cache

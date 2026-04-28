@@ -197,7 +197,6 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         print(f"[analyze] 수신 완료: {name!r} ({len(content)} bytes)", flush=True)
 
         # 이미지 로드 및 EDSR 고해상도화
-        # 원본 이미지를 그대로 EDSR에 넣어 디테일을 살립니다.
         raw_img = Image.open(raw_path).convert("RGB")
 
         #QuickQual 전처리 + 품질 평가
