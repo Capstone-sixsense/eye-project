@@ -6,14 +6,14 @@ project:
 data:
   manifest_path: data/processed/manifest_preprocessed.csv
   image_root: data/raw
-  resize_size: 512
+  resize_size: 448
   image_size: 448
   num_workers: 4
   persistent_workers: false
   batch_size: 16
   use_preprocessing: false
   use_align: false
-  preprocess_size: 512
+  preprocess_size: 448
   train_split: train
   val_split: val
   test_split: test
