@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 import '../api/eye_api_client.dart';
 import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
+import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
+import '../state/analysis_history_store.dart';
 
 class UploadScreen extends StatefulWidget {
   const UploadScreen({super.key});
@@ -109,6 +111,15 @@ class _UploadScreenState extends State<UploadScreen> {
     try {
       final AnalyzeResponse res = await _api.analyze(bytes, name);
       if (!mounted) return;
+
+      AnalysisHistoryStore.add(
+        AnalysisHistoryEntry(
+          filename: name,
+          originalImageBytes: bytes,
+          response: res,
+          createdAt: DateTime.now(),
+        ),
+      );
 
       if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
         await _showInputChannelUnsupportedDialog();
