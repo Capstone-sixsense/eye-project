@@ -4,6 +4,21 @@ services:
       context: ./backend
       dockerfile: backend_Dockerfile
     container_name: eye-backend-service
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app
+      --reload-include "*.py"
+      --reload-include "*.yaml"
+      --reload-include "*.yml"
+
+      --reload-exclude "/app/storage/*"
+      --reload-exclude "/app/results/*"
+      --reload-exclude "/app/data/*"
+      --reload-exclude "/app/.cache/*"
+      --reload-exclude "*.log"
     ports:
       - "8000:8000"
     volumes:
@@ -15,18 +30,20 @@ services:
       # PYTHONPATH=/ai 설정을 위해 프로젝트 루트의 ai 폴더를 연결합니다.
       - ./ai:/ai
 
-      # 데이터 저장 영역 (명시적 관리)
-      - ./backend/data:/app/data
-      - ./backend/storage:/app/storage
-      - ./backend/results:/app/results
+      # DenseNet121 pretrained weights 캐시 (Windows symlink checkout 문제 방지)
+      - backend-cache:/app/.cache
     environment:
       - PYTHONUNBUFFERED=1
+      - FUNDUS_CONFIG_PATH=/ai/configs/base.yaml
       # CPU 추론 속도 (호스트 코어 수에 맞게 조절)
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
       - TORCH_NUM_THREADS=8
-      # CleanVision(Imagelab) 1장도 매우 느림 — 로컬/개발에서만 1 권장. 운영 품질 검사 필요 시 0 또는 제거
-      - SKIP_CLEANVISION=0
+
+      # QuickQual 설정
+      - QUICKQUAL_SVM_FILENAME=quickqual_dn121_512.pkl
+      - QUICKQUAL_BAD_THRESHOLD=0.7
+      - REJECT_BAD_QUALITY=false   # true로 바꾸면 bad 이미지 422로 거부
     restart: always
 
   frontend:
@@ -43,3 +60,6 @@ services:
 networks:
   default:
     name: eye-project-network
+
+volumes:
+  backend-cache:

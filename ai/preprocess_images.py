@@ -1,10 +1,7 @@
 """Offline preprocessing script.
 
-Applies Ben Graham + Circular Crop + resize (data.preprocess_size) to every
-image in the manifest and saves the results to data/processed/images/ as PNG.
-Training then loads these pre-processed images with use_preprocessing: false.
-Inference applies the same FundusPreprocess(output_size=preprocess_size) live,
-ensuring train/infer parity.
+Applies Circular Crop + Ben Graham normalization + resize (data.preprocess_size)
+to every image in the manifest. No quality filtering — all images are included.
 
 Run:
     python preprocess_images.py [--config configs/base.yaml] [--workers N]
@@ -37,7 +34,7 @@ def _process_one(args: tuple[str, Path, Path]) -> tuple[str, bool, str]:
         return image_path_rel, True, "skipped"
     try:
         with Image.open(src) as img:
-            processed = _preprocessor(img)
+            processed = _preprocessor(img.convert("RGB"))
         dst.parent.mkdir(parents=True, exist_ok=True)
         processed.save(dst, format="PNG", optimize=False)
         return image_path_rel, True, "ok"
@@ -47,6 +44,7 @@ def _process_one(args: tuple[str, Path, Path]) -> tuple[str, bool, str]:
 
 def main() -> None:
     global _preprocessor
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/base.yaml", help="Path to YAML config.")
     parser.add_argument("--workers", type=int, default=1, help="Parallel workers (default 1 for Windows).")
@@ -54,10 +52,16 @@ def main() -> None:
 
     config_path = Path(args.config).resolve()
     base_path = config_path.parent / "base.yaml"
-    config = load_app_config(config_path, base_path=base_path if config_path.name != "base.yaml" and base_path.exists() else None)
+    config = load_app_config(
+        config_path,
+        base_path=base_path if config_path.name != "base.yaml" and base_path.exists() else None,
+    )
+
     preprocess_size = int(config["data"].get("preprocess_size", 0)) or None
-    _preprocessor = FundusPreprocess(output_size=preprocess_size)
-    print(f"Preprocessor: Ben Graham + Circular Crop, output_size={preprocess_size}")
+    use_align = bool(config["data"].get("use_align", False))
+    _preprocessor = FundusPreprocess(output_size=preprocess_size, align=use_align)
+
+    print(f"Preprocessor: Circular Crop + Ben Graham, output_size={preprocess_size}, align={use_align}")
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -97,14 +101,13 @@ def main() -> None:
             print(f"  {e}")
         sys.exit(1)
 
-    # Update manifest to point to processed images
     updated = frame.copy()
     updated["image_path"] = updated["image_path"].apply(
         lambda p: "processed/images/" + Path(p).with_suffix(".png").as_posix()
     )
     out_manifest = MANIFEST_PATH.parent / "manifest_preprocessed.csv"
     updated.to_csv(out_manifest, index=False)
-    print(f"\nUpdated manifest: {out_manifest}")
+    print(f"\nUpdated manifest: {out_manifest} ({len(updated)} rows)")
     print("Set data.manifest_path: data/processed/manifest_preprocessed.csv in base.yaml to use it.")
 
 

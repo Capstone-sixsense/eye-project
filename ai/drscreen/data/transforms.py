@@ -36,19 +36,84 @@ class FundusPreprocess:
         ben_graham_weight: float = 4.0,
         ben_graham_offset: float = 128.0,
         output_size: int | None = None,
+        align: bool = False,
+        align_decentering_limit: float = 0.35,
     ) -> None:
         self._crop_tol = crop_tol
         self._weight = ben_graham_weight
         self._offset = ben_graham_offset
         self._output_size = output_size
+        self._align = align
+        self._decentering_limit = align_decentering_limit
 
     def __call__(self, img: PILImage.Image) -> PILImage.Image:
         arr = np.asarray(img.convert("RGB")).copy()
+        if self._align:
+            arr = self._correct_alignment(arr)
         arr = self._circular_crop(arr)
         arr = self._ben_graham(arr)
         result = PILImage.fromarray(arr)
         if self._output_size is not None:
             result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
+        return result
+
+    def preprocess_for_display(self, img: PILImage.Image) -> PILImage.Image:
+        arr = np.asarray(img.convert("RGB")).copy()
+        if self._align:
+            arr = self._correct_alignment(arr)
+        arr = self._circular_crop(arr)
+        result = PILImage.fromarray(arr)
+        if self._output_size is not None:
+            result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
+        return result
+
+    def _correct_alignment(self, image: np.ndarray) -> np.ndarray:
+        """Translate the fundus disk centroid to the image center.
+
+        If the disk centroid is more than ``align_decentering_limit`` of the
+        shorter image dimension from the frame center, alignment is skipped —
+        the image is too severely decentered for reliable geometric correction
+        and will be handled by the quality assessor downstream.
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        _, mask = cv2.threshold(gray, self._crop_tol, 255, cv2.THRESH_BINARY)
+
+        ksize = max(5, min(image.shape[:2]) // 30) | 1  # adaptive, always odd
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return image
+
+        largest = max(contours, key=cv2.contourArea)
+        h, w = image.shape[:2]
+        img_cx, img_cy = w / 2.0, h / 2.0
+
+        moments = cv2.moments(largest)
+        if moments["m00"] == 0:
+            return image
+        disk_cx = moments["m10"] / moments["m00"]
+        disk_cy = moments["m01"] / moments["m00"]
+
+        # Skip if disk is too far off-center for reliable correction
+        if np.hypot(disk_cx - img_cx, disk_cy - img_cy) > min(h, w) * self._decentering_limit:
+            return image
+
+        result = image.copy()
+
+        # Center correction via translation
+        dx, dy = img_cx - disk_cx, img_cy - disk_cy
+        if abs(dx) > 3 or abs(dy) > 3:
+            M = np.float32([[1, 0, dx], [0, 1, dy]])
+            result = cv2.warpAffine(
+                result, M, (w, h),
+                flags=cv2.INTER_LANCZOS4,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=(0, 0, 0),
+            )
+
         return result
 
     def _get_circle_mask(self, h: int, w: int) -> np.ndarray:
@@ -63,13 +128,33 @@ class FundusPreprocess:
         coords = cv2.findNonZero(mask)
         if coords is None:
             return image
+
+        M = cv2.moments(mask)
+        if M["m00"] > 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+        else:
+            x, y, w, h = cv2.boundingRect(coords)
+            cx, cy = x + w // 2, y + h // 2
+
         x, y, w, h = cv2.boundingRect(coords)
-        cropped = image[y : y + h, x : x + w]
-        side = max(w, h)
-        pad_top = (side - h) // 2
-        pad_bottom = side - h - pad_top
-        pad_left = (side - w) // 2
-        pad_right = side - w - pad_left
+        radius = min(w, h) // 2
+
+        h_img, w_img = image.shape[:2]
+        cx = int(np.clip(cx, radius, w_img - radius))
+        cy = int(np.clip(cy, radius, h_img - radius))
+        x1 = cx - radius
+        y1 = cy - radius
+        x2 = cx + radius
+        y2 = cy + radius
+        cropped = image[y1:y2, x1:x2]
+
+        ch, cw = cropped.shape[:2]
+        side = max(ch, cw)
+        pad_top = (side - ch) // 2
+        pad_bottom = side - ch - pad_top
+        pad_left = (side - cw) // 2
+        pad_right = side - cw - pad_left
         return cv2.copyMakeBorder(
             cropped, pad_top, pad_bottom, pad_left, pad_right,
             cv2.BORDER_CONSTANT, value=(0, 0, 0),

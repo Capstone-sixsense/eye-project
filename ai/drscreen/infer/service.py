@@ -17,7 +17,6 @@ from drscreen.data.transforms import FundusPreprocess, build_eval_transform
 from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
-from drscreen.quality.quickqual import QuickQualAssessor
 from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
@@ -71,7 +70,9 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest_label).astype(np.float32)
 
 
-def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.Image:
+def _render_gradcam_overlay(
+    image: Image.Image, heatmap: torch.Tensor
+) -> tuple[Image.Image, bool]:
     normalized = heatmap.detach().cpu().clamp(0.0, 1.0).numpy().astype(np.float32)
     retina_mask = _build_retina_mask(image)
     resized = cv2.resize(
@@ -86,6 +87,13 @@ def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.
     emphasized = np.clip((resized - threshold) / (1.0 - threshold), 0.0, 1.0)
     emphasized = np.power(emphasized, 0.8, dtype=np.float32)
 
+    retina_pixel_count = float(retina_mask.sum())
+    if retina_pixel_count > 0:
+        active_ratio = float((emphasized > 0).sum()) / retina_pixel_count
+    else:
+        active_ratio = 0.0
+    xai_no_region = active_ratio < 0.01
+
     heat_uint8 = np.uint8(np.clip(resized, 0.0, 1.0) * 255.0)
     heat_bgr = cv2.applyColorMap(heat_uint8, cv2.COLORMAP_TURBO)
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
@@ -93,7 +101,7 @@ def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.
     original = np.asarray(image.convert("RGB"), dtype=np.float32)
     alpha_mask = emphasized[..., None] * 0.82
     overlay = (original * (1.0 - alpha_mask)) + (heat_rgb * alpha_mask)
-    return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0)))
+    return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
 
 @dataclass(slots=True)
@@ -123,7 +131,6 @@ class InferenceSession:
     label_names: tuple[str, ...]
     prediction_dir: Path
     heatmap_dir: Path
-    quality_assessor: QuickQualAssessor | None
     preprocessor: FundusPreprocess | None
 
     @classmethod
@@ -176,8 +183,8 @@ class InferenceSession:
             use_preprocessing=False,
         )
         preprocess_size = int(data_cfg.get("preprocess_size", 0)) or None
-        preprocessor = FundusPreprocess(output_size=preprocess_size) if use_preprocessing else None
-        quality_assessor = QuickQualAssessor.from_config(effective_config, project_root, device)
+        use_align = bool(infer_cfg.get("use_align", data_cfg.get("use_align", False)))
+        preprocessor = FundusPreprocess(output_size=preprocess_size, align=use_align) if use_preprocessing else None
         prediction_dir = resolve_project_path(project_root, effective_config["infer"]["prediction_dir"])
         heatmap_dir = resolve_project_path(project_root, effective_config["infer"]["heatmap_dir"])
         prediction_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +201,6 @@ class InferenceSession:
             label_names=tuple(effective_config["labels"]["names"]),
             prediction_dir=prediction_dir,
             heatmap_dir=heatmap_dir,
-            quality_assessor=quality_assessor,
             preprocessor=preprocessor,
         )
 
@@ -236,30 +242,26 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         original_image = image.convert("RGB")
-        raw_image = np.asarray(original_image)
+        display_image = original_image
         if self.preprocessor is not None:
+            display_image = self.preprocessor.preprocess_for_display(original_image)
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
-        quality_cfg = self.config["quality"]
         infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
-            raw_image=raw_image,
             label_names=self.label_names,
-            blur_threshold=float(quality_cfg["blur_score_min"]),
-            brightness_threshold=float(quality_cfg["brightness_mean_min"]),
-            low_quality_action=str(quality_cfg["action_on_low_quality"]),
-            quality_assessor=self.quality_assessor,
             threshold=float(infer_cfg.get("threshold", 0.5)),
         )
 
         heatmap_overlay = None
         xai_error_code = None
+        xai_no_region = False
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
-            heatmap_overlay = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+            heatmap_overlay, xai_no_region = _render_gradcam_overlay(display_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
             xai_error_code = "XAI_001"
@@ -277,6 +279,7 @@ class InferenceSession:
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
         payload["xai_error_code"] = xai_error_code
+        payload["xai_no_region"] = xai_no_region
 
         return SingleImagePrediction(
             result=result,

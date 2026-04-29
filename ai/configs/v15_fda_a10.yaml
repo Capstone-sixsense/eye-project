@@ -1,0 +1,23 @@
+project:
+  version: v15_fda_a10
+
+data:
+  train_exclude_domains: []
+  use_fda: true
+  fda_alpha: 0.10
+
+model:
+  use_mixstyle: false
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  pretrained_backbone_path: artifacts/checkpoints/v7_messidor_train/best.pt
+
+infer:
+  checkpoint_path: artifacts/checkpoints/v15_fda_a10/best.pt
+  threshold: 0.5
