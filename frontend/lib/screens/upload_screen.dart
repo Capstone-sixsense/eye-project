@@ -5,12 +5,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../api/eye_api_client.dart';
-import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
 import '../state/analysis_history_store.dart';
+import '../ui/medical_ui.dart';
 
 class UploadScreen extends StatefulWidget {
   const UploadScreen({super.key});
@@ -160,7 +160,7 @@ class _UploadScreenState extends State<UploadScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '요청 실패: $e\n(API: ${ApiConfig.baseUrl} — 브라우저 주소창과 백엔드 포트를 확인하세요)',
+            '요청 실패: $e\n브라우저 주소창과 백엔드 포트를 확인하세요.',
           ),
           duration: const Duration(seconds: 6),
         ),
@@ -182,51 +182,110 @@ class _UploadScreenState extends State<UploadScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final contentMaxWidth = width > 680 ? 640.0 : 520.0;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Upload Retinal Image')),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'API: ${ApiConfig.baseUrl}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
+      appBar: AppBar(title: const Text('망막 이미지 분석')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(MedicalTokens.spaceMd),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentMaxWidth),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const MedicalSectionTitle(
+                    '이미지 업로드',
+                    subtitle: '선명한 안저 이미지를 선택한 뒤 분석을 진행하세요.',
                   ),
-            ),
-            const SizedBox(height: 8),
-            if (fileBytes != null)
-              Text(
-                '선택된 파일: ${_kb(fileBytes!.length)} KB',
-                style: Theme.of(context).textTheme.bodySmall,
+                  const SizedBox(height: MedicalTokens.spaceMd),
+                  MedicalCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.cloud_upload_outlined,
+                              color: MedicalTokens.primary,
+                            ),
+                            const SizedBox(width: MedicalTokens.spaceXs),
+                            Expanded(
+                              child: Text(
+                                fileName ?? '선택된 이미지가 없습니다',
+                                style: Theme.of(context).textTheme.titleSmall,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (fileBytes != null)
+                              MedicalBadge(text: '${_kb(fileBytes!.length)} KB'),
+                          ],
+                        ),
+                        const SizedBox(height: MedicalTokens.spaceMd),
+                        _UploadPreview(fileBytes: fileBytes),
+                        const SizedBox(height: MedicalTokens.spaceMd),
+                        MedicalSecondaryButton(
+                          label: '이미지 선택',
+                          onPressed: _uploading ? null : pickFile,
+                        ),
+                        const SizedBox(height: MedicalTokens.spaceSm),
+                        MedicalPrimaryButton(
+                          label: _uploading ? '분석 진행 중...' : '업로드 및 분석',
+                          onPressed: (fileBytes == null || _uploading)
+                              ? null
+                              : _uploadAndAnalyze,
+                          leading: _uploading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.analytics_outlined, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            const SizedBox(height: 8),
-            fileName != null
-                ? Text('Selected: $fileName')
-                : const Text('No image selected'),
-            const SizedBox(height: 20),
-            if (fileBytes != null)
-              Image.memory(fileBytes!, width: 250, height: 250, fit: BoxFit.contain),
-
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _uploading ? null : pickFile,
-              child: const Text('Select Image'),
             ),
-
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: (fileBytes == null || _uploading) ? null : _uploadAndAnalyze,
-              child: _uploading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Upload'),
-            ),
-          ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _UploadPreview extends StatelessWidget {
+  const _UploadPreview({required this.fileBytes});
+
+  final Uint8List? fileBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: MedicalTokens.primarySoft.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+        border: Border.all(color: MedicalTokens.border),
+      ),
+      child: AspectRatio(
+        aspectRatio: 1.25,
+        child: fileBytes != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+                child: Image.memory(fileBytes!, fit: BoxFit.contain),
+              )
+            : const Center(
+                child: Text(
+                  '이미지를 선택하면 미리보기가 표시됩니다.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
       ),
     );
   }
