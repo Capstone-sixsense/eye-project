@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _session = None
         _session_error = str(exc)
-        
+
     #QuickQual 모델
     try:
         svm_filename = os.environ.get(
@@ -253,13 +253,7 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
         ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
         prob = pred.payload.get("abnormal_probability", 0.0)
-        metrics = {
-            "accuracy": prob,
-            "precision": prob,
-            "recall": prob,
-            "specificity": 1.0 - prob,
-            "f1": prob,
-        }
+        metrics = pred.payload.get("eval_metrics") or {}
         report_path = create_medical_report_image(
             ai_image=ai_image,
             record_id=record_id,

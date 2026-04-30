@@ -57,17 +57,6 @@ class FundusPreprocess:
             result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
         return result
 
-    def preprocess_for_display(self, img: PILImage.Image) -> PILImage.Image:
-        arr = np.asarray(img.convert("RGB")).copy()
-        if self._align:
-            arr = self._correct_alignment(arr)
-        arr = self._circular_crop(arr)
-        result = PILImage.fromarray(arr)
-        if self._output_size is not None:
-            result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
-        return result
-
-
     def _correct_alignment(self, image: np.ndarray) -> np.ndarray:
         """Translate the fundus disk centroid to the image center.
 

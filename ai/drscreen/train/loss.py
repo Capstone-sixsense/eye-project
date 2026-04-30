@@ -42,3 +42,31 @@ class BinaryFocalLoss(nn.Module):
             focal_weight = alpha_t * focal_weight
 
         return (focal_weight * bce).mean()
+
+
+class CoralLoss(nn.Module):
+    """Deep CORAL: Correlation Alignment (Sun & Saenko, 2016, arXiv:1607.01719).
+
+    Minimises the squared Frobenius-norm difference between the unbiased sample
+    covariance matrices of two domain feature sets.  Applied on pooled
+    pre-classifier features so it acts directly on the representation space.
+
+    L_CORAL = (1 / 4d²) * ||C_source − C_target||²_F
+
+    Args:
+        n < 2 per domain: returns zero loss (no covariance defined).
+    """
+
+    @staticmethod
+    def _covariance(x: torch.Tensor) -> torch.Tensor:
+        n, d = x.shape
+        if n < 2:
+            return x.new_zeros(d, d)
+        xc = x - x.mean(0, keepdim=True)
+        return (xc.T @ xc) / (n - 1)
+
+    def forward(self, source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        d = source.size(1)
+        cs = self._covariance(source.float())
+        ct = self._covariance(target.float())
+        return torch.norm(cs - ct, p="fro") ** 2 / (4 * d * d)
