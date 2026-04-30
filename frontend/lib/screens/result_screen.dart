@@ -32,9 +32,26 @@ class ResultScreen extends StatelessWidget {
         (explanationPath != null && explanationPath.isNotEmpty)
             ? ApiConfig.resolveAssetUrl(explanationPath)
             : null;
-
     return Scaffold(
-      appBar: AppBar(title: const Text('분석 결과')),
+      appBar: AppBar(
+        centerTitle: true,
+        title: IconButton(
+          onPressed: () {
+            _showZoomViewer(
+              context,
+              original: original,
+              explanationAbsoluteUrl: explanationAbsoluteUrl,
+            );
+          },
+          style: IconButton.styleFrom(
+            foregroundColor: Colors.black,
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: Colors.black12),
+          ),
+          icon: const _MagnifierGlyph(size: 22),
+          tooltip: '이미지 확대 보기',
+        ),
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -196,6 +213,109 @@ class ResultScreen extends StatelessWidget {
   }
 }
 
+void _showZoomViewer(
+  BuildContext context, {
+  required Uint8List? original,
+  required String? explanationAbsoluteUrl,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return Dialog.fullscreen(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: MedicalTokens.spaceSm,
+                  vertical: 6,
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      '이미지 확대 보기',
+                      style: Theme.of(dialogContext).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close),
+                      tooltip: '닫기',
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(MedicalTokens.spaceMd),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth >= 920;
+                      final originalPanel = _ZoomPanel(
+                        title: '원본이미지',
+                        child: original != null
+                            ? Image.memory(original, fit: BoxFit.contain)
+                            : const Center(child: Text('이미지가 없습니다')),
+                      );
+                      final explanationPanel = _ZoomPanel(
+                        title: '설명이미지',
+                        child: (explanationAbsoluteUrl != null &&
+                                explanationAbsoluteUrl.isNotEmpty)
+                            ? Image.network(
+                                explanationAbsoluteUrl,
+                                fit: BoxFit.contain,
+                                loadingBuilder: (context, child, progress) {
+                                  if (progress == null) return child;
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Text(
+                                      '이미지를 불러올 수 없습니다.\n(CORS 또는 URL 확인)',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : const Center(child: Text('응답에 설명 이미지 URL이 없습니다.')),
+                      );
+
+                      if (isWide) {
+                        return Row(
+                          children: [
+                            Expanded(child: originalPanel),
+                            const SizedBox(width: MedicalTokens.spaceMd),
+                            Expanded(child: explanationPanel),
+                          ],
+                        );
+                      }
+
+                      return Column(
+                        children: [
+                          Expanded(child: originalPanel),
+                          const SizedBox(height: MedicalTokens.spaceMd),
+                          Expanded(child: explanationPanel),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _ImageBox extends StatelessWidget {
   const _ImageBox({required this.child});
 
@@ -214,6 +334,101 @@ class _ImageBox extends StatelessWidget {
             child: child,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ZoomPanel extends StatelessWidget {
+  const _ZoomPanel({
+    required this.title,
+    required this.child,
+  });
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: MedicalCard(
+            padding: EdgeInsets.zero,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(MedicalTokens.radiusLg),
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: Center(child: child),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MagnifierGlyph extends StatelessWidget {
+  const _MagnifierGlyph({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final lensSize = size * 0.62;
+    final handleWidth = size * 0.46;
+    final handleThickness = size * 0.14;
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 1,
+            top: 1,
+            child: Container(
+              width: lensSize,
+              height: lensSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.black,
+                  width: 2.2,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 1,
+            child: Transform.rotate(
+              angle: 0.78,
+              child: Container(
+                width: handleWidth,
+                height: handleThickness,
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
