@@ -13,6 +13,7 @@ services:
       --reload-include "*.py"
       --reload-include "*.yaml"
       --reload-include "*.yml"
+      
       --reload-exclude "storage/*"
       --reload-exclude "results/*"
       --reload-exclude "data/*"
