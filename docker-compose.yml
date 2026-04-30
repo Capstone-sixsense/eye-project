@@ -13,11 +13,10 @@ services:
       --reload-include "*.py"
       --reload-include "*.yaml"
       --reload-include "*.yml"
-
-      --reload-exclude "/app/storage/*"
-      --reload-exclude "/app/results/*"
-      --reload-exclude "/app/data/*"
-      --reload-exclude "/app/.cache/*"
+      --reload-exclude "storage/*"
+      --reload-exclude "results/*"
+      --reload-exclude "data/*"
+      --reload-exclude ".cache/*"
       --reload-exclude "*.log"
     ports:
       - "8000:8000"
