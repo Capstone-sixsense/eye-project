@@ -222,93 +222,73 @@ void _showZoomViewer(
     context: context,
     builder: (dialogContext) {
       return Dialog.fullscreen(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: MedicalTokens.spaceSm,
-                  vertical: 6,
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      '이미지 확대 보기',
-                      style: Theme.of(dialogContext).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            centerTitle: true,
+            title: IconButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              icon: const Icon(Icons.close),
+              tooltip: '닫기',
+            ),
+          ),
+          body: Padding(
+            padding: const EdgeInsets.all(MedicalTokens.spaceMd),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 920;
+                final originalPanel = _ZoomPanel(
+                  title: '원본이미지',
+                  child: original != null
+                      ? Image.memory(original, fit: BoxFit.contain)
+                      : const Center(child: Text('이미지가 없습니다')),
+                );
+                final explanationPanel = _ZoomPanel(
+                  title: '결과 이미지',
+                  child: (explanationAbsoluteUrl != null &&
+                          explanationAbsoluteUrl.isNotEmpty)
+                      ? Image.network(
+                          explanationAbsoluteUrl,
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                '이미지를 불러올 수 없습니다.\n(CORS 또는 URL 확인)',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
                           ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      icon: const Icon(Icons.close),
-                      tooltip: '닫기',
-                    ),
+                        )
+                      : const Center(child: Text('응답에 결과 이미지 URL이 없습니다.')),
+                );
+
+                if (isWide) {
+                  return Row(
+                    children: [
+                      Expanded(child: originalPanel),
+                      const SizedBox(width: MedicalTokens.spaceMd),
+                      Expanded(child: explanationPanel),
+                    ],
+                  );
+                }
+
+                return Column(
+                  children: [
+                    Expanded(child: originalPanel),
+                    const SizedBox(height: MedicalTokens.spaceMd),
+                    Expanded(child: explanationPanel),
                   ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(MedicalTokens.spaceMd),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isWide = constraints.maxWidth >= 920;
-                      final originalPanel = _ZoomPanel(
-                        title: '원본이미지',
-                        child: original != null
-                            ? Image.memory(original, fit: BoxFit.contain)
-                            : const Center(child: Text('이미지가 없습니다')),
-                      );
-                      final explanationPanel = _ZoomPanel(
-                        title: '결과 이미지',
-                        child: (explanationAbsoluteUrl != null &&
-                                explanationAbsoluteUrl.isNotEmpty)
-                            ? Image.network(
-                                explanationAbsoluteUrl,
-                                fit: BoxFit.contain,
-                                loadingBuilder: (context, child, progress) {
-                                  if (progress == null) return child;
-                                  return const Center(
-                                    child: CircularProgressIndicator(),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) =>
-                                    const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(16),
-                                    child: Text(
-                                      '이미지를 불러올 수 없습니다.\n(CORS 또는 URL 확인)',
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : const Center(child: Text('응답에 결과 이미지 URL이 없습니다.')),
-                      );
-
-                      if (isWide) {
-                        return Row(
-                          children: [
-                            Expanded(child: originalPanel),
-                            const SizedBox(width: MedicalTokens.spaceMd),
-                            Expanded(child: explanationPanel),
-                          ],
-                        );
-                      }
-
-                      return Column(
-                        children: [
-                          Expanded(child: originalPanel),
-                          const SizedBox(height: MedicalTokens.spaceMd),
-                          Expanded(child: explanationPanel),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
+                );
+              },
+            ),
           ),
         ),
       );
