@@ -48,6 +48,7 @@ class ManifestDataset(Dataset):
             "label": int(row["label"]),
             "image_path": str(image_path),
             "split": str(row["split"]),
+            "domain": str(row["domain"]) if "domain" in self.frame.columns else "",
         }
 
 
@@ -143,4 +144,5 @@ class FDAManifestDataset(ManifestDataset):
             "label": int(row["label"]),
             "image_path": str(self.image_root / str(row["image_path"])),
             "split": str(row["split"]),
+            "domain": str(row["domain"]) if "domain" in self.frame.columns else "",
         }

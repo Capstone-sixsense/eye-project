@@ -474,6 +474,14 @@ def run_training(
         checkpoint_dir = checkpoint_dir / version
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    use_coral = bool(config["train"].get("use_coral", False))
+    lambda_coral = float(config["train"].get("lambda_coral", 1.0))
+    coral_criterion: torch.nn.Module | None = None
+    if use_coral:
+        from drscreen.train.loss import CoralLoss
+        coral_criterion = CoralLoss().to(device)
+        LOGGER.info("CORAL enabled: lambda=%.4f", lambda_coral)
+
     amp_enabled = bool(config["train"].get("amp", False)) and device.type == "cuda"
     # BF16 has the same exponent range as FP32, so GradScaler is not needed.
     # FP16 still requires scaling to avoid underflow in gradients.
@@ -516,6 +524,8 @@ def run_training(
                     if phase.head_only else None
                 ),
                 amp_enabled=amp_enabled, scaler=scaler, gradient_clip_norm=gradient_clip_norm,
+                coral_criterion=coral_criterion,
+                lambda_coral=lambda_coral,
             )
             val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
             if scheduler is not None:

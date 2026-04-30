@@ -62,6 +62,49 @@ def _unpack_batch(
     return batch["image"].to(device), batch["label"].float().to(device).view(-1, 1)
 
 
+def _has_timm_feature_api(model: torch.nn.Module) -> bool:
+    return (
+        hasattr(model, "forward_features")
+        and hasattr(model, "forward_head")
+        and hasattr(model, "classifier")
+    )
+
+
+def _forward_with_features(
+    model: torch.nn.Module, images: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return (pooled_features, logits) using timm's split forward API."""
+    feat_map = model.forward_features(images)
+    pooled = model.forward_head(feat_map, pre_logits=True)
+    logits = model.classifier(pooled)
+    return pooled, logits
+
+
+def _compute_coral_loss(
+    coral_criterion: torch.nn.Module,
+    pooled: torch.Tensor,
+    domains: list[str],
+) -> torch.Tensor:
+    domain_to_indices: dict[str, list[int]] = {}
+    for i, d in enumerate(domains):
+        domain_to_indices.setdefault(d, []).append(i)
+
+    unique_domains = list(domain_to_indices.keys())
+    if len(unique_domains) < 2:
+        return pooled.new_tensor(0.0)
+
+    losses: list[torch.Tensor] = []
+    for i in range(len(unique_domains)):
+        for j in range(i + 1, len(unique_domains)):
+            idx1 = torch.tensor(domain_to_indices[unique_domains[i]], device=pooled.device)
+            idx2 = torch.tensor(domain_to_indices[unique_domains[j]], device=pooled.device)
+            f1, f2 = pooled[idx1], pooled[idx2]
+            if f1.size(0) >= 2 and f2.size(0) >= 2:
+                losses.append(coral_criterion(f1, f2))
+
+    return torch.stack(losses).mean() if losses else pooled.new_tensor(0.0)
+
+
 def _amp_dtype(device: torch.device) -> torch.dtype:
     """Return BF16 on Ampere/Blackwell (SM >= 8.0) where BF16 is hardware-supported
     and avoids FP16 overflow. Fall back to FP16 for older GPUs."""
@@ -107,10 +150,14 @@ def train_one_epoch(
     amp_enabled: bool = False,
     scaler: torch.amp.GradScaler | None = None,
     gradient_clip_norm: float | None = None,
+    coral_criterion: torch.nn.Module | None = None,
+    lambda_coral: float = 0.0,
 ) -> EpochMetrics:
     model.train()
     if model_train_setup is not None:
         model_train_setup(model)
+
+    use_coral = coral_criterion is not None and lambda_coral > 0.0 and _has_timm_feature_api(model)
     total_loss = 0.0
     total_examples = 0
     all_logits: list[torch.Tensor] = []
@@ -118,12 +165,19 @@ def train_one_epoch(
 
     for batch in loader:
         images, targets = _unpack_batch(batch, device)
+        domains: list[str] | None = batch.get("domain") if use_coral else None
 
         optimizer.zero_grad(set_to_none=True)
 
         with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
-            logits = model(images)
-            loss = criterion(logits, targets)
+            if use_coral and domains is not None:
+                pooled, logits = _forward_with_features(model, images)
+                cls_loss = criterion(logits, targets)
+                coral_loss = _compute_coral_loss(coral_criterion, pooled, domains)
+                loss = cls_loss + lambda_coral * coral_loss
+            else:
+                logits = model(images)
+                loss = criterion(logits, targets)
 
         if scaler is not None and scaler.is_enabled():
             scaler.scale(loss).backward()

@@ -132,6 +132,7 @@ class InferenceSession:
     prediction_dir: Path
     heatmap_dir: Path
     preprocessor: FundusPreprocess | None
+    eval_metrics: dict | None
 
     @classmethod
     def from_config_path(
@@ -190,6 +191,26 @@ class InferenceSession:
         prediction_dir.mkdir(parents=True, exist_ok=True)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
 
+        version = str(effective_config.get("project", {}).get("version", ""))
+        eval_metrics_path = project_root / "artifacts" / "evaluations" / f"external_test_{version}_best_metrics.json"
+        eval_metrics = None
+        if eval_metrics_path.exists():
+            try:
+                with open(eval_metrics_path, encoding="utf-8") as _f:
+                    _data = json.load(_f)
+                _opt = _data.get("metrics_at_optimal_threshold", {})
+                eval_metrics = {
+                    "auroc": _data.get("metrics", {}).get("auroc"),
+                    "accuracy": _opt.get("accuracy"),
+                    "sensitivity": _opt.get("sensitivity"),
+                    "specificity": _opt.get("specificity"),
+                    "precision": _opt.get("precision"),
+                    "f1": _opt.get("f1"),
+                    "optimal_threshold": _data.get("optimal_threshold"),
+                }
+            except Exception:
+                eval_metrics = None
+
         return cls(
             config_path=resolved_config_path,
             project_root=project_root,
@@ -202,6 +223,7 @@ class InferenceSession:
             prediction_dir=prediction_dir,
             heatmap_dir=heatmap_dir,
             preprocessor=preprocessor,
+            eval_metrics=eval_metrics,
         )
 
     def predict_image_path(
@@ -242,9 +264,7 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         original_image = image.convert("RGB")
-        display_image = original_image
         if self.preprocessor is not None:
-            display_image = self.preprocessor.preprocess_for_display(original_image)
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
@@ -261,7 +281,7 @@ class InferenceSession:
         xai_no_region = False
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
-            heatmap_overlay, xai_no_region = _render_gradcam_overlay(display_image, gradcam.heatmap[0])
+            heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
             xai_error_code = "XAI_001"
@@ -275,11 +295,17 @@ class InferenceSession:
             )
 
         payload = result.to_dict()
+        payload["should_block"] = False
+        payload["quality_warning"] = None
+        payload["quality"] = None
+        payload["quality_grade"] = None
+        payload["quality_grade_confidence"] = None
         payload["checkpoint_path"] = str(self.checkpoint_path)
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
         payload["xai_error_code"] = xai_error_code
         payload["xai_no_region"] = xai_no_region
+        payload["eval_metrics"] = self.eval_metrics
 
         return SingleImagePrediction(
             result=result,
