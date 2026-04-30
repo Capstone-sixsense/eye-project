@@ -115,3 +115,7 @@ docker compose up -d
 1. git clone을 통해서 setup.sh 실행
 2. docker hub를 이용 → 폴더 생성 후 docker-compose.yml 파일을 위치시킨 후 `docker compose up -d` 명령어 입력
 
+
+##테스트시 result 폴더 비우기
+rm -rf backend/storage/raw_* backend/results/2026-*
+

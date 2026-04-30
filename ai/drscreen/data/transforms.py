@@ -57,6 +57,17 @@ class FundusPreprocess:
             result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
         return result
 
+    def preprocess_for_display(self, img: PILImage.Image) -> PILImage.Image:
+        arr = np.asarray(img.convert("RGB")).copy()
+        if self._align:
+            arr = self._correct_alignment(arr)
+        arr = self._circular_crop(arr)
+        result = PILImage.fromarray(arr)
+        if self._output_size is not None:
+            result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
+        return result
+
+
     def _correct_alignment(self, image: np.ndarray) -> np.ndarray:
         """Translate the fundus disk centroid to the image center.
 
@@ -128,13 +139,15 @@ class FundusPreprocess:
             cx, cy = x + w // 2, y + h // 2
 
         x, y, w, h = cv2.boundingRect(coords)
-        radius = max(w, h) // 2
+        radius = min(w, h) // 2
 
         h_img, w_img = image.shape[:2]
-        x1 = max(0, cx - radius)
-        y1 = max(0, cy - radius)
-        x2 = min(w_img, cx + radius)
-        y2 = min(h_img, cy + radius)
+        cx = int(np.clip(cx, radius, w_img - radius))
+        cy = int(np.clip(cy, radius, h_img - radius))
+        x1 = cx - radius
+        y1 = cy - radius
+        x2 = cx + radius
+        y2 = cy + radius
         cropped = image[y1:y2, x1:x2]
 
         ch, cw = cropped.shape[:2]

@@ -1,8 +1,0 @@
-project:
-  version: v4b
-
-train:
-  pretrained_backbone_path: artifacts/ssl_ablation/backbone_best.pt
-
-infer:
-  checkpoint_path: artifacts/checkpoints/v4b/best.pt

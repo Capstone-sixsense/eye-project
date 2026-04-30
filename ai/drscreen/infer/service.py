@@ -70,7 +70,9 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest_label).astype(np.float32)
 
 
-def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.Image:
+def _render_gradcam_overlay(
+    image: Image.Image, heatmap: torch.Tensor
+) -> tuple[Image.Image, bool]:
     normalized = heatmap.detach().cpu().clamp(0.0, 1.0).numpy().astype(np.float32)
     retina_mask = _build_retina_mask(image)
     resized = cv2.resize(
@@ -85,6 +87,13 @@ def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.
     emphasized = np.clip((resized - threshold) / (1.0 - threshold), 0.0, 1.0)
     emphasized = np.power(emphasized, 0.8, dtype=np.float32)
 
+    retina_pixel_count = float(retina_mask.sum())
+    if retina_pixel_count > 0:
+        active_ratio = float((emphasized > 0).sum()) / retina_pixel_count
+    else:
+        active_ratio = 0.0
+    xai_no_region = active_ratio < 0.01
+
     heat_uint8 = np.uint8(np.clip(resized, 0.0, 1.0) * 255.0)
     heat_bgr = cv2.applyColorMap(heat_uint8, cv2.COLORMAP_TURBO)
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
@@ -92,7 +101,7 @@ def _render_gradcam_overlay(image: Image.Image, heatmap: torch.Tensor) -> Image.
     original = np.asarray(image.convert("RGB"), dtype=np.float32)
     alpha_mask = emphasized[..., None] * 0.82
     overlay = (original * (1.0 - alpha_mask)) + (heat_rgb * alpha_mask)
-    return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0)))
+    return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
 
 @dataclass(slots=True)
@@ -233,7 +242,9 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         original_image = image.convert("RGB")
+        display_image = original_image
         if self.preprocessor is not None:
+            display_image = self.preprocessor.preprocess_for_display(original_image)
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
@@ -247,9 +258,10 @@ class InferenceSession:
 
         heatmap_overlay = None
         xai_error_code = None
+        xai_no_region = False
         try:
             gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
-            heatmap_overlay = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+            heatmap_overlay, xai_no_region = _render_gradcam_overlay(display_image, gradcam.heatmap[0])
         except Exception:
             heatmap_overlay = None
             xai_error_code = "XAI_001"
@@ -272,6 +284,7 @@ class InferenceSession:
         payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
         payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
         payload["xai_error_code"] = xai_error_code
+        payload["xai_no_region"] = xai_no_region
 
         return SingleImagePrediction(
             result=result,

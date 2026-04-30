@@ -17,8 +17,12 @@ RUN apt-get update && apt-get install -y \
 COPY backend_requirements .
 RUN pip install --no-cache-dir -r backend_requirements
 
+ENV TORCH_HOME=/app/.cache/torch
+ENV HF_HOME=/app/.cache/huggingface
+
 # 디렉토리 구조 미리 생성
-RUN mkdir -p /app/data /app/storage /app/results
+RUN mkdir -p /app/data /app/storage /app/results /app/models \
+             /app/.cache/torch /app/.cache/huggingface
 
 # AI 패키지 경로 등록 (/ai 는 docker-compose 볼륨으로 마운트)
 ENV PYTHONPATH=/ai
@@ -27,4 +31,4 @@ ENV PYTHONPATH=/ai
 COPY . .
 
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

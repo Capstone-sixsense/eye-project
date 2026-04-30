@@ -1,5 +1,8 @@
 # AI docs and agent instructions
 ai/docs/
+!ai/docs/
+ai/docs/*
+!ai/docs/SPRINT2_Devlog.md
 ai/AGENTS.md
 .omc/
 
@@ -28,9 +31,8 @@ ai/artifacts/checkpoints/**
 !ai/artifacts/checkpoints/best.pt
 !ai/artifacts/checkpoints/current_version.txt
 
-# Archived AI artifacts/data: keep only archived code/config files in git
-ai/archive/artifacts/
-ai/archive/data/
+# Archived AI files
+ai/archive/
 
 # Flutter / Dart
 .dart_tool/
