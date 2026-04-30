@@ -39,7 +39,9 @@ frontend/
 │   ├── config/               # API 베이스 URL 등
 │   ├── constants/            # 오류 코드 상수
 │   ├── models/               # 응답·인자 모델
-│   └── screens/              # 화면 위젯
+│   ├── screens/              # 화면 위젯
+│   ├── state/                # 세션 상태 저장소
+│   └── ui/                   # 공통 디자인 토큰/컴포넌트
 ├── test/                     # 위젯 테스트
 ├── pubspec.yaml              # 패키지명·의존성
 ├── analysis_options.yaml     # 분석/린트
@@ -49,21 +51,26 @@ frontend/
 
 ---
 
-## 플러터 단독 실행 방법
+## 실행 방법 (`setup.sh` 권장)
 
 ```bash
-cd frontend   # 이 README가 있는 디렉터리
-flutter pub get
-flutter run
+cd eye-project
+./setup.sh
 ```
 
-백엔드 주소가 기본(`http://127.0.0.1:8000`)과 다르면:
+실행 후 브라우저에서 `http://127.0.0.1:8080`으로 접속합니다.
+
+종료는 실행 환경에 맞게 아래 중 하나를 사용합니다.
 
 ```bash
-flutter run --dart-define=API_BASE_URL=http://호스트:포트
+# 기본 compose
+docker compose down
+
+# Apple Silicon(Mac) 오버라이드 사용 시
+docker compose -f docker-compose.yml -f docker-compose-mac.yml down
 ```
 
-- Windows 등에서 `localhost`가 IPv6만 잡히면 Docker 포트와 어긋날 수 있어, 코드 기본값을 **`127.0.0.1`**로 두었습니다. (`api_config.dart` 주석 참고).
+- 참고: Flutter 단독 실행도 가능하지만, 팀 공통 검증/시연은 `setup.sh` 흐름을 기준으로 합니다.
 
 ---
 
@@ -88,6 +95,7 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 | `package:flutter/material.dart` | `runApp`, `MaterialApp`, `ModalRoute`. |
 | `models/result_screen_args.dart` | `/result`의 주 인자 타입. |
 | `screens/history_screen.dart` 등 | 각 이름 라우트에 대응하는 화면 위젯. |
+| `ui/medical_ui.dart` | 공통 디자인 토큰/컴포넌트를 전역 테마에 적용. |
 
 ---
 
@@ -132,6 +140,15 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 
 ---
 
+### `lib/models/analysis_history_entry.dart`
+
+| 항목 | 설명 |
+|------|------|
+| **역할** | 분석 이력 1건을 표현하는 데이터 모델입니다. |
+| **필드** | `filename`, `originalImageBytes`, `response`, `createdAt`. |
+
+---
+
 ### `lib/api/eye_api_client.dart`
 
 | 항목 | 설명 |
@@ -159,7 +176,7 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 | **예외** | `TimeoutException` → 스낵바. `EyeApiException` → 입력 채널 오류면 다이얼로그, 아니면 상태코드+본문 스낵바. 기타 → 스낵바에 예외와 `ApiConfig.baseUrl` 힌트. |
 | **`finally`** | root `Navigator`로 진행 다이얼로그 pop, `_uploading` false. |
 | **`dispose`** | `_api.close()`. |
-| **`build`** | AppBar 제목 `Upload Retinal Image`, 현재 API URL, 파일 크기(KB), 썸네일, Select / Upload 버튼. 업로드 중 버튼 비활성 및 작은 `CircularProgressIndicator`. |
+| **`build`** | 앱바 `망막 이미지 분석`, 카드 기반 업로드 UI, 파일명/용량 배지, 미리보기, `이미지 선택`/`업로드 및 분석` 버튼 구성. |
 
 ---
 
@@ -167,14 +184,16 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 
 | 항목 | 설명 |
 |------|------|
-| **역할** | 분석 **결과 시각화**: 원본 메모리 이미지, 설명 이미지(네트워크), 판정 카드, 이상 확률·품질 카드, 하단 액션. |
+| **역할** | 분석 **결과 시각화**: 상단 고지문, 원본/설명 이미지, 판정 카드, 리포트 지표, 이상 확률 카드, 하단 액션. |
 | **생성자** | `args` 우선, 없으면 `originalImageBytes`만(구 라우트). |
-| **레이아웃** | `LayoutBuilder`로 **너비 720px 이상**이면 원본·설명을 가로 2열, 그 아래 판정/점수. 좁으면 세로 스택. |
-| **`_ImageBox` / `_kResultImageMaxHeight`** | 원본 타일 최대 높이 280, 테두리·라운드 클립. |
+| **레이아웃** | 상단 고정 고지문 아래에 원본/설명 이미지를 먼저 배치하고, 이후 `분석 요약 → 성능 지표 → 이상 확률` 순서로 정보를 노출합니다. |
+| **`_ImageBox` / `_kResultImageMaxHeight`** | 이미지 타일 최대 높이 300, 공통 카드 스타일로 높이/외곽을 통일. |
 | **`_JudgmentCard`** | 응답 없음/실패/전처리 미통과 시 안내 문구, 성공·추론 표시 가능 시 `label` 크게 표시. |
-| **`_ScoreQualityCard`** | 이상 확률 %, 품질 등급·신뢰도·acceptable·warning. 품질 블록 없으면 legacy API 안내. |
+| **`_ReportMetricsCard`** | `Accuracy`, `Precision`, `Sensitivity`, `Specificity`, `F1-score`를 배지 형태로 표시합니다. |
+| **`_ProbabilityCard`** | 백엔드 `abnormal_probability`를 이상 확률 배지로 표시합니다. |
 | **`_ExplanationPanel`** | `shouldShowExplanationFailure`면 실패 문구+`xaiErrorCode`(없으면 `XAI_001`). URL 있으면 `Image.network`+로딩·에러(CORS 등) 처리. 없으면 placeholder 카드. |
-| **`_InfoCard`** | 공통 카드 스타일(테두리·연한 배경·패딩). |
+| **`_MedicalDisclaimerBanner`** | "본 결과는 의료적 확정 진단이 아닌 보조 판별 결과입니다." 고정 안내 배너를 표시합니다. |
+| **`_InfoCard`** | 공통 카드 래퍼(`MedicalCard`). |
 | **하단 버튼** | `다시 업로드` — `/upload`까지 스택 제거. `이력 보기` — `/history` push. |
 
 ---
@@ -183,8 +202,17 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 
 | 항목 | 설명 |
 |------|------|
-| **역할** | **분석 이력** 화면 자리만 잡은 **플레이스홀더**. |
-| **현재 동작** | 중앙에 “분석 이력은 추후 연동 예정입니다.” 문구만 표시. 백엔드·로컬 스토리지 연동은 이후 작업으로 가정. |
+| **역할** | 세션 기반 **분석 이력 리스트**를 표시하고 결과 화면으로 재진입합니다. |
+| **현재 동작** | `AnalysisHistoryStore.entries`를 카드 리스트로 렌더링, 상단 휴지통으로 전체 삭제, 항목 탭 시 `/result`로 원본 이미지+응답을 전달합니다. |
+
+---
+
+### `lib/state/analysis_history_store.dart`
+
+| 항목 | 설명 |
+|------|------|
+| **역할** | 세션 메모리 기반 이력 저장소(static)입니다. |
+| **API** | `entries`(읽기 전용), `add`, `clear`. |
 
 ---
 
@@ -193,7 +221,7 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 | 항목 | 설명 |
 |------|------|
 | **역할** | Flutter 기본 **위젯 테스트** — `UploadScreen`이 깨지지 않고 빌드되는지 검증. |
-| **테스트 내용** | `MaterialApp(home: UploadScreen())`을 pump한 뒤 AppBar 제목 문자열 `Upload Retinal Image`가 하나 있는지 `expect`. |
+| **테스트 내용** | `MaterialApp(home: UploadScreen())`을 pump한 뒤 업로드 화면이 정상 렌더링되는지 확인합니다. |
 | **import** | 패키지명은 `pubspec.yaml`의 `name: eye_project`에 맞춰 `package:eye_project/screens/upload_screen.dart` 사용. |
 
 ---
@@ -203,8 +231,8 @@ flutter run --dart-define=API_BASE_URL=http://호스트:포트
 1. 앱 시작 → **`/upload`** (`UploadScreen`).
 2. **Upload**로 분석 성공 → **`ResultScreenArgs`**를 `arguments`에 실어 **`/result`** (`ResultScreen`).
 3. **`/result`**에서 **다시 업로드** → 스택을 비우고 **`/upload`** 로 복귀.
-4. **`/result`**에서 **이력 보기** → **`/history`** (`HistoryScreen`, 현재 플레이스홀더).
-5. **`/upload`**에서 별도 “이력” 진입은 `main.dart` 라우트만 정의되어 있고, 화면 버튼은 결과 화면 쪽에 있음.
+4. **`/result`**에서 **이력 보기** → **`/history`** (`HistoryScreen`, 세션 이력 리스트).
+5. **`/history`**에서 항목 선택 시 해당 응답으로 **`/result`**를 다시 열어 재확인.
 
 ---
 
