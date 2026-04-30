@@ -109,7 +109,7 @@ class ResultScreen extends StatelessWidget {
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
                                       children: [
                                         Text(
-                                          '설명이미지',
+                                          '결과 이미지',
                                           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                                 fontWeight: FontWeight.w700,
                                               ),
@@ -139,7 +139,7 @@ class ResultScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: MedicalTokens.spaceMd),
                               Text(
-                                '설명이미지',
+                                '결과 이미지',
                                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -261,7 +261,7 @@ void _showZoomViewer(
                             : const Center(child: Text('이미지가 없습니다')),
                       );
                       final explanationPanel = _ZoomPanel(
-                        title: '설명이미지',
+                        title: '결과 이미지',
                         child: (explanationAbsoluteUrl != null &&
                                 explanationAbsoluteUrl.isNotEmpty)
                             ? Image.network(
@@ -284,7 +284,7 @@ void _showZoomViewer(
                                   ),
                                 ),
                               )
-                            : const Center(child: Text('응답에 설명 이미지 URL이 없습니다.')),
+                            : const Center(child: Text('응답에 결과 이미지 URL이 없습니다.')),
                       );
 
                       if (isWide) {
@@ -616,7 +616,7 @@ class _ExplanationPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '설명 이미지 생성에 실패했습니다',
+              '결과 이미지 생성에 실패했습니다',
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             const SizedBox(height: 24),
@@ -664,7 +664,7 @@ class _ExplanationPanel extends StatelessWidget {
     }
 
     return const _InfoCard(
-      child: Text('응답에 설명 이미지 URL이 없습니다.'),
+      child: Text('응답에 결과 이미지 URL이 없습니다.'),
     );
   }
 }
