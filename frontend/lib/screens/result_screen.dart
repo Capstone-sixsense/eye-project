@@ -14,6 +14,42 @@ import '../ui/medical_ui.dart';
 
 const double _kResultImageMaxHeight = 300;
 
+String? _originalAssetAbsoluteUrl(AnalyzeResponse? res) {
+  final path = res?.originalUrl;
+  if (path == null || path.isEmpty) return null;
+  return ApiConfig.resolveAssetUrl(path);
+}
+
+Widget _buildOriginalImageFit({
+  required Uint8List? storedBytes,
+  required AnalyzeResponse? response,
+}) {
+  if (storedBytes != null) {
+    return Image.memory(storedBytes, fit: BoxFit.contain);
+  }
+  final u = _originalAssetAbsoluteUrl(response);
+  if (u != null && u.isNotEmpty) {
+    return Image.network(
+      u,
+      fit: BoxFit.contain,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return const Center(child: CircularProgressIndicator());
+      },
+      errorBuilder: (_, __, ___) => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            '원본 이미지를 불러올 수 없습니다.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+  return const Center(child: Text('이미지가 없습니다'));
+}
+
 class ResultScreen extends StatelessWidget {
   const ResultScreen({
     super.key,
@@ -43,7 +79,8 @@ class ResultScreen extends StatelessWidget {
           onPressed: () {
             _showZoomViewer(
               context,
-              original: original,
+              storedBytes: original,
+              response: res,
               explanationAbsoluteUrl: explanationAbsoluteUrl,
             );
           },
@@ -111,9 +148,10 @@ class ResultScreen extends StatelessWidget {
                                         ),
                                         const SizedBox(height: 8),
                                         _ImageBox(
-                                          child: original != null
-                                              ? Image.memory(original, fit: BoxFit.contain)
-                                              : const Center(child: Text('이미지가 없습니다')),
+                                          child: _buildOriginalImageFit(
+                                            storedBytes: original,
+                                            response: res,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -148,9 +186,10 @@ class ResultScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 8),
                               _ImageBox(
-                                child: original != null
-                                    ? Image.memory(original, fit: BoxFit.contain)
-                                    : const Center(child: Text('이미지가 없습니다')),
+                                child: _buildOriginalImageFit(
+                                  storedBytes: original,
+                                  response: res,
+                                ),
                               ),
                               const SizedBox(height: MedicalTokens.spaceMd),
                               Text(
@@ -241,8 +280,15 @@ Future<void> _exportResultPdf(
   );
 
   try {
+    Uint8List? mergedOriginal = original;
+    if (mergedOriginal == null && response != null) {
+      final u = _originalAssetAbsoluteUrl(response);
+      mergedOriginal =
+          u != null && u.isNotEmpty ? await _tryFetchImageBytes(u) : null;
+    }
+
     final bytes = await _buildResultPdf(
-      original: original,
+      original: mergedOriginal,
       response: response,
       explanationAbsoluteUrl: explanationAbsoluteUrl,
     );
@@ -450,7 +496,8 @@ String _buildProbabilityPdf(AnalyzeResponse? response) {
 
 void _showZoomViewer(
   BuildContext context, {
-  required Uint8List? original,
+  required Uint8List? storedBytes,
+  required AnalyzeResponse? response,
   required String? explanationAbsoluteUrl,
 }) {
   showDialog<void>(
@@ -472,12 +519,13 @@ void _showZoomViewer(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth >= 920;
-                final originalPanel = _ZoomPanel(
-                  title: '원본이미지',
-                  child: original != null
-                      ? Image.memory(original, fit: BoxFit.contain)
-                      : const Center(child: Text('이미지가 없습니다')),
-                );
+                      final originalPanel = _ZoomPanel(
+                        title: '원본이미지',
+                        child: _buildOriginalImageFit(
+                          storedBytes: storedBytes,
+                          response: response,
+                        ),
+                      );
                 final explanationPanel = _ZoomPanel(
                   title: '결과 이미지',
                   child: (explanationAbsoluteUrl != null &&
