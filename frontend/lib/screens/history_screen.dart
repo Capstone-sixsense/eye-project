@@ -457,7 +457,9 @@ class _HistoryListView extends StatelessWidget {
         final isAbnormal = subtitle.contains('abnormal');
         final selected = selectedIndices.contains(index);
         final rowContent = InkWell(
-          onTap: () => _openResult(context, item),
+          onTap: selectionMode
+              ? () => onToggleSelection(index)
+              : () => _openResult(context, item),
           borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
           child: Padding(
             padding: EdgeInsets.fromLTRB(
@@ -599,7 +601,9 @@ class _HistoryDashboardView extends StatelessWidget {
 
             final card = InkWell(
               borderRadius: BorderRadius.circular(MedicalTokens.radiusLg),
-              onTap: () => _openResult(context, item),
+              onTap: selectionMode
+                  ? () => onToggleSelection(index)
+                  : () => _openResult(context, item),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.white,
