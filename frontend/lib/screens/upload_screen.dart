@@ -6,10 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../api/eye_api_client.dart';
 import '../constants/api_error_codes.dart';
-import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
-import '../state/analysis_history_store.dart';
 import '../ui/medical_ui.dart';
 
 class UploadScreen extends StatefulWidget {
@@ -112,15 +110,6 @@ class _UploadScreenState extends State<UploadScreen> {
       final AnalyzeResponse res = await _api.analyze(bytes, name);
       if (!mounted) return;
 
-      AnalysisHistoryStore.add(
-        AnalysisHistoryEntry(
-          filename: name,
-          originalImageBytes: bytes,
-          response: res,
-          createdAt: DateTime.now(),
-        ),
-      );
-
       if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
         await _showInputChannelUnsupportedDialog();
         return;
@@ -130,8 +119,8 @@ class _UploadScreenState extends State<UploadScreen> {
         context,
         '/result',
         arguments: ResultScreenArgs(
-          originalImageBytes: bytes,
           analyzeResponse: res,
+          originalImageBytes: bytes,
         ),
       );
     } on TimeoutException catch (e) {
