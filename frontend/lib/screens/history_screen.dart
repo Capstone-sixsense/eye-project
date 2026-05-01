@@ -567,8 +567,6 @@ class _HistoryDashboardView extends StatelessWidget {
   /// 카드 하단 메타 바(이름·날짜) 고정 높이 — 그리드 `childAspectRatio` 계산과 맞춘다.
   static const double _metaBarHeight = 68;
 
-  static const Color _galleryImageBg = Color(0xFFF2F5F9);
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -628,7 +626,7 @@ class _HistoryDashboardView extends StatelessWidget {
                               top: Radius.circular(MedicalTokens.radiusLg - 2),
                             ),
                             child: ColoredBox(
-                              color: _galleryImageBg,
+                              color: Colors.black,
                               child: _HistoryThumbnail(
                                 entry: item,
                                 boxFit: BoxFit.contain,
