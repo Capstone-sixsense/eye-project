@@ -1,6 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
@@ -51,6 +55,17 @@ class ResultScreen extends StatelessWidget {
           icon: const _MagnifierGlyph(size: 22),
           tooltip: '이미지 확대 보기',
         ),
+        actions: [
+          TextButton(
+            onPressed: () => _exportResultPdf(
+              context,
+              original: original,
+              response: res,
+              explanationAbsoluteUrl: explanationAbsoluteUrl,
+            ),
+            child: const Text('내보내기'),
+          ),
+        ],
       ),
       body: SafeArea(
         child: LayoutBuilder(
@@ -211,6 +226,226 @@ class ResultScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _exportResultPdf(
+  BuildContext context, {
+  required Uint8List? original,
+  required AnalyzeResponse? response,
+  required String? explanationAbsoluteUrl,
+}) async {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
+
+  try {
+    final bytes = await _buildResultPdf(
+      original: original,
+      response: response,
+      explanationAbsoluteUrl: explanationAbsoluteUrl,
+    );
+
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    final now = DateTime.now();
+    final filename =
+        'result_report_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}.pdf';
+
+    await Printing.sharePdf(bytes: bytes, filename: filename);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF 내보내기가 완료되었습니다.')),
+      );
+    }
+  } catch (_) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF 내보내기에 실패했습니다. 다시 시도해주세요.')),
+      );
+    }
+  }
+}
+
+Future<Uint8List> _buildResultPdf({
+  required Uint8List? original,
+  required AnalyzeResponse? response,
+  required String? explanationAbsoluteUrl,
+}) async {
+  final doc = pw.Document();
+
+  final fontRegular = await PdfGoogleFonts.notoSansKRRegular();
+  final fontBold = await PdfGoogleFonts.notoSansKRBold();
+
+  final explanationBytes = await _tryFetchImageBytes(explanationAbsoluteUrl);
+
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(24),
+      theme: pw.ThemeData.withFont(base: fontRegular, bold: fontBold),
+      build: (_) => [
+        pw.Text(
+          '결과 보고서',
+          style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: pw.BoxDecoration(
+            color: PdfColor.fromHex('#FFF4E8'),
+            border: pw.Border.all(color: PdfColor.fromHex('#F3D2AE')),
+            borderRadius: pw.BorderRadius.circular(6),
+          ),
+          child: pw.Text('본 결과는 의료적 확정 진단이 아닌 보조 판별 결과입니다.'),
+        ),
+        pw.SizedBox(height: 16),
+        pw.Text(
+          '원본이미지',
+          style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfImageBox(
+          original != null
+              ? pw.Image(pw.MemoryImage(original), fit: pw.BoxFit.contain)
+              : pw.Center(child: pw.Text('이미지가 없습니다')),
+        ),
+        pw.SizedBox(height: 14),
+        pw.Text(
+          '결과 이미지',
+          style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfImageBox(
+          explanationBytes != null
+              ? pw.Image(
+                  pw.MemoryImage(explanationBytes),
+                  fit: pw.BoxFit.contain,
+                )
+              : pw.Center(child: pw.Text('결과 이미지를 불러올 수 없습니다.')),
+        ),
+        pw.SizedBox(height: 18),
+        pw.Text(
+          '분석 요약',
+          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfInfoCard(_buildJudgmentPdf(response)),
+        pw.SizedBox(height: 16),
+        pw.Text(
+          '성능 지표',
+          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfInfoCard(_buildMetricsPdf(response)),
+        pw.SizedBox(height: 16),
+        pw.Text(
+          '이상 확률',
+          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfInfoCard(pw.Text(_buildProbabilityPdf(response))),
+      ],
+    ),
+  );
+
+  return doc.save();
+}
+
+Future<Uint8List?> _tryFetchImageBytes(String? url) async {
+  if (url == null || url.isEmpty) return null;
+  try {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    final res = await http.get(uri);
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return res.bodyBytes;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+pw.Widget _pdfImageBox(pw.Widget child) {
+  return pw.Container(
+    width: double.infinity,
+    height: 180,
+    padding: const pw.EdgeInsets.all(8),
+    decoration: pw.BoxDecoration(
+      border: pw.Border.all(color: PdfColor.fromHex('#D8DEE9')),
+      borderRadius: pw.BorderRadius.circular(8),
+    ),
+    child: child,
+  );
+}
+
+pw.Widget _pdfInfoCard(pw.Widget child) {
+  return pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.all(12),
+    decoration: pw.BoxDecoration(
+      border: pw.Border.all(color: PdfColor.fromHex('#E6EAF2')),
+      borderRadius: pw.BorderRadius.circular(8),
+    ),
+    child: child,
+  );
+}
+
+pw.Widget _buildJudgmentPdf(AnalyzeResponse? response) {
+  if (response == null) return pw.Text('결과가 없습니다.');
+  if (response.isFail) return pw.Text(response.message ?? '분석에 실패했습니다.');
+  if (!response.canShowInferenceResults) {
+    return pw.Text('전처리를 통과하지 않아 판정 결과를 표시할 수 없습니다.');
+  }
+  return pw.Text('AI 판정: ${response.label ?? '—'}');
+}
+
+pw.Widget _buildMetricsPdf(AnalyzeResponse? response) {
+  if (response == null) return pw.Text('—');
+  if (response.isFail || !response.canShowInferenceResults) {
+    return pw.Text('전처리를 통과하지 않아 리포트 지표를 표시할 수 없습니다.');
+  }
+
+  final prob = response.abnormalProbability;
+  if (prob == null) {
+    return pw.Text('이상 확률 값이 없어 리포트 지표를 계산할 수 없습니다.');
+  }
+
+  const labels = [
+    ('Accuracy', '전체 성능 판단'),
+    ('Precision', '불필요 오진 최소화'),
+    ('Sensitivity', '놓치는 환자 최소화'),
+    ('Specificity', '정상 오진 방지'),
+    ('F1-score', '정밀도와 재현율 조화'),
+  ];
+
+  double metricValue(int index) => index == 3 ? 1.0 - prob : prob;
+
+  return pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      for (var i = 0; i < labels.length; i++) ...[
+        if (i > 0) pw.SizedBox(height: 8),
+        pw.Text('${labels[i].$1}: ${(metricValue(i) * 100).toStringAsFixed(1)}%'),
+        pw.SizedBox(height: 2),
+        pw.Text(labels[i].$2, style: const pw.TextStyle(fontSize: 10)),
+      ],
+    ],
+  );
+}
+
+String _buildProbabilityPdf(AnalyzeResponse? response) {
+  if (response == null) return '—';
+  if (response.isFail || !response.canShowInferenceResults) return '—';
+  final prob = response.abnormalProbability;
+  return prob == null ? '—' : '${(prob * 100).toStringAsFixed(1)}%';
 }
 
 void _showZoomViewer(
