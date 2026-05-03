@@ -22,3 +22,5 @@ timm
 albumentations
 grad-cam
 captum
+
+cryptography>=42.0

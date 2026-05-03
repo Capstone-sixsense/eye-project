@@ -44,6 +44,8 @@ services:
       - QUICKQUAL_SVM_FILENAME=quickqual_dn121_512.pkl
       - QUICKQUAL_BAD_THRESHOLD=0.7
       - REJECT_BAD_QUALITY=false   # true로 바꾸면 bad 이미지 422로 거부
+
+      - IMAGE_ENCRYPTION_KEY=${IMAGE_ENCRYPTION_KEY} 
     restart: always
 
   frontend:
