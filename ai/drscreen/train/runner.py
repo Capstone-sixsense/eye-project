@@ -65,9 +65,11 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
     image_size = int(data_cfg["image_size"])
     resize_size = int(data_cfg["resize_size"])
     use_preprocessing = bool(data_cfg.get("use_preprocessing", False))
+    use_random_resized_crop = bool(data_cfg.get("use_random_resized_crop", True))
     train_transform = build_train_transform(
         crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
         mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
+        use_random_resized_crop=use_random_resized_crop,
     )
     eval_transform = build_eval_transform(
         crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
@@ -90,17 +92,27 @@ def _build_datasets(
         if str(domain).strip()
     }
 
+    seg_mask_dir_cfg = data_cfg.get("seg_mask_dir")
+    seg_mask_dir = (
+        resolve_project_path(project_root, seg_mask_dir_cfg)
+        if seg_mask_dir_cfg
+        else project_root / "data" / "raw" / "IDRiD" / "A. Segmentation" / "2. All Segmentation Groundtruths"
+    )
+    seg_mask_size = int(data_cfg.get("image_size", 512))
+
     use_fda = bool(data_cfg.get("use_fda", False))
     if use_fda:
         fda_alpha = float(data_cfg.get("fda_alpha", 0.05))
         train_dataset: ManifestDataset = FDAManifestDataset(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform, fda_alpha=fda_alpha,
+            seg_mask_dir=seg_mask_dir, seg_mask_size=seg_mask_size,
         )
     else:
         train_dataset = ManifestDataset(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform,
+            seg_mask_dir=seg_mask_dir, seg_mask_size=seg_mask_size,
         )
     val_dataset = ManifestDataset(
         manifest_path=manifest_path, image_root=image_root,
@@ -196,6 +208,9 @@ def _prepare_model_for_head_only_training(model: nn.Module, architecture: str) -
     for module in model.children():
         module.eval()
     classifier.train()
+    seg_head = getattr(model, "seg_head", None)
+    if seg_head is not None:
+        seg_head.train()
     # Keep BN layers in train mode so they use batch statistics.
     # When backbone starts from ImageNet weights, the running stats are
     # calibrated for ImageNet distribution. Fundus images at 448px are
@@ -460,10 +475,11 @@ def run_training(
         pretrained=bool(config["model"]["pretrained"]),
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
-        use_mixstyle=bool(config["model"].get("use_mixstyle", False)),
         use_ibn=bool(config["model"].get("use_ibn", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
-        classifier_dropout=float(config["model"].get("classifier_dropout", 0.0)),
+        use_aux_seg=bool(config["model"].get("use_aux_seg", False)),
+        aux_seg_block=int(config["model"].get("aux_seg_block", 2)),
+        aux_seg_output_size=int(config["data"].get("image_size", 512)),
     ).to(device)
     _load_pretrained_backbone(model, config, project_root)
 
@@ -476,6 +492,7 @@ def run_training(
 
     use_coral = bool(config["train"].get("use_coral", False))
     lambda_coral = float(config["train"].get("lambda_coral", 1.0))
+    lambda_aux_seg = float(config["train"].get("lambda_aux_seg", 0.0))
     coral_criterion: torch.nn.Module | None = None
     if use_coral:
         from drscreen.train.loss import CoralLoss
@@ -526,6 +543,7 @@ def run_training(
                 amp_enabled=amp_enabled, scaler=scaler, gradient_clip_norm=gradient_clip_norm,
                 coral_criterion=coral_criterion,
                 lambda_coral=lambda_coral,
+                lambda_aux_seg=lambda_aux_seg,
             )
             val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
             if scheduler is not None:
@@ -654,9 +672,10 @@ def run_split_evaluation(
         pretrained=False,
         num_outputs=int(effective_config["model"]["num_outputs"]),
         use_attention=bool(effective_config["model"].get("use_attention", False)),
-        use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
         use_ibn=bool(effective_config["model"].get("use_ibn", False)),
-        classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
+        use_aux_seg=bool(effective_config["model"].get("use_aux_seg", False)),
+        aux_seg_block=int(effective_config["model"].get("aux_seg_block", 2)),
+        aux_seg_output_size=int(effective_config["model"].get("aux_seg_output_size", 512)),
     ).to(device)
     load_state_from_checkpoint(model, checkpoint)
 

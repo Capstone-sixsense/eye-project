@@ -27,6 +27,7 @@ def generate_gradcam(
     target_layer: torch.nn.Module | None = None,
     target_layer_name: str | None = None,
     class_index: int | None = None,
+    method: str = "gradcam",
 ) -> GradCamResult:
     if target_layer is not None:
         layer = target_layer
@@ -64,7 +65,10 @@ def generate_gradcam(
 
         activation = activations["value"]
         gradient = gradients["value"]
-        weights = gradient.mean(dim=(2, 3), keepdim=True)
+        if method == "layercam":
+            weights = torch.relu(gradient)
+        else:
+            weights = gradient.mean(dim=(2, 3), keepdim=True)
         cam = torch.relu((weights * activation).sum(dim=1, keepdim=True))
         cam = F.interpolate(
             cam,
