@@ -55,6 +55,23 @@ def union_mask(masks: dict[str, np.ndarray]) -> np.ndarray | None:
     return result
 
 
+def normalize_cam_fov(cam: np.ndarray, retina_mask: np.ndarray) -> np.ndarray:
+    """Min-max normalize CAM within the retina FOV, zero outside.
+
+    Removes score calibration bias so different XAI methods are comparable
+    on the same threshold scale (Choe et al., CVPR 2020).
+    """
+    out = np.zeros_like(cam, dtype=np.float32)
+    active = cam[retina_mask > 0]
+    if active.size == 0:
+        return out
+    lo, hi = float(active.min()), float(active.max())
+    if hi - lo < 1e-8:
+        return out
+    out[retina_mask > 0] = (cam[retina_mask > 0] - lo) / (hi - lo)
+    return out
+
+
 def binarize_cam(
     cam: np.ndarray,
     retina_mask: np.ndarray | None = None,
@@ -91,6 +108,62 @@ def compute_iou(pred: np.ndarray, gt: np.ndarray) -> float | None:
     return intersection / union_area
 
 
+def compute_auprc(
+    cam: np.ndarray,
+    gt_mask: np.ndarray,
+    retina_mask: np.ndarray | None = None,
+) -> float | None:
+    """Pixel-level AUPRC: CAM as continuous ranking score vs GT lesion mask.
+
+    Treats each retina pixel as an instance. A perfect localizer scores 1.0;
+    a random baseline scores approximately lesion_area / retina_area.
+
+    Returns None when gt_mask has no positive pixels.
+    """
+    from sklearn.metrics import average_precision_score
+
+    if retina_mask is not None:
+        scores = cam[retina_mask > 0].ravel().astype(np.float64)
+        labels = gt_mask[retina_mask > 0].ravel().astype(np.int32)
+    else:
+        scores = cam.ravel().astype(np.float64)
+        labels = gt_mask.ravel().astype(np.int32)
+
+    if labels.sum() == 0:
+        return None
+    return float(average_precision_score(labels, scores))
+
+
+def compute_auc_iou(
+    cam: np.ndarray,
+    retina_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    n_thresholds: int = 50,
+) -> float | None:
+    """Mean IoU across a uniform threshold sweep (AUC-IoU proxy).
+
+    Removes threshold choice bias: instead of a single top-k% cutoff, sweeps
+    the full range of CAM values and averages IoU (Choe et al., CVPR 2020).
+
+    Returns None when gt_mask has no positive pixels.
+    """
+    if gt_mask.sum() == 0:
+        return None
+    active = cam[retina_mask > 0]
+    if active.size == 0:
+        return None
+    lo, hi = float(active.min()), float(active.max())
+    if hi - lo < 1e-8:
+        return None
+    thresholds = np.linspace(lo, hi, n_thresholds)
+    ious = []
+    for t in thresholds:
+        binary = ((cam >= t) & (retina_mask > 0)).astype(np.uint8)
+        iou = compute_iou(binary, gt_mask)
+        ious.append(iou if iou is not None else 0.0)
+    return float(np.mean(ious))
+
+
 def pointing_game(cam: np.ndarray, gt: np.ndarray) -> bool | None:
     """True if the CAM argmax pixel falls inside the GT mask.
 
@@ -102,3 +175,37 @@ def pointing_game(cam: np.ndarray, gt: np.ndarray) -> bool | None:
     h, w = cam.shape
     peak_y, peak_x = divmod(peak_idx, w)
     return bool(gt[peak_y, peak_x] > 0)
+
+
+# ---------------------------------------------------------------------------
+# Baseline CAM generators (for contextualization)
+# ---------------------------------------------------------------------------
+
+def make_random_cam(
+    retina_mask: np.ndarray,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """Uniform random heatmap within retina FOV."""
+    if rng is None:
+        rng = np.random.default_rng(0)
+    cam = np.zeros(retina_mask.shape, dtype=np.float32)
+    cam[retina_mask > 0] = rng.random(int((retina_mask > 0).sum())).astype(np.float32)
+    return cam
+
+
+def make_center_gaussian_cam(retina_mask: np.ndarray) -> np.ndarray:
+    """2-D Gaussian centered at image center, σ = min(H,W)/4, masked to FOV."""
+    h, w = retina_mask.shape
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    sigma = float(min(h, w)) / 4.0
+    cam = np.exp(-((ys - h / 2) ** 2 + (xs - w / 2) ** 2) / (2 * sigma ** 2))
+    cam = cam.astype(np.float32)
+    cam[retina_mask == 0] = 0.0
+    return cam
+
+
+def make_retina_uniform_cam(retina_mask: np.ndarray) -> np.ndarray:
+    """Constant 1.0 within retina FOV — lower bound for any threshold-based metric."""
+    cam = np.zeros(retina_mask.shape, dtype=np.float32)
+    cam[retina_mask > 0] = 1.0
+    return cam

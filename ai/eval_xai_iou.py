@@ -1,8 +1,12 @@
 """XAI quantitative validation: Layer-CAM vs IDRiD lesion masks.
 
 Generates Layer-CAM (or Grad-CAM) for each IDRiD segmentation image,
-binarizes the heatmap at the top-N% threshold, and computes IoU against
-ground truth lesion masks (MA / HE / EX / SE) and a pointing-game score.
+normalizes the heatmap within the retina FOV (Choe et al., CVPR 2020),
+binarizes at the top-N% threshold, and computes:
+  - IoU (top-N% binarization) against GT lesion masks (MA / HE / EX / SE)
+  - Pixel AUPRC (continuous score vs binary GT mask)
+  - AUC-IoU (mean IoU across full threshold sweep)
+  - Pointing Game score
 
 FundusPreprocess is intentionally skipped: v21 was trained on unprocessed
 images (data.use_preprocessing=false), so raw resize keeps the spatial
@@ -10,19 +14,17 @@ layout consistent between the CAM and GT masks.
 
 Usage
 -----
-    python eval_xai_iou.py --config configs/v21_512_layercam.yaml
+    python eval_xai_iou.py --config configs/v24_multitask.yaml --split test
 
-    # custom threshold sweep
-    python eval_xai_iou.py --config configs/v21_512_layercam.yaml \\
-        --top-percents 0.10 0.20 0.30
+    # with baseline comparison (random / center Gaussian / retina uniform)
+    python eval_xai_iou.py --config configs/v24_multitask.yaml --split test --baselines
 
-    # evaluate test split instead of training
-    python eval_xai_iou.py --config configs/v21_512_layercam.yaml \\
-        --split test
+    # use auxiliary seg_head output instead of Layer-CAM
+    python eval_xai_iou.py --config configs/v24_multitask.yaml --split test --use-seg-head
 
 Output
 ------
-    artifacts/evaluations/xai_iou_{version}_{split}.json
+    artifacts/evaluations/xai_iou_{version}_{block_label}_{split}.json
 """
 
 from __future__ import annotations
@@ -40,12 +42,18 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 
 from drscreen.infer.service import InferenceSession
-from drscreen.xai.gradcam import generate_gradcam
+from drscreen.xai.gradcam import generate_gradcam, resolve_default_target_layer
 from drscreen.xai.iou import (
     LESION_CODES,
     binarize_cam,
+    compute_auc_iou,
+    compute_auprc,
     compute_iou,
     load_lesion_masks,
+    make_center_gaussian_cam,
+    make_random_cam,
+    make_retina_uniform_cam,
+    normalize_cam_fov,
     pointing_game,
     union_mask,
 )
@@ -74,6 +82,44 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest).astype(np.uint8)
 
 
+def _eval_cam(
+    cam: np.ndarray,
+    retina_mask: np.ndarray,
+    gt_masks: dict,
+    gt_union,
+    top_percents: list[float],
+) -> dict:
+    """Compute all metrics for a single normalized CAM."""
+    cam_norm = normalize_cam_fov(cam, retina_mask)
+
+    result: dict = {
+        "pointing_game": None,
+        "auprc": None,
+        "auc_iou": None,
+        "thresholds": {},
+    }
+
+    if gt_union is not None:
+        result["pointing_game"] = pointing_game(cam_norm, gt_union)
+        result["auprc"] = compute_auprc(cam_norm, gt_union, retina_mask)
+        result["auc_iou"] = compute_auc_iou(cam_norm, retina_mask, gt_union)
+
+    for top_pct in top_percents:
+        binary_cam = binarize_cam(cam_norm, retina_mask, top_percent=top_pct)
+        key = f"top{int(top_pct * 100):02d}"
+
+        per_code: dict[str, float | None] = {}
+        for code in LESION_CODES:
+            per_code[code] = compute_iou(binary_cam, gt_masks[code]) if code in gt_masks else None
+
+        result["thresholds"][key] = {
+            "iou_union": compute_iou(binary_cam, gt_union) if gt_union is not None else None,
+            "iou_per_lesion": per_code,
+        }
+
+    return result
+
+
 def _process_image(
     session: InferenceSession,
     image_path: Path,
@@ -82,82 +128,75 @@ def _process_image(
     top_percents: list[float],
     target_layer=None,
     use_seg_head: bool = False,
+    run_baselines: bool = False,
+    method_override: str | None = None,
 ) -> dict:
-    image_stem = image_path.stem  # e.g. "IDRiD_01"
+    image_stem = image_path.stem
 
-    # Load image — skip FundusPreprocess for spatial alignment with GT masks
     pil_image = Image.open(image_path).convert("RGB")
     image_tensor = session.eval_transform(pil_image).to(session.device)
-
     cam_h, cam_w = image_tensor.shape[-2], image_tensor.shape[-1]
 
+    active_method = method_override if method_override is not None else gradcam_method
+
     if use_seg_head:
-        # Use seg_head sigmoid output directly as heatmap
-        seg_prob = session.model.predict_seg(image_tensor.unsqueeze(0))  # [1,1,H,W]
-        cam_raw = seg_prob[0, 0].detach().cpu().numpy()  # [H, W], already in [0,1]
-        # Resize to model input resolution if needed
+        seg_prob = session.model.predict_seg(image_tensor.unsqueeze(0))
+        cam_raw = seg_prob[0, 0].detach().cpu().numpy()
         if cam_raw.shape != (cam_h, cam_w):
             cam_raw = cv2.resize(cam_raw, (cam_w, cam_h), interpolation=cv2.INTER_LINEAR)
         cam = cam_raw
     else:
-        # Generate CAM (gradients required — no torch.no_grad)
         gradcam = generate_gradcam(
             session.model,
             image_tensor.unsqueeze(0),
-            method=gradcam_method,
+            method=active_method,
             target_layer=target_layer,
         )
-        cam = gradcam.heatmap[0].detach().cpu().numpy()  # [H, W], float32 in [0, 1]
+        cam = gradcam.heatmap[0].detach().cpu().numpy()
 
-    # Retina mask at model input resolution
     pil_resized = pil_image.resize((cam_w, cam_h), Image.BILINEAR)
     retina_mask = _build_retina_mask(pil_resized)
 
-    # Load GT masks resized to model input resolution
     gt_masks = load_lesion_masks(mask_base_dir, image_stem, target_size=(cam_w, cam_h))
     gt_union = union_mask(gt_masks)
+
+    metrics = _eval_cam(cam, retina_mask, gt_masks, gt_union, top_percents)
 
     result: dict = {
         "image_id": image_stem,
         "masks_present": list(gt_masks.keys()),
-        "pointing_game": None,
-        "thresholds": {},
+        **metrics,
     }
 
-    # Pointing game (threshold-independent)
-    if gt_union is not None:
-        result["pointing_game"] = pointing_game(cam, gt_union)
-
-    for top_pct in top_percents:
-        binary_cam = binarize_cam(cam, retina_mask, top_percent=top_pct)
-        key = f"top{int(top_pct * 100):02d}"
-
-        per_code: dict[str, float | None] = {}
-        for code in LESION_CODES:
-            if code in gt_masks:
-                per_code[code] = compute_iou(binary_cam, gt_masks[code])
-            else:
-                per_code[code] = None
-
-        iou_union = compute_iou(binary_cam, gt_union) if gt_union is not None else None
-
-        result["thresholds"][key] = {
-            "iou_union": iou_union,
-            "iou_per_lesion": per_code,
+    if run_baselines and gt_union is not None:
+        rng = np.random.default_rng(0)
+        baseline_cams = {
+            "random": make_random_cam(retina_mask, rng),
+            "center_gaussian": make_center_gaussian_cam(retina_mask),
+            "retina_uniform": make_retina_uniform_cam(retina_mask),
+        }
+        result["baselines"] = {
+            name: _eval_cam(bcam, retina_mask, gt_masks, gt_union, top_percents)
+            for name, bcam in baseline_cams.items()
         }
 
     return result
 
 
-def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
-    agg: dict = {"pointing_game": None, "thresholds": {}}
+def _agg_scalar(per_image: list[dict], key: str) -> dict | None:
+    vals = [r[key] for r in per_image if r.get(key) is not None]
+    if not vals:
+        return None
+    return {"mean": float(np.mean(vals)), "n": len(vals)}
 
-    pg_scores = [r["pointing_game"] for r in per_image if r["pointing_game"] is not None]
-    if pg_scores:
-        agg["pointing_game"] = {
-            "mean": float(np.mean(pg_scores)),
-            "n": len(pg_scores),
-        }
+
+def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
+    agg: dict = {
+        "pointing_game": _agg_scalar(per_image, "pointing_game"),
+        "auprc": _agg_scalar(per_image, "auprc"),
+        "auc_iou": _agg_scalar(per_image, "auc_iou"),
+        "thresholds": {},
+    }
 
     for top_pct in top_percents:
         key = f"top{int(top_pct * 100):02d}"
@@ -186,6 +225,29 @@ def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
             },
         }
 
+    # Aggregate baselines if present
+    if per_image and "baselines" in per_image[0]:
+        baseline_names = list(per_image[0]["baselines"].keys())
+        agg["baselines"] = {}
+        for name in baseline_names:
+            baseline_records = [r["baselines"][name] for r in per_image if "baselines" in r]
+            agg["baselines"][name] = {
+                "pointing_game": _agg_scalar(baseline_records, "pointing_game"),
+                "auprc": _agg_scalar(baseline_records, "auprc"),
+                "auc_iou": _agg_scalar(baseline_records, "auc_iou"),
+                "thresholds": {},
+            }
+            for top_pct in top_percents:
+                key = f"top{int(top_pct * 100):02d}"
+                b_union_ious = [
+                    br["thresholds"][key]["iou_union"]
+                    for br in baseline_records
+                    if br["thresholds"][key]["iou_union"] is not None
+                ]
+                agg["baselines"][name]["thresholds"][key] = {
+                    "mean_iou_union": float(np.mean(b_union_ious)) if b_union_ious else None,
+                }
+
     return agg
 
 
@@ -197,6 +259,7 @@ def evaluate(
     target_block: int | None = None,
     output_path: str | None = None,
     use_seg_head: bool = False,
+    run_baselines: bool = False,
 ) -> dict:
     if top_percents is None:
         top_percents = [0.10, 0.20, 0.30]
@@ -223,14 +286,11 @@ def evaluate(
         raise FileNotFoundError(f"IDRiD mask directory not found: {mask_base_dir}")
 
     session = InferenceSession.from_config_path(config_path)
-    # Skip FundusPreprocess so GT masks stay spatially aligned with the CAM.
-    # v21 was trained without preprocessing, so this matches the training distribution.
     session.preprocessor = None
 
     gradcam_method = session.config.get("infer", {}).get("gradcam_method", "gradcam")
     version = session.config.get("project", {}).get("version", "unknown")
 
-    # Resolve target layer from block index
     target_layer = None
     block_label = "seg_head" if use_seg_head else "default"
     if not use_seg_head and target_block is not None:
@@ -244,12 +304,13 @@ def evaluate(
     if not image_paths:
         raise FileNotFoundError(f"No images found in {image_dir}")
 
-    print(f"Config  : {config_path}")
-    print(f"Version : {version}")
-    print(f"Method  : {gradcam_method}")
-    print(f"Layer   : {block_label}")
-    print(f"Split   : {split}  ({len(image_paths)} images)")
+    print(f"Config    : {config_path}")
+    print(f"Version   : {version}")
+    print(f"Method    : {gradcam_method}")
+    print(f"Layer     : {block_label}")
+    print(f"Split     : {split}  ({len(image_paths)} images)")
     print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
+    print(f"Baselines : {run_baselines}")
     print()
 
     per_image: list[dict] = []
@@ -257,16 +318,15 @@ def evaluate(
         rec = _process_image(
             session, image_path, mask_base_dir, gradcam_method, top_percents, target_layer,
             use_seg_head=use_seg_head,
+            run_baselines=run_baselines,
         )
 
-        union_iou_20 = rec["thresholds"].get("top20", {}).get("iou_union")
-        iou_str = f"{union_iou_20:.4f}" if union_iou_20 is not None else "N/A"
-        pg_str = str(rec["pointing_game"]) if rec["pointing_game"] is not None else "N/A"
+        iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
             f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}"
-            f"  union_iou={iou_str}"
-            f"  pg={pg_str}"
-            f"  masks={rec['masks_present']}"
+            f"  iou={iou20:.4f}" if iou20 is not None else f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}  iou=N/A",
+            f"  auprc={rec['auprc']:.4f}" if rec['auprc'] is not None else "  auprc=N/A",
+            f"  pg={rec['pointing_game']}",
         )
         per_image.append(rec)
 
@@ -277,12 +337,29 @@ def evaluate(
     if aggregate["pointing_game"]:
         pg = aggregate["pointing_game"]
         print(f"Pointing game : {pg['mean']:.4f}  (n={pg['n']})")
+    if aggregate["auprc"]:
+        ap = aggregate["auprc"]
+        print(f"AUPRC         : {ap['mean']:.4f}  (n={ap['n']})")
+    if aggregate["auc_iou"]:
+        ai = aggregate["auc_iou"]
+        print(f"AUC-IoU       : {ai['mean']:.4f}  (n={ai['n']})")
     for top_pct in top_percents:
         key = f"top{int(top_pct * 100):02d}"
         agg_t = aggregate["thresholds"][key]
         miou = agg_t["mean_iou_union"]
         miou_str = f"{miou:.4f}" if miou is not None else "N/A"
         print(f"IoU top{int(top_pct*100):02d}%    : {miou_str}  (n={agg_t['n_images_with_gt']})")
+
+    if run_baselines and "baselines" in aggregate:
+        print()
+        print("=== Baselines ===")
+        for name, bagg in aggregate["baselines"].items():
+            ap_b = bagg["auprc"]["mean"] if bagg["auprc"] else None
+            iou20_b = bagg["thresholds"].get("top20", {}).get("mean_iou_union")
+            print(
+                f"  {name:20s}  AUPRC={ap_b:.4f}" if ap_b is not None else f"  {name:20s}  AUPRC=N/A",
+                f"  IoU-top20={iou20_b:.4f}" if iou20_b is not None else "  IoU-top20=N/A",
+            )
 
     output = {
         "version": version,
@@ -306,6 +383,113 @@ def evaluate(
     return output
 
 
+def compare_xai_methods(
+    config_path: str,
+    methods: list[str],
+    split: str = "test",
+    idrid_root: str | None = None,
+    top_percents: list[float] | None = None,
+    run_baselines: bool = False,
+    output_path: str | None = None,
+) -> dict:
+    """Run multiple XAI methods on the same images and produce a comparison table."""
+    if top_percents is None:
+        top_percents = [0.10, 0.20, 0.30]
+
+    project_root = Path(config_path).resolve().parents[1]
+
+    if idrid_root is None:
+        idrid_root = project_root / "data" / "raw" / "IDRiD"
+    else:
+        idrid_root = Path(idrid_root)
+
+    split_subdir = _SPLIT_IMAGE_SUBDIR.get(split)
+    if split_subdir is None:
+        raise ValueError(f"split must be 'train' or 'test', got {split!r}")
+
+    image_dir = idrid_root / "A. Segmentation" / "1. Original Images" / split_subdir
+    mask_base_dir = (
+        idrid_root / "A. Segmentation" / "2. All Segmentation Groundtruths" / split_subdir
+    )
+    if not image_dir.exists():
+        raise FileNotFoundError(f"IDRiD image directory not found: {image_dir}")
+
+    session = InferenceSession.from_config_path(config_path)
+    session.preprocessor = None
+
+    version = session.config.get("project", {}).get("version", "unknown")
+    default_method = session.config.get("infer", {}).get("gradcam_method", "gradcam")
+    target_layer = resolve_default_target_layer(session.model)
+
+    image_paths = sorted(image_dir.glob("*.jpg")) + sorted(image_dir.glob("*.png"))
+    if not image_paths:
+        raise FileNotFoundError(f"No images found in {image_dir}")
+
+    print(f"Config  : {config_path}")
+    print(f"Version : {version}")
+    print(f"Methods : {methods}")
+    print(f"Split   : {split}  ({len(image_paths)} images)")
+    print()
+
+    results_by_method: dict[str, dict] = {}
+
+    for method in methods:
+        print(f"--- {method} ---")
+        per_image: list[dict] = []
+        for i, image_path in enumerate(image_paths, 1):
+            rec = _process_image(
+                session, image_path, mask_base_dir, default_method, top_percents,
+                target_layer=target_layer,
+                run_baselines=(run_baselines and method == methods[0]),
+                method_override=method,
+            )
+            iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
+            print(
+                f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}"
+                f"  iou={iou20:.4f}" if iou20 is not None else
+                f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}  iou=N/A",
+                f"  auprc={rec['auprc']:.4f}" if rec["auprc"] is not None else "  auprc=N/A",
+            )
+            per_image.append(rec)
+        results_by_method[method] = _aggregate(per_image, top_percents)
+        print()
+
+    print("=== Comparison ===")
+    header = f"{'Method':<14}  {'AUPRC':>7}  {'AUC-IoU':>8}  {'IoU-10%':>8}  {'IoU-20%':>8}  {'IoU-30%':>8}  {'PG':>7}"
+    print(header)
+    print("-" * len(header))
+    for method, agg in results_by_method.items():
+        auprc = agg["auprc"]["mean"] if agg["auprc"] else None
+        auc_iou = agg["auc_iou"]["mean"] if agg["auc_iou"] else None
+        iou10 = agg["thresholds"].get("top10", {}).get("mean_iou_union")
+        iou20 = agg["thresholds"].get("top20", {}).get("mean_iou_union")
+        iou30 = agg["thresholds"].get("top30", {}).get("mean_iou_union")
+        pg = agg["pointing_game"]["mean"] if agg["pointing_game"] else None
+
+        def _f(v):
+            return f"{v:.4f}" if v is not None else "  N/A"
+
+        print(f"{method:<14}  {_f(auprc):>7}  {_f(auc_iou):>8}  {_f(iou10):>8}  {_f(iou20):>8}  {_f(iou30):>8}  {_f(pg):>7}")
+
+    output = {
+        "version": version,
+        "split": split,
+        "methods": methods,
+        "top_percents": top_percents,
+        "results_by_method": results_by_method,
+    }
+
+    if output_path is None:
+        eval_dir = project_root / "artifacts" / "evaluations"
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        method_tag = "_".join(methods)
+        output_path = str(eval_dir / f"xai_compare_{version}_{method_tag}_{split}.json")
+
+    Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
+    print(f"\nSaved: {output_path}")
+    return output
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="XAI IoU evaluation against IDRiD lesion masks")
     parser.add_argument("--config", required=True, help="Path to model config YAML")
@@ -320,25 +504,45 @@ def main() -> None:
     )
     parser.add_argument(
         "--target-block", type=int, default=None,
-        help="Index into model.blocks for CAM target layer. Default: last block (blocks[-1]). "
-             "Try 2 (64x64), 3 (32x32), 4 (32x32) for higher spatial resolution."
+        help="Index into model.blocks for CAM target layer (default: last block)."
     )
     parser.add_argument("--output", help="Output JSON path")
     parser.add_argument(
         "--use-seg-head", action="store_true",
         help="Use auxiliary seg_head sigmoid output as heatmap instead of Layer-CAM"
     )
+    parser.add_argument(
+        "--baselines", action="store_true",
+        help="Also evaluate random / center-Gaussian / retina-uniform baseline heatmaps"
+    )
+    parser.add_argument(
+        "--methods", nargs="+",
+        choices=["gradcam", "layercam", "gradcam++", "scorecam", "ig"],
+        help="Compare multiple XAI methods side by side (overrides single-method mode)"
+    )
     args = parser.parse_args()
 
-    evaluate(
-        config_path=args.config,
-        split=args.split,
-        idrid_root=args.idrid_root,
-        top_percents=args.top_percents,
-        target_block=args.target_block,
-        output_path=args.output,
-        use_seg_head=args.use_seg_head,
-    )
+    if args.methods:
+        compare_xai_methods(
+            config_path=args.config,
+            methods=args.methods,
+            split=args.split,
+            idrid_root=args.idrid_root,
+            top_percents=args.top_percents,
+            run_baselines=args.baselines,
+            output_path=args.output,
+        )
+    else:
+        evaluate(
+            config_path=args.config,
+            split=args.split,
+            idrid_root=args.idrid_root,
+            top_percents=args.top_percents,
+            target_block=args.target_block,
+            output_path=args.output,
+            use_seg_head=args.use_seg_head,
+            run_baselines=args.baselines,
+        )
 
 
 if __name__ == "__main__":
