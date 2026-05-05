@@ -175,8 +175,10 @@ class EyeApiClient {
     final parsed = <AnalysisHistoryEntry>[];
     if (rawItems is List) {
       for (final e in rawItems) {
-        if (e is Map<String, dynamic>) {
-          final row = AnalysisHistoryEntry.tryParse(e);
+        if (e is Map) {
+          final row = AnalysisHistoryEntry.tryParse(
+            Map<String, dynamic>.from(e),
+          );
           if (row != null) parsed.add(row);
         }
       }
