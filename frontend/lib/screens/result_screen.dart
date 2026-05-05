@@ -594,7 +594,10 @@ class _ImageBox extends StatelessWidget {
           borderRadius: BorderRadius.circular(MedicalTokens.radiusLg),
           child: SizedBox(
             height: _kResultImageMaxHeight,
-            child: child,
+            child: ColoredBox(
+              color: Colors.black,
+              child: child,
+            ),
           ),
         ),
       ),
@@ -903,19 +906,22 @@ class _ExplanationPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(MedicalTokens.radiusLg),
             child: SizedBox(
               height: _kResultImageMaxHeight,
-              child: Image.network(
-                absoluteUrl!,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return const Center(child: CircularProgressIndicator());
-                },
-                errorBuilder: (context, error, stackTrace) => const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      '이미지를 불러올 수 없습니다.\n(CORS 또는 URL 확인)',
-                      textAlign: TextAlign.center,
+              child: ColoredBox(
+                color: Colors.black,
+                child: Image.network(
+                  absoluteUrl!,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return const Center(child: CircularProgressIndicator());
+                  },
+                  errorBuilder: (context, error, stackTrace) => const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        '이미지를 불러올 수 없습니다.\n(CORS 또는 URL 확인)',
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                 ),
