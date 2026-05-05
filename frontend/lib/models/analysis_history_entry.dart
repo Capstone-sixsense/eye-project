@@ -21,14 +21,16 @@ class AnalysisHistoryEntry {
 
   /// 서버 목록 행(`/history`) JSON → 로컬 엔트리.
   static AnalysisHistoryEntry? tryParse(Map<String, dynamic> json) {
-    final id = json['id'] as String?;
+    final id = (json['id'] ?? json['record_id']) as String?;
     if (id == null || id.isEmpty) return null;
 
     try {
       return AnalysisHistoryEntry(
         recordId: id,
-        filename: json['original_filename'] as String? ?? 'image',
-        createdAt: _parseCreated(json['created_at'] as String?),
+        filename: (json['original_filename'] ?? json['filename']) as String? ?? 'image',
+        createdAt: _parseCreated(
+          (json['created_at'] ?? json['createdAt'] ?? json['timestamp']) as String?,
+        ),
         response: AnalyzeResponse.fromHistoryRecord(json),
         originalImageBytes: null,
       );
