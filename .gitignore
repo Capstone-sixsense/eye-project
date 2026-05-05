@@ -77,6 +77,7 @@ __pycache__/
 .venv/
 venv/
 .env
+/env
 
 # Docker / build outputs
 **/dist/
