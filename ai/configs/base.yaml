@@ -55,7 +55,7 @@ train:
   global_best_checkpoint_path: artifacts/checkpoints/best.pt
 infer:
   device: cuda
-  checkpoint_path: artifacts/runs/05_xai_attention_ablation/v28_no_attention/checkpoints/best.pt
+  checkpoint_path: artifacts/checkpoints/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
