@@ -6,21 +6,20 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
+from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 
 from drscreen.infer.service import InferenceSession
 
-from make_result_img import create_medical_report_image
+from make_result_img import render_report_image_bytes
 from models.quickqual_wrapper import QuickQualWrapper
 import traceback
 
-from fastapi.concurrency import run_in_threadpool
-
 import history
-
-
+import crypto  # 키 검증을 위해 import만 해도 충분 (모듈 로드 시 검증)
+import io
 
 
 _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
@@ -78,7 +77,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _session = None
         _session_error = str(exc)
-
+        
     #QuickQual 모델
     try:
         svm_filename = os.environ.get(
@@ -113,9 +112,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.mount("/storage", StaticFiles(directory="storage"), name="storage") # 원본 접근용 추가
-app.mount("/results", StaticFiles(directory="results"), name="results") # 분석 결과 접근용
 
 
 def _health_payload() -> dict[str, Any]:
@@ -189,24 +185,20 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
     _, ext = os.path.splitext(image.filename or "upload.png")
     ext = ext.lstrip(".").lower() or "png"
 
-    raw_path = history.raw_path_for(record_id, ext=ext)
-    proc_path = os.path.join(UPLOAD_DIR, f"proc_{record_id}.{ext}")
-
     #타이머 시작
     t0 = time.perf_counter()
 
     try:
         # 이미지 수신 및 원본 저장
         content = await image.read()
-
         print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
-        with open(raw_path, "wb") as f: 
-            f.write(content)
-        print(f"[analyze] 수신 완료: {name!r} ({len(content)} bytes)", flush=True)
 
-        # 이미지 로드
+        raw_path = history.save_raw_image(record_id, content, ext=ext)
+        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
+
+        # 이미지 로드 /  메모리에서 PIL 로드 (디스크 평문 경로 거치지 않음)
         try:
-            raw_img = Image.open(raw_path).convert("RGB")
+            raw_img = Image.open(io.BytesIO(content)).convert("RGB")
         except Exception:
             raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
 
@@ -235,9 +227,6 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
                         "quality": quality,
                     },
                 )
-
-        # 진단 모델의 resize/crop은 AI InferenceSession 내부 transform에서 처리합니다.
-        preprocessed_img.save(proc_path)
         
         #타이머 종료
         print(
@@ -245,31 +234,46 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             flush=True,
         )
 
+        """
         # AI 추론 (CPU + EfficientNet 등은 여기서 대부분의 시간 소요)
         with open(proc_path, "rb") as f:
             pred = _session.predict_image_bytes(f.read(), image_name=name)
+        """
+        # 진단 추론 — 전처리된 이미지를 바이트로 직접 전달 (proc_path 디스크 쓰기 제거)
+        proc_buf = io.BytesIO()
+        preprocessed_img.save(proc_buf, format="PNG")
+        pred = _session.predict_image_bytes(proc_buf.getvalue(), image_name=name)
 
         # 리포트 이미지 합성
         # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
-        ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
-        prob = pred.payload.get("abnormal_probability", 0.0)
-        metrics = pred.payload.get("eval_metrics") or {}
-        report_path = create_medical_report_image(
-            ai_image=ai_image,
-            record_id=record_id,
-        )
+        #ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
+        ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else preprocessed_img
+        report_bytes = render_report_image_bytes(ai_image)
+        report_path = history.save_report_image(record_id, report_bytes)
 
-        # 이력 메타데이터 저장
+
+        prob = pred.payload.get("abnormal_probability", 0.0)
+        decision_threshold = pred.payload.get("decision_threshold")
+        metrics = {
+            "accuracy": prob,
+            "precision": prob,
+            "recall": prob,
+            "specificity": 1.0 - prob,
+            "f1": prob,
+        }
+
+        # 이력 메타데이터 저장(URL은 동적 엔드포인트 경로)
         history.save_metadata(
             record_id,
             original_filename=name,
-            raw_url=raw_path.replace("\\", "/"),
-            report_url=report_path.replace("\\", "/"),
+            raw_url=f"/image/raw/{record_id}",       # 동적 엔드포인트
+            report_url=f"/image/report/{record_id}", # 동적 엔드포인트
             label=pred.payload.get("predicted_label"),
             abnormal_probability=prob,
             quality=quality,
             metrics=metrics,
         )
+
 
         print(f"[analyze] 완료: {time.perf_counter() - t0:.1f}s", flush=True)
         return {
@@ -277,11 +281,12 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "id": record_id,
             "label": pred.payload.get("predicted_label"),
             "abnormal_probability": prob,
+            "decision_threshold": decision_threshold,
             "quality": quality,
-            "report_url": report_path.replace("\\", "/"),
-            "original_url": raw_path.replace("\\", "/"),
-            #"raw_url": raw_path.replace("\\", "/")
             "quality_warning": quality_warning,
+            "report_url": f"/image/report/{record_id}",
+            "raw_url": f"/image/raw/{record_id}",
+            "original_url": f"/image/raw/{record_id}",  # 기존 키 호환용
         }
 
     except HTTPException:
@@ -289,10 +294,37 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"[analyze] {name}: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="분석 실패") from e
-    finally:
-        # 임시 전처리 파일만 정리 (원본 raw는 프론트에서 참조하므로 유지)
-        if proc_path and os.path.exists(proc_path):
-            os.remove(proc_path)
+
+
+# ---------------------------------------------------------------
+# 이미지 스트리밍 (복호화 후 응답)
+# ---------------------------------------------------------------
+@app.get("/image/raw/{record_id}")
+def serve_raw_image(record_id: str) -> Response:
+    """복호화된 raw 이미지 바이트 응답."""
+    result = history.load_raw_bytes(record_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="raw image not found")
+    data, ext = result
+    media_type = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "tif": "image/tiff",
+        "tiff": "image/tiff",
+    }.get(ext.lower(), "application/octet-stream")
+    return Response(content=data, media_type=media_type)
+
+@app.get("/image/report/{record_id}")
+def serve_report_image(record_id: str) -> Response:
+    """복호화된 분석 결과 이미지 응답 (PNG)."""
+    data = history.load_report_bytes(record_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="report image not found")
+    return Response(content=data, media_type="image/png")
+
 
 
 # ---------------------------------------------------------------
@@ -340,29 +372,6 @@ def history_list(limit: int = 50, offset: int = 0) -> dict[str, Any]:
         "items": records,
     }
 
-
-# ---------------------------------------------------------------
-# history_detail  (GET /history/{record_id})
-# ---------------------------------------------------------------
-# 특정 분석 이력 한 건을 상세 조회하는 REST 엔드포인트.
-#
-# [역할]
-#   - 프론트가 목록에서 특정 항목을 클릭했을 때, 해당 분석의
-#     원본 이미지 / 결과 이미지 / 메트릭을 다시 화면에 띄우기 위해 호출한다.
-#   - 응답 스키마는 /analyze 의 그것과 사실상 동일하므로,
-#     같은 화면 컴포넌트로 재사용 가능하다.
-#
-# [동작 순서]
-#   1) URL path parameter 로 받은 record_id 를 history.load_record 에 위임.
-#   2) None 이면 404 (record not found).
-#   3) 정상이면 dict 그대로 반환 (FastAPI가 JSON 직렬화).
-#
-# [응답 스키마]
-#   save_metadata가 저장한 그 형태:
-#     id, created_at, original_filename, raw_url, report_url,
-#     label, abnormal_probability, quality, metrics
-#   raw_url / report_url 이 None 이면 해당 파일이 디스크에 없다는 뜻.
-
 @app.get("/history/{record_id}")
 def history_detail(record_id: str) -> dict[str, Any]:
     """특정 분석 이력 단건 조회."""
@@ -371,48 +380,11 @@ def history_detail(record_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="record not found")
     return record
 
-
-
-# ---------------------------------------------------------------
-# history_delete  (DELETE /history/{record_id})
-# ---------------------------------------------------------------
-# 특정 분석 이력과 관련 파일들을 영구 삭제하는 REST 엔드포인트.
-#
-# [역할]
-#   - 사용자가 "이 기록 삭제" 버튼을 눌렀을 때 호출.
-#   - 단순히 메타데이터만 지우는 게 아니라, 원본/결과 이미지까지 함께 정리해서
-#     storage/ , results/ 폴더가 무한히 부풀지 않도록 한다.
-#
-# [동작 순서]
-#   1) load_record 로 대상 이력을 먼저 조회.
-#      - 없으면 404 (record not found) 즉시 반환.
-#   2) 메타데이터에서 raw_url / report_url 두 경로를 꺼내,
-#      각각 디스크에 존재하면 삭제.
-#      - 한 쪽 파일만 남아있어도 (예: report 누락) 다른 쪽은 정상 삭제.
-#   3) 마지막으로 메타 JSON 파일을 삭제.
-#      - 메타 JSON이 가장 마지막에 사라져야 부분 실패 시에도 재시도가 가능.
-#   4) 삭제 성공을 알리는 dict 반환.
-#
-# [응답]
-#   { "status": "deleted", "id": "<record_id>" }
-#
-# [주의]
-#   - 빈 날짜 폴더(예: results/2026-04-28/) 는 남는다.
-#     운영상 거슬리면 별도 cleanup 스크립트로 주기적으로 정리.
-#   - DELETE는 멱등이어야 하는 게 원칙이지만, 여기서는 두 번째 호출 시 404가 난다.
-#     프론트에서 "이미 삭제됨"을 동일하게 처리하면 무방.
-
 @app.delete("/history/{record_id}")
 def history_delete(record_id: str) -> dict[str, Any]:
+    """특정 분석 이력과 관련 파일(raw, report, metadata) 일괄 삭제."""
     record = history.load_record(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")
-
-    for path_key in ("raw_url", "report_url"):
-        p = record.get(path_key)
-        if p and os.path.exists(p):
-            os.remove(p)
-    meta = history.metadata_path_for(record_id)
-    if os.path.exists(meta):
-        os.remove(meta)
+    history.delete_record_files(record_id)
     return {"status": "deleted", "id": record_id}

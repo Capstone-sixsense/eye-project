@@ -28,4 +28,4 @@ ssl:
   max_samples: 0
   early_stopping_patience: 10
   early_stopping_min_delta: 0.005
-  output_path: artifacts/checkpoints/ssl/effnet_simclr_clean.pth
+  output_path: artifacts/runs/01_ssl_lineage/ssl_effnet_clean/checkpoints/effnet_simclr_clean.pth

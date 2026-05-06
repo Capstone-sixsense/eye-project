@@ -1,5 +1,5 @@
 project:
-  version: v17_focal_g2
+  version: v28_no_attention
   task: binary_dr_screening
   output_root: artifacts
 
@@ -18,8 +18,7 @@ data:
   val_split: val
   test_split: test
   external_test_split: external_test
-  train_exclude_domains:
-    - Messidor
+  train_exclude_domains: []
 
 labels:
   names:
@@ -31,7 +30,9 @@ model:
   architecture: efficientnet_b5
   pretrained: true
   num_outputs: 1
-  use_attention: true
+  use_attention: false
+  use_aux_seg: true
+  aux_seg_block: 2
   use_ibn: false
   grad_checkpointing: false
 train:
@@ -50,11 +51,13 @@ train:
   early_stopping_patience: 5
   early_stopping_min_delta: 0.001
   amp: true
-  checkpoint_dir: artifacts/checkpoints
+  checkpoint_dir: artifacts/runs
+  global_best_checkpoint_path: artifacts/checkpoints/best.pt
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/v17_focal_g2/best.pt
+  checkpoint_path: artifacts/runs/05_xai_attention_ablation/v28_no_attention/checkpoints/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
-  threshold: 0.42
+  threshold: 0.45
+  gradcam_method: layercam

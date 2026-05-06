@@ -26,5 +26,5 @@ train:
 
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/last.pt
+  checkpoint_path: artifacts/runs/04_lesion_supervision/v24_multitask/checkpoints/best.pt
 

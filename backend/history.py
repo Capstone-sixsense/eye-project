@@ -1,11 +1,11 @@
 """
-분석 이력 저장/조회 유틸리티.
+분석 이력 저장/조회 유틸리티 (AES-256-GCM 암호화).
 파일 시스템 기반의 단순 저장소.
 
-파일 배치 규약:
-  storage/raw_<id>.<ext>                            원본 이미지
-  results/<YYYY-MM-DD>/report_<id>.png              분석 결과 이미지
-  results/<YYYY-MM-DD>/report_<id>.json             메타데이터
+파일 배치 규약 (모든 산출물이 .enc 로 끝남):
+  storage/raw_<id>.<ext>.enc                     원본 이미지(암호화)
+  results/<YYYY-MM-DD>/report_<id>.png.enc       분석 결과 이미지(암호화)
+  results/<YYYY-MM-DD>/report_<id>.json.enc      메타데이터(암호화)
 
 <id>는 'YYYYMMDD_HHMMSS_mmm' 형식의 타임스탬프 문자열.
 """
@@ -14,15 +14,16 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+
+import crypto
 
 UPLOAD_DIR = "storage"
 RESULTS_DIR = "results"
 
-# 파일명 규약: report_YYYYMMDD_HHMMSS_mmm.json
-ID_PATTERN = re.compile(r"^report_(?P<id>\d{8}_\d{6}_\d{3})\.json$")
-
+# 메타데이터 암호 파일은 'report_<id>.json.enc'
+ID_PATTERN = re.compile(r"^report_(?P<id>\d{8}_\d{6}_\d{3})\.json\.enc$")
 
 # ---------------------------------------------------------------
 # ID 발급
@@ -37,25 +38,48 @@ def _date_subdir(record_id: str) -> str:
     """record_id에서 'YYYY-MM-DD' 폴더명 추출."""
     return f"{record_id[0:4]}-{record_id[4:6]}-{record_id[6:8]}"
 
+def _aad(record_id: str) -> bytes:
+    """GCM associated data — record_id를 묶어 파일 swap 공격 방어."""
+    return record_id.encode("utf-8")
+
 
 # ---------------------------------------------------------------
 # 경로 헬퍼
 # ---------------------------------------------------------------
 def raw_path_for(record_id: str, ext: str = "png") -> str:
-    return os.path.join(UPLOAD_DIR, f"raw_{record_id}.{ext}")
+    return os.path.join(UPLOAD_DIR, f"raw_{record_id}.{ext}{crypto.ENC_SUFFIX}")
 
 
 def report_image_path_for(record_id: str) -> str:
-    return os.path.join(RESULTS_DIR, _date_subdir(record_id), f"report_{record_id}.png")
+    return os.path.join(
+        RESULTS_DIR,
+        _date_subdir(record_id),
+        f"report_{record_id}.png{crypto.ENC_SUFFIX}",
+    )
 
 
 def metadata_path_for(record_id: str) -> str:
-    return os.path.join(RESULTS_DIR, _date_subdir(record_id), f"report_{record_id}.json")
-
+    return os.path.join(
+        RESULTS_DIR,
+        _date_subdir(record_id),
+        f"report_{record_id}.json{crypto.ENC_SUFFIX}",
+    )
 
 # ---------------------------------------------------------------
 # 저장
 # ---------------------------------------------------------------
+
+def save_raw_image(record_id: str, data: bytes, ext: str = "png") -> str:
+    """원본 이미지 바이트를 암호화 저장. 저장 경로 반환."""
+    path = raw_path_for(record_id, ext=ext)
+    return crypto.write_encrypted_file(path, data, associated_data=_aad(record_id))
+
+
+def save_report_image(record_id: str, data: bytes) -> str:
+    """리포트 이미지(PNG 바이트)를 암호화 저장. 저장 경로 반환."""
+    path = report_image_path_for(record_id)
+    return crypto.write_encrypted_file(path, data, associated_data=_aad(record_id))
+
 # save_metadata
 # ---------------------------------------------------------------
 # 단건 분석의 메타데이터(라벨/확률/품질/지표 등)를 JSON 파일로 저장한다.
@@ -92,7 +116,7 @@ def save_metadata(
     """분석 메타데이터를 JSON으로 저장. 저장 경로 반환."""
     payload = {
         "id": record_id,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "original_filename": original_filename,
         "raw_url": raw_url,
         "report_url": report_url,
@@ -102,10 +126,8 @@ def save_metadata(
         "metrics": metrics,
     }
     path = metadata_path_for(record_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return path
+    blob = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return crypto.write_encrypted_file(path, blob, associated_data=_aad(record_id))
 
 
 # ---------------------------------------------------------------
@@ -222,27 +244,62 @@ def load_record(record_id: str) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except (OSError, json.JSONDecodeError):
+        plaintext = crypto.read_encrypted_file(
+            meta_path, associated_data=_aad(record_id)
+        )
+        payload = json.loads(plaintext.decode("utf-8"))
+    except (OSError, json.JSONDecodeError, crypto.DecryptionFailed):
         return None
-
-    # raw 파일은 확장자가 다양할 수 있어 prefix 매칭으로 fallback 탐색
-    raw_url = payload.get("raw_url")
-    if raw_url and not os.path.exists(raw_url):
-        candidates = [
-            os.path.join(UPLOAD_DIR, f)
-            for f in os.listdir(UPLOAD_DIR)
-            if f.startswith(f"raw_{record_id}.")
-        ] if os.path.isdir(UPLOAD_DIR) else []
-        payload["raw_url"] = candidates[0] if candidates else None
-
-    report_url = payload.get("report_url")
-    if report_url and not os.path.exists(report_url):
-        payload["report_url"] = None
-
+    
     return payload
 
+def load_raw_bytes(record_id: str) -> tuple[bytes, str] | None:
+    """
+    raw 이미지 바이트와 원본 확장자를 반환. 없으면 None.
+    """
+    if not os.path.isdir(UPLOAD_DIR):
+        return None
+    for fname in os.listdir(UPLOAD_DIR):
+        if fname.startswith(f"raw_{record_id}.") and fname.endswith(crypto.ENC_SUFFIX):
+            path = os.path.join(UPLOAD_DIR, fname)
+            try:
+                data = crypto.read_encrypted_file(
+                    path, associated_data=_aad(record_id)
+                )
+            except (OSError, crypto.DecryptionFailed):
+                return None
+            # raw_<id>.<ext>.enc 에서 <ext> 추출
+            stem = fname[: -len(crypto.ENC_SUFFIX)]      # raw_<id>.<ext>
+            ext = stem.rsplit(".", 1)[-1] if "." in stem else "png"
+            return data, ext
+    return None    
+
+def load_report_bytes(record_id: str) -> bytes | None:
+    path = report_image_path_for(record_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        return crypto.read_encrypted_file(path, associated_data=_aad(record_id))
+    except (OSError, crypto.DecryptionFailed):
+        return None
 
 def count_records() -> int:
     return len(_iter_metadata_files())
+
+
+def delete_record_files(record_id: str) -> None:
+    """raw + report + metadata 파일 모두 삭제 (없는 건 스킵)."""
+    # raw
+    if os.path.isdir(UPLOAD_DIR):
+        for fname in os.listdir(UPLOAD_DIR):
+            if fname.startswith(f"raw_{record_id}."):
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, fname))
+                except OSError:
+                    pass
+    for path in (report_image_path_for(record_id), metadata_path_for(record_id)):
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass

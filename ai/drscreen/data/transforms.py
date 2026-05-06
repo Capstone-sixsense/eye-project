@@ -62,8 +62,8 @@ class FundusPreprocess:
 
         If the disk centroid is more than ``align_decentering_limit`` of the
         shorter image dimension from the frame center, alignment is skipped —
-        the image is too severely decentered for reliable geometric correction
-        and will be handled by the quality assessor downstream.
+        the image is too severely decentered for reliable geometric correction,
+        so preprocessing falls back to circular crop + Ben Graham only.
         """
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         _, mask = cv2.threshold(gray, self._crop_tol, 255, cv2.THRESH_BINARY)
@@ -243,6 +243,7 @@ def build_train_transform(
     mean: tuple[float, float, float] = (0.485, 0.456, 0.406),
     std: tuple[float, float, float] = (0.229, 0.224, 0.225),
     use_preprocessing: bool = False,
+    use_random_resized_crop: bool = True,
 ) -> _TrainTransform:
     resize = resize_size or crop_size
 
@@ -250,12 +251,15 @@ def build_train_transform(
     if use_preprocessing:
         pil_steps.append(FundusPreprocess())
 
-    aug = A.Compose([
-        # Resize to intermediate resolution before crop so that scale=(0.8, 1.0)
-        # crops from a higher-res image, avoiding quality degradation.
+    resize_steps: list = [A.Resize(resize, resize)]
+    if use_random_resized_crop:
         # Lower bound 0.8 (not 0.7) to avoid cropping out peripheral lesions.
-        A.Resize(resize, resize),
-        A.RandomResizedCrop(size=(crop_size, crop_size), scale=(0.8, 1.0)),
+        resize_steps.append(A.RandomResizedCrop(size=(crop_size, crop_size), scale=(0.8, 1.0)))
+    elif resize != crop_size:
+        resize_steps.append(A.CenterCrop(crop_size, crop_size))
+
+    aug = A.Compose([
+        *resize_steps,
 
         # Geometric: fundus lesions are rotation-invariant; all orientations valid.
         A.HorizontalFlip(p=0.5),

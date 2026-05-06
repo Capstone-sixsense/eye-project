@@ -13,9 +13,9 @@ train:
   finetune_epochs: 15
   backbone_learning_rate: 0.00004
   lambda_aux_seg: 0.3
-  pretrained_backbone_path: artifacts/checkpoints/v7_512_messidor_train/best.pt
+  pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v24_multitask/best.pt
+  checkpoint_path: artifacts/runs/04_lesion_supervision/v24_multitask/checkpoints/best.pt
   threshold: 0.42
   gradcam_method: layercam

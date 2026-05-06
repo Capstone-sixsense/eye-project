@@ -1,10 +1,10 @@
 project:
-  version: v21_512_layercam
+  version: v29_with_attention
 
-data:
-  train_exclude_domains: []
-  use_fda: true
-  fda_alpha: 0.05
+model:
+  use_attention: true
+  use_aux_seg: true
+  aux_seg_block: 2
 
 train:
   loss: focal
@@ -13,9 +13,10 @@ train:
   head_epochs: 0
   finetune_epochs: 15
   backbone_learning_rate: 0.00004
+  lambda_aux_seg: 0.3
   pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
 
 infer:
-  checkpoint_path: artifacts/runs/03_resolution_layercam/v21_512_layercam/checkpoints/best.pt
+  checkpoint_path: artifacts/runs/05_xai_attention_ablation/v29_with_attention/checkpoints/best.pt
   threshold: 0.42
   gradcam_method: layercam

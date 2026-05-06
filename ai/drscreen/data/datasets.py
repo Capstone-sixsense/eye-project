@@ -5,9 +5,11 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from drscreen.data.mask_providers import IDRiDMaskProvider, LesionMaskProvider, NullMaskProvider
 from drscreen.data.transforms import fda_mix
 
 
@@ -18,10 +20,22 @@ class ManifestDataset(Dataset):
         image_root: str | Path | None = None,
         split: str | None = None,
         transform: Callable[[Image.Image], Any] | None = None,
+        seg_mask_dir: str | Path | None = None,
+        seg_mask_size: int = 512,
+        mask_provider: LesionMaskProvider | None = None,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.image_root = Path(image_root) if image_root else self.manifest_path.parent
         self.transform = transform
+        self._seg_mask_size = seg_mask_size
+
+        # mask_provider takes precedence; seg_mask_dir is a convenience shorthand
+        if mask_provider is not None:
+            self._mask_provider: LesionMaskProvider = mask_provider
+        elif seg_mask_dir is not None:
+            self._mask_provider = IDRiDMaskProvider(seg_mask_dir)
+        else:
+            self._mask_provider = NullMaskProvider()
 
         frame = pd.read_csv(self.manifest_path)
         required_columns = {"image_path", "label", "split"}
@@ -43,12 +57,18 @@ class ManifestDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         if self.transform is not None:
             image = self.transform(image)
+        domain = str(row["domain"]) if "domain" in self.frame.columns else ""
+        seg_mask, seg_mask_valid = self._mask_provider.load(
+            str(row["image_path"]), domain, self._seg_mask_size
+        )
         return {
             "image": image,
             "label": int(row["label"]),
             "image_path": str(image_path),
             "split": str(row["split"]),
-            "domain": str(row["domain"]) if "domain" in self.frame.columns else "",
+            "domain": domain,
+            "seg_mask": seg_mask,
+            "seg_mask_valid": seg_mask_valid,
         }
 
 
@@ -85,8 +105,15 @@ class FDAManifestDataset(ManifestDataset):
         transform: Callable[[Image.Image], Any] | None = None,
         fda_alpha: float = 0.05,
         domain_column: str = "domain",
+        seg_mask_dir: str | Path | None = None,
+        seg_mask_size: int = 512,
+        mask_provider: LesionMaskProvider | None = None,
     ) -> None:
-        super().__init__(manifest_path, image_root, split, transform)
+        super().__init__(
+            manifest_path, image_root, split, transform,
+            seg_mask_dir=seg_mask_dir, seg_mask_size=seg_mask_size,
+            mask_provider=mask_provider,
+        )
         self._alpha = fda_alpha
         self._domain_column = domain_column
         self._rng = np.random.default_rng()
@@ -139,10 +166,16 @@ class FDAManifestDataset(ManifestDataset):
         if self.transform is not None:
             image = self.transform(image)
 
+        domain = str(row["domain"]) if "domain" in self.frame.columns else ""
+        seg_mask, seg_mask_valid = self._mask_provider.load(
+            str(row["image_path"]), domain, self._seg_mask_size
+        )
         return {
             "image": image,
             "label": int(row["label"]),
             "image_path": str(self.image_root / str(row["image_path"])),
             "split": str(row["split"]),
-            "domain": str(row["domain"]) if "domain" in self.frame.columns else "",
+            "domain": domain,
+            "seg_mask": seg_mask,
+            "seg_mask_valid": seg_mask_valid,
         }

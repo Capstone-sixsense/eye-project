@@ -31,6 +31,7 @@ class QualitySummary {
 class AnalyzeResponse {
   const AnalyzeResponse({
     required this.status,
+    this.recordId,
     this.message,
     this.details,
     this.label,
@@ -45,6 +46,9 @@ class AnalyzeResponse {
   });
 
   final String status;
+
+  /// `POST /analyze` 의 `id` 또는 히스토리 메타의 `id` (예: `20260428_165403_123`).
+  final String? recordId;
   final String? message;
   final Map<String, dynamic>? details;
   final String? label;
@@ -110,6 +114,7 @@ class AnalyzeResponse {
 
     return AnalyzeResponse(
       status: json['status'] as String? ?? 'unknown',
+      recordId: json['id'] as String?,
       message: json['message'] as String?,
       details: details,
       label: json['label'] as String? ?? json['predicted_label'] as String?,
@@ -122,6 +127,33 @@ class AnalyzeResponse {
       explanationImageUrl: explanation,
       xaiErrorCode:
           json['xai_error_code'] as String? ?? json['xai_error'] as String?,
+    );
+  }
+
+  /// `GET /history`·`GET /history/{id}` 에서 저장된 메타(JSON) 규격.
+  factory AnalyzeResponse.fromHistoryRecord(Map<String, dynamic> json) {
+    final metrics = json['metrics'];
+    Map<String, dynamic>? details;
+    if (metrics is Map<String, dynamic>) {
+      details = {'eval_metrics': metrics};
+    }
+    return AnalyzeResponse(
+      status: 'success',
+      recordId: json['id'] as String?,
+      message: null,
+      details: details,
+      label: json['label'] as String?,
+      abnormalProbability:
+          (json['abnormal_probability'] as num?)?.toDouble(),
+      reportUrl: (json['report_url'] ?? json['reportUrl']) as String?,
+      originalUrl: (json['raw_url'] ?? json['original_url'] ?? json['rawUrl']) as String?,
+      preprocessed: 1,
+      errorCode: null,
+      quality: QualitySummary.tryParse(json['quality']),
+      explanationImageUrl: (json['explanation_url'] ??
+          json['explanation_image_url'] ??
+          json['heatmap_url']) as String?,
+      xaiErrorCode: null,
     );
   }
 

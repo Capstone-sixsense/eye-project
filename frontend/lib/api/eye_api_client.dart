@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
 
 /// 백엔드/게이트웨이가 돌려주는 HTTP 오류 본문에서 코드 추출 (가능할 때만).
@@ -31,6 +32,22 @@ String? parseErrorCodeFromBody(String body) {
     }
   } catch (_) {}
   return null;
+}
+
+class HistoryListPage {
+  const HistoryListPage({
+    required this.total,
+    required this.limit,
+    required this.offset,
+    required this.items,
+  });
+
+  final int total;
+  final int limit;
+  final int offset;
+
+  /// 이미 검증된 엔트리만 포함 (파싱 실패 행 제외).
+  final List<AnalysisHistoryEntry> items;
 }
 
 class EyeApiException implements Exception {
@@ -121,6 +138,69 @@ class EyeApiClient {
             ? detail.map((e) => e.toString()).join(', ')
             : response.body;
     throw EyeApiException(response.statusCode, msg, errorCode: code);
+  }
+
+  /// `GET /history` — 페이지네이션 목록 (최신순 서버 순서).
+  Future<HistoryListPage> fetchHistoryPage({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
+    final uri = Uri.parse(base).resolve('history').replace(
+          queryParameters: <String, String>{
+            'limit': '$limit',
+            'offset': '$offset',
+          },
+        );
+
+    debugPrint('[EyeApi] GET $uri');
+    final response = await _client.get(uri);
+    debugPrint('[EyeApi] history ${response.statusCode}');
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw EyeApiException(response.statusCode, response.body);
+    }
+
+    Map<String, dynamic>? map;
+    try {
+      final d = jsonDecode(response.body);
+      if (d is Map<String, dynamic>) map = d;
+    } catch (_) {}
+
+    if (map == null) {
+      throw EyeApiException(response.statusCode, '히스토리 응답 JSON 파싱 실패');
+    }
+
+    final rawItems = map['items'];
+    final parsed = <AnalysisHistoryEntry>[];
+    if (rawItems is List) {
+      for (final e in rawItems) {
+        if (e is Map) {
+          final row = AnalysisHistoryEntry.tryParse(
+            Map<String, dynamic>.from(e),
+          );
+          if (row != null) parsed.add(row);
+        }
+      }
+    }
+
+    return HistoryListPage(
+      total: (map['total'] as num?)?.toInt() ?? parsed.length,
+      limit: (map['limit'] as num?)?.toInt() ?? limit,
+      offset: (map['offset'] as num?)?.toInt() ?? offset,
+      items: parsed,
+    );
+  }
+
+  Future<void> deleteHistoryRecord(String recordId) async {
+    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
+    final uri =
+        Uri.parse(base).resolve('history/${Uri.encodeComponent(recordId)}');
+    debugPrint('[EyeApi] DELETE $uri');
+    final response = await _client.delete(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw EyeApiException(response.statusCode, response.body);
+    }
   }
 
   void close() => _client.close();

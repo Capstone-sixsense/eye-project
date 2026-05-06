@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import timm
 import torch
 import torch.nn as nn
@@ -64,6 +62,78 @@ class _EcaSpatialAttn(nn.Module):
         return self.spatial(self.eca(x))
 
 
+# ---------------------------------------------------------------------------
+# Variant builders (internal) — called by build_model() dispatcher
+# ---------------------------------------------------------------------------
+
+def _build_efficientnet_b5(
+    *,
+    pretrained: bool,
+    num_outputs: int,
+    use_attention: bool,
+    use_ibn: bool,
+    grad_checkpointing: bool,
+    in_channels: int = 3,
+) -> nn.Module:
+    se_layer = _EcaSpatialAttn if use_attention else EcaModule
+    model = timm.create_model(
+        "efficientnet_b5",
+        pretrained=pretrained,
+        se_layer=se_layer,
+        num_classes=num_outputs,
+        in_chans=in_channels,
+    )
+    if use_ibn:
+        _inject_ibn(model)
+    if grad_checkpointing:
+        model.set_grad_checkpointing(True)
+    return model
+
+
+def _build_multitask_aux_seg(
+    *,
+    pretrained: bool,
+    num_outputs: int,
+    use_attention: bool,
+    use_ibn: bool,
+    grad_checkpointing: bool,
+    aux_seg_block: int,
+    aux_seg_output_size: int,
+) -> nn.Module:
+    from drscreen.models.aux_seg import MultiTaskModel
+    backbone = _build_efficientnet_b5(
+        pretrained=pretrained,
+        num_outputs=num_outputs,
+        use_attention=use_attention,
+        use_ibn=use_ibn,
+        grad_checkpointing=grad_checkpointing,
+    )
+    return MultiTaskModel(backbone, block_index=aux_seg_block, output_size=aux_seg_output_size)
+
+
+def _build_mil_attention(
+    *,
+    pretrained: bool,
+    num_outputs: int,
+    use_attention: bool,
+    use_ibn: bool,
+    grad_checkpointing: bool,
+) -> nn.Module:
+    from drscreen.models.mil_attention import MILAttentionModel
+    backbone = _build_efficientnet_b5(
+        pretrained=pretrained,
+        num_outputs=num_outputs,
+        use_attention=use_attention,
+        use_ibn=use_ibn,
+        grad_checkpointing=grad_checkpointing,
+    )
+    return MILAttentionModel(backbone, num_outputs=num_outputs)
+
+
+# ---------------------------------------------------------------------------
+# Public API — signature preserved for all existing callers
+# ---------------------------------------------------------------------------
+
 def build_model(
     model_name: str,
     pretrained: bool = True,
@@ -74,23 +144,36 @@ def build_model(
     use_aux_seg: bool = False,
     aux_seg_block: int = 2,
     aux_seg_output_size: int = 512,
+    use_mil_attention: bool = False,
+    in_channels: int = 3,
 ) -> nn.Module:
     if model_name == "efficientnet_b5":
-        se_layer = _EcaSpatialAttn if use_attention else EcaModule
-        model = timm.create_model(
-            "efficientnet_b5",
-            pretrained=pretrained,
-            se_layer=se_layer,
-            num_classes=num_outputs,
-        )
-        if use_ibn:
-            _inject_ibn(model)
-        if grad_checkpointing:
-            model.set_grad_checkpointing(True)
         if use_aux_seg:
-            from drscreen.models.aux_seg import MultiTaskModel
-            return MultiTaskModel(model, block_index=aux_seg_block, output_size=aux_seg_output_size)
-        return model
+            return _build_multitask_aux_seg(
+                pretrained=pretrained,
+                num_outputs=num_outputs,
+                use_attention=use_attention,
+                use_ibn=use_ibn,
+                grad_checkpointing=grad_checkpointing,
+                aux_seg_block=aux_seg_block,
+                aux_seg_output_size=aux_seg_output_size,
+            )
+        if use_mil_attention:
+            return _build_mil_attention(
+                pretrained=pretrained,
+                num_outputs=num_outputs,
+                use_attention=use_attention,
+                use_ibn=use_ibn,
+                grad_checkpointing=grad_checkpointing,
+            )
+        return _build_efficientnet_b5(
+            pretrained=pretrained,
+            num_outputs=num_outputs,
+            use_attention=use_attention,
+            use_ibn=use_ibn,
+            grad_checkpointing=grad_checkpointing,
+            in_channels=in_channels,
+        )
 
     weights = get_weights_enum(model_name) if pretrained else None
 
@@ -126,13 +209,20 @@ def split_model_parameters(
     model_name: str,
     model: nn.Module,
 ) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
-    classifier = get_classifier_module(model_name, model)
-    head_ids = {id(p) for p in classifier.parameters()}
+    from drscreen.models.mil_attention import MILAttentionModel
 
-    # Treat aux seg head parameters as head parameters (trained at head LR)
-    seg_head = getattr(model, "seg_head", None)
-    if seg_head is not None:
-        head_ids |= {id(p) for p in seg_head.parameters()}
+    if isinstance(model, MILAttentionModel):
+        head_ids = (
+            {id(p) for p in model.attn_pool.parameters()}
+            | {id(p) for p in model.classifier.parameters()}
+        )
+    else:
+        classifier = get_classifier_module(model_name, model)
+        head_ids = {id(p) for p in classifier.parameters()}
+
+        seg_head = getattr(model, "seg_head", None)
+        if seg_head is not None:
+            head_ids |= {id(p) for p in seg_head.parameters()}
 
     backbone_parameters: list[nn.Parameter] = []
     head_parameters: list[nn.Parameter] = []
