@@ -253,6 +253,7 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 
 
         prob = pred.payload.get("abnormal_probability", 0.0)
+        decision_threshold = pred.payload.get("decision_threshold")
         metrics = {
             "accuracy": prob,
             "precision": prob,
@@ -280,6 +281,7 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "id": record_id,
             "label": pred.payload.get("predicted_label"),
             "abnormal_probability": prob,
+            "decision_threshold": decision_threshold,
             "quality": quality,
             "quality_warning": quality_warning,
             "report_url": f"/image/report/{record_id}",

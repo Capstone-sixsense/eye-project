@@ -5,7 +5,7 @@ from pathlib import Path
 from pprint import pprint
 
 from drscreen.settings import ensure_runtime_directories, load_app_config
-from drscreen.train.runner import run_split_evaluation
+from drscreen.train.evaluate import run_split_evaluation
 
 
 def parse_args() -> argparse.Namespace:

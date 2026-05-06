@@ -1,0 +1,14 @@
+project:
+  version: effnet_ssl_clean
+
+model:
+  pretrained: false
+
+train:
+  head_epochs: 3
+  finetune_epochs: 15
+  loss: bce
+  pretrained_backbone_path: artifacts/runs/01_ssl_lineage/ssl_effnet_clean/checkpoints/effnet_simclr_clean.pth
+
+infer:
+  checkpoint_path: artifacts/runs/01_ssl_lineage/effnet_ssl_clean/checkpoints/best.pt

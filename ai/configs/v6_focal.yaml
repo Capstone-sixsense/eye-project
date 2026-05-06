@@ -1,9 +1,6 @@
 project:
   version: v6
 
-model:
-  use_mixstyle: false
-
 train:
   loss: focal
   focal_gamma: 2.0
@@ -11,7 +8,7 @@ train:
   head_epochs: 0
   finetune_epochs: 15
   backbone_learning_rate: 0.00004
-  pretrained_backbone_path: artifacts/checkpoints/v4.1/best.pt
+  pretrained_backbone_path: artifacts/runs/01_ssl_lineage/v4.1/checkpoints/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v6/best.pt
+  checkpoint_path: artifacts/runs/01_ssl_lineage/v6/checkpoints/best.pt

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import crypto
@@ -116,7 +116,7 @@ def save_metadata(
     """분석 메타데이터를 JSON으로 저장. 저장 경로 반환."""
     payload = {
         "id": record_id,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "original_filename": original_filename,
         "raw_url": raw_url,
         "report_url": report_url,
