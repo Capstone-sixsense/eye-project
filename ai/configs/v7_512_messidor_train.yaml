@@ -1,0 +1,14 @@
+project:
+  version: v7_512_messidor_train
+
+data:
+  train_exclude_domains: []
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+
+infer:
+  checkpoint_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
+  threshold: 0.09

@@ -2,7 +2,6 @@ project:
   version: v14_ibn
 
 model:
-  use_mixstyle: false
   use_ibn: true
 
 train:
@@ -13,8 +12,8 @@ train:
   finetune_epochs: 20
   warmup_epochs: 3
   backbone_learning_rate: 0.00004
-  pretrained_backbone_path: artifacts/checkpoints/v9_fda/best.pt
+  pretrained_backbone_path: artifacts/runs/02_domain_generalization/v9_fda/checkpoints/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v14_ibn/best.pt
+  checkpoint_path: artifacts/runs/02_domain_generalization/v14_ibn/checkpoints/best.pt
   threshold: 0.5

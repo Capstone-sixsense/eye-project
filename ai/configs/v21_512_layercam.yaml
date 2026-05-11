@@ -1,0 +1,21 @@
+project:
+  version: v21_512_layercam
+
+data:
+  train_exclude_domains: []
+  use_fda: true
+  fda_alpha: 0.05
+
+train:
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
+
+infer:
+  checkpoint_path: artifacts/runs/03_resolution_layercam/v21_512_layercam/checkpoints/best.pt
+  threshold: 0.42
+  gradcam_method: layercam

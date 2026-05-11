@@ -4,14 +4,11 @@ project:
 data:
   train_exclude_domains: []
 
-model:
-  use_mixstyle: false
-
 train:
   loss: focal
   focal_gamma: 0.0
   focal_alpha: 0.75
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v7_messidor_train/best.pt
+  checkpoint_path: artifacts/runs/02_domain_generalization/v7_messidor_train/checkpoints/best.pt
   threshold: 0.09

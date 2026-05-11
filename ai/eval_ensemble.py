@@ -5,7 +5,7 @@ Usage:
         --config1 configs/v9_fda.yaml \
         --config2 configs/v10_swad.yaml \
         --split external_test \
-        --out artifacts/evaluations/ensemble_v9v10/external_test.json
+        --out artifacts/runs/02_domain_generalization/ensemble_v9v10/evaluations/external_test.json
 """
 from __future__ import annotations
 
@@ -23,11 +23,12 @@ from drscreen.models.profiles import get_model_profile
 from drscreen.settings import (
     build_effective_checkpoint_config,
     load_app_config,
+    resolve_checkpoint_path,
     resolve_project_path,
 )
 from drscreen.train.engine import collect_logits_and_targets
 from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
-from drscreen.train.runner import resolve_device
+from drscreen.train.model_setup import resolve_device
 from drscreen.utils.checkpoint import load_state_from_checkpoint
 
 
@@ -44,7 +45,7 @@ def _load_model_and_logits(
         config_path,
         base_path=base_path if config_path.name != "base.yaml" and base_path.exists() else None,
     )
-    ckpt_path = resolve_project_path(project_root, config["infer"]["checkpoint_path"])
+    ckpt_path = resolve_checkpoint_path(project_root, config["infer"]["checkpoint_path"])
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     eff_cfg = build_effective_checkpoint_config(config, checkpoint)
 
@@ -53,9 +54,10 @@ def _load_model_and_logits(
         pretrained=False,
         num_outputs=int(eff_cfg["model"]["num_outputs"]),
         use_attention=bool(eff_cfg["model"].get("use_attention", False)),
-        use_mixstyle=bool(eff_cfg["model"].get("use_mixstyle", False)),
         use_ibn=bool(eff_cfg["model"].get("use_ibn", False)),
-        classifier_dropout=float(eff_cfg["model"].get("classifier_dropout", 0.0)),
+        use_aux_seg=bool(eff_cfg["model"].get("use_aux_seg", False)),
+        aux_seg_block=int(eff_cfg["model"].get("aux_seg_block", 2)),
+        aux_seg_output_size=int(eff_cfg["model"].get("aux_seg_output_size", eff_cfg["data"].get("image_size", 512))),
     ).to(device)
     load_state_from_checkpoint(model, checkpoint)
 
@@ -85,7 +87,10 @@ def main() -> None:
     parser.add_argument("--config1", required=True)
     parser.add_argument("--config2", required=True)
     parser.add_argument("--split", default="external_test")
-    parser.add_argument("--out", default="artifacts/evaluations/ensemble_v9v10/external_test.json")
+    parser.add_argument(
+        "--out",
+        default="artifacts/runs/02_domain_generalization/ensemble_v9v10/evaluations/external_test.json",
+    )
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -141,7 +146,7 @@ def main() -> None:
         "metrics_at_optimal_threshold": metrics_opt.to_dict(),
     }
 
-    out_path = Path(args.out)
+    out_path = resolve_project_path(project_root, args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2))
 
