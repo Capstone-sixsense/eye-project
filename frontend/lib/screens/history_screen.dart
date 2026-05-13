@@ -1,10 +1,43 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/eye_api_client.dart';
 import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
+
+/// 판정 필터 — [`_HistoryJudgmentIcon`]·목록 배지와 같은 기준.
+enum _JudgmentFilter { all, abnormal, normal, unknown }
+
+/// 기간 필터 (로컬 `createdAt` 기준).
+enum _PeriodFilter { all, today, last7, last30, custom }
+
+_JudgmentKind _judgmentKind(AnalysisHistoryEntry e) {
+  final label = e.response.label ?? '';
+  final lower = label.toLowerCase();
+  if (lower.contains('abnormal') || label.contains('이상')) {
+    return _JudgmentKind.abnormal;
+  }
+  if (label.isEmpty ||
+      label.contains('판정 없음') ||
+      lower.contains('unknown')) {
+    return _JudgmentKind.unknown;
+  }
+  return _JudgmentKind.normal;
+}
+
+enum _JudgmentKind { abnormal, normal, unknown }
+
+class _FilterDismissIntent extends Intent {
+  const _FilterDismissIntent();
+}
+
+class _FilterConfirmIntent extends Intent {
+  const _FilterConfirmIntent();
+}
 
 /// 이력 보기 — 백엔드 `GET /history` 에 저장된 영구 이력을 표시.
 class HistoryScreen extends StatefulWidget {
@@ -33,12 +66,301 @@ class _HistoryScreenState extends State<HistoryScreen> {
   bool _loadMoreBusy = false;
   String? _fetchError;
 
+  bool _filterPanelOpen = false;
+  _JudgmentFilter _judgmentFilter = _JudgmentFilter.all;
+  _PeriodFilter _periodFilter = _PeriodFilter.all;
+  DateTime? _customRangeStart;
+  DateTime? _customRangeEnd;
+
+  final LayerLink _filterLayerLink = LayerLink();
+  final FocusNode _filterOverlayFocusNode = FocusNode();
+  final GlobalKey<_CompactDateRangeCalendarState> _dateRangeCalendarKey =
+      GlobalKey<_CompactDateRangeCalendarState>();
+  OverlayEntry? _filterOverlayEntry;
+  bool _calendarOpen = false;
+
+  static const double _kFilterPanelWidth = 504;
+
   bool get _hasMore => _entries.length < _total;
+
+  bool get _filtersActive {
+    if (_judgmentFilter != _JudgmentFilter.all) return true;
+    switch (_periodFilter) {
+      case _PeriodFilter.all:
+        return false;
+      case _PeriodFilter.custom:
+        return _customRangeStart != null && _customRangeEnd != null;
+      case _PeriodFilter.today:
+      case _PeriodFilter.last7:
+      case _PeriodFilter.last30:
+        return true;
+    }
+  }
+
+  List<AnalysisHistoryEntry> get _filteredEntries {
+    return _entries.where(_passesFilters).toList();
+  }
+
+  bool _passesFilters(AnalysisHistoryEntry e) {
+    if (!_matchesJudgment(e)) return false;
+    if (!_matchesPeriod(e)) return false;
+    return true;
+  }
+
+  bool _matchesJudgment(AnalysisHistoryEntry e) {
+    switch (_judgmentFilter) {
+      case _JudgmentFilter.all:
+        return true;
+      case _JudgmentFilter.abnormal:
+        return _judgmentKind(e) == _JudgmentKind.abnormal;
+      case _JudgmentFilter.normal:
+        return _judgmentKind(e) == _JudgmentKind.normal;
+      case _JudgmentFilter.unknown:
+        return _judgmentKind(e) == _JudgmentKind.unknown;
+    }
+  }
+
+  bool _matchesPeriod(AnalysisHistoryEntry e) {
+    final t = e.createdAt.toLocal();
+    final now = DateTime.now();
+    switch (_periodFilter) {
+      case _PeriodFilter.all:
+        return true;
+      case _PeriodFilter.today:
+        final d = DateTime(t.year, t.month, t.day);
+        final n = DateTime(now.year, now.month, now.day);
+        return d == n;
+      case _PeriodFilter.last7:
+        final today = DateTime(now.year, now.month, now.day);
+        final from = today.subtract(const Duration(days: 7));
+        final d = DateTime(t.year, t.month, t.day);
+        return !d.isBefore(from);
+      case _PeriodFilter.last30:
+        final today = DateTime(now.year, now.month, now.day);
+        final from = today.subtract(const Duration(days: 30));
+        final d = DateTime(t.year, t.month, t.day);
+        return !d.isBefore(from);
+      case _PeriodFilter.custom:
+        final s = _customRangeStart;
+        final end = _customRangeEnd;
+        // 확정된 날짜 범위가 없으면(선택 중·미적용) 목록을 비우지 않음
+        if (s == null || end == null) return true;
+        final day = DateTime(t.year, t.month, t.day);
+        final sDay = DateTime(s.year, s.month, s.day);
+        final eDay = DateTime(end.year, end.month, end.day);
+        return !day.isBefore(sDay) && !day.isAfter(eDay);
+    }
+  }
+
+  void _removeFilterOverlay() {
+    _filterOverlayEntry?.remove();
+    _filterOverlayEntry = null;
+  }
+
+  void _syncFilterOverlay() {
+    _filterOverlayEntry?.markNeedsBuild();
+  }
+
+  void _showFilterOverlay() {
+    if (!_filterPanelOpen || !mounted) return;
+    _removeFilterOverlay();
+    _filterOverlayEntry = OverlayEntry(
+      builder: (_) => _buildFilterOverlayLayer(),
+    );
+    Overlay.of(context).insert(_filterOverlayEntry!);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _filterOverlayFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _closeFilterPanelOverlay() {
+    if (!mounted) return;
+    setState(() {
+      _filterPanelOpen = false;
+      _calendarOpen = false;
+      _selectedIndices.clear();
+    });
+    _removeFilterOverlay();
+  }
+
+  /// 하단 [확인] — 날짜 달력이 열려 있으면 선택 구간을 저장한 뒤 패널을 닫습니다.
+  void _confirmFilterFooter() {
+    if (!mounted) return;
+    setState(() {
+      if (_calendarOpen) {
+        final r = _dateRangeCalendarKey.currentState?.commitPendingRange();
+        if (r != null) {
+          _periodFilter = _PeriodFilter.custom;
+          _customRangeStart =
+              DateTime(r.start.year, r.start.month, r.start.day);
+          _customRangeEnd = DateTime(r.end.year, r.end.month, r.end.day);
+        }
+        _calendarOpen = false;
+      }
+      _filterPanelOpen = false;
+      _selectedIndices.clear();
+    });
+    _removeFilterOverlay();
+  }
+
+  Widget _buildFilterOverlayLayer() {
+    void barrierDismiss() => _closeFilterPanelOverlay();
+
+    final stack = Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: barrierDismiss,
+            child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
+          ),
+        ),
+        CompositedTransformFollower(
+          link: _filterLayerLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomRight,
+          followerAnchor: Alignment.topRight,
+          offset: const Offset(0, 6),
+          child: Builder(
+            builder: (overlayContext) {
+              final screenW = MediaQuery.sizeOf(overlayContext).width;
+              final horizontalMargin = 12.0;
+              final panelW = math.min(
+                _kFilterPanelWidth,
+                math.max(280.0, screenW - horizontalMargin * 2),
+              );
+              return SizedBox(
+                width: panelW,
+                child: Material(
+                  elevation: 12,
+                  shadowColor: const Color(0x260C2A4A),
+                  borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+                  clipBehavior: Clip.antiAlias,
+                  color: Colors.white,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _HistoryFilterPanel(
+                        judgment: _judgmentFilter,
+                        period: _periodFilter,
+                        customStart: _customRangeStart,
+                        customEnd: _customRangeEnd,
+                        onJudgmentChanged: (v) {
+                          setState(() {
+                            _judgmentFilter = v;
+                            _selectedIndices.clear();
+                          });
+                          _syncFilterOverlay();
+                        },
+                        onPeriodChanged: (v) {
+                          setState(() {
+                            _periodFilter = v;
+                            if (v != _PeriodFilter.custom) {
+                              _customRangeStart = null;
+                              _customRangeEnd = null;
+                              _calendarOpen = false;
+                            }
+                            _selectedIndices.clear();
+                          });
+                          _syncFilterOverlay();
+                        },
+                        onDateRangeChipTap: () {
+                          setState(() {
+                            _periodFilter = _PeriodFilter.custom;
+                            _calendarOpen = true;
+                          });
+                          _syncFilterOverlay();
+                        },
+                      ),
+                      if (_calendarOpen)
+                        _CompactDateRangeCalendar(
+                          key: _dateRangeCalendarKey,
+                          initialStart: _customRangeStart,
+                          initialEnd: _customRangeEnd,
+                        ),
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: MedicalTokens.spaceSm,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            TextButton(
+                              onPressed: _confirmFilterFooter,
+                              child: const Text('확인'),
+                            ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _resetFilters();
+                                  _selectedIndices.clear();
+                                });
+                                _syncFilterOverlay();
+                              },
+                              child: const Text('초기화'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+
+    return Shortcuts(
+      shortcuts: <ShortcutActivator, Intent>{
+        const SingleActivator(LogicalKeyboardKey.escape): const _FilterDismissIntent(),
+        const SingleActivator(LogicalKeyboardKey.enter): const _FilterConfirmIntent(),
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): const _FilterConfirmIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _FilterDismissIntent: CallbackAction<_FilterDismissIntent>(
+            onInvoke: (_) {
+              barrierDismiss();
+              return null;
+            },
+          ),
+          _FilterConfirmIntent: CallbackAction<_FilterConfirmIntent>(
+            onInvoke: (_) {
+              _confirmFilterFooter();
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          focusNode: _filterOverlayFocusNode,
+          child: stack,
+        ),
+      ),
+    );
+  }
 
   void _exitSelectionMode() {
     setState(() {
       _selectionMode = false;
       _selectedIndices.clear();
+    });
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _judgmentFilter = _JudgmentFilter.all;
+      _periodFilter = _PeriodFilter.all;
+      _customRangeStart = null;
+      _customRangeEnd = null;
+      _calendarOpen = false;
     });
   }
 
@@ -122,6 +444,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   void dispose() {
+    _removeFilterOverlay();
+    _filterOverlayFocusNode.dispose();
     _api.close();
     super.dispose();
   }
@@ -142,13 +466,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   void _toggleSelectAll() {
     setState(() {
-      if (_entries.isEmpty) return;
-      if (_selectedIndices.length == _entries.length) {
+      if (_filteredEntries.isEmpty) return;
+      if (_selectedIndices.length == _filteredEntries.length) {
         _selectedIndices.clear();
       } else {
         _selectedIndices
           ..clear()
-          ..addAll(List<int>.generate(_entries.length, (i) => i));
+          ..addAll(List<int>.generate(_filteredEntries.length, (i) => i));
       }
     });
   }
@@ -165,7 +489,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final sortedSnap = List<int>.from(_selectedIndices)..sort();
     final recordIds =
-        sortedSnap.map((i) => _entries[i].recordId).toSet().toList();
+        sortedSnap.map((i) => _filteredEntries[i].recordId).toSet().toList();
     final count = recordIds.length;
 
     final confirmed = await showDialog<bool>(
@@ -211,10 +535,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _syncSelectionToEntryCount(_entries.length);
+    _syncSelectionToEntryCount(_filteredEntries.length);
 
-    final allSelected =
-        _entries.isNotEmpty && _selectedIndices.length == _entries.length;
+    final allSelected = _filteredEntries.isNotEmpty &&
+        _selectedIndices.length == _filteredEntries.length;
 
     final appReady = !_loadingRefresh;
 
@@ -251,6 +575,49 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
         ),
       );
+    } else if (_filteredEntries.isEmpty) {
+      bodyContent = LayoutBuilder(
+        builder: (context, constraints) {
+          return RefreshIndicator(
+            onRefresh: _loadFirstPage,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(MedicalTokens.spaceLg),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '조건에 맞는 이력이 없습니다.\n필터를 변경하거나 초기화해 보세요.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: MedicalTokens.spaceMd),
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: IntrinsicWidth(
+                              child: MedicalSecondaryButton(
+                                label: '필터 초기화',
+                                onPressed: () {
+                                  setState(_resetFilters);
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
     } else {
       final scrollBody = NotificationListener<ScrollNotification>(
         onNotification: (n) {
@@ -261,13 +628,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
         },
         child: _viewMode == HistoryViewMode.list
             ? _HistoryListView(
-                entries: _entries,
+                entries: _filteredEntries,
                 selectionMode: _selectionMode,
                 selectedIndices: _selectedIndices,
                 onToggleSelection: _toggleIndex,
               )
             : _HistoryDashboardView(
-                entries: _entries,
+                entries: _filteredEntries,
                 selectionMode: _selectionMode,
                 selectedIndices: _selectedIndices,
                 onToggleSelection: _toggleIndex,
@@ -283,6 +650,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actionsIconTheme: IconThemeData(
+          color: MedicalTokens.textMain,
+          size: 22,
+        ),
         leading: canPop
             ? IconButton(
                 icon: Icon(
@@ -304,6 +675,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
           },
         ),
         actions: [
+          CompositedTransformTarget(
+            link: _filterLayerLink,
+            child: IconButton(
+              tooltip: '필터',
+              onPressed: !appReady
+                  ? null
+                  : () {
+                      if (_entries.isEmpty && !_filterPanelOpen) return;
+                      final opening = !_filterPanelOpen;
+                      setState(() {
+                        _filterPanelOpen = opening;
+                        if (!opening) {
+                          _calendarOpen = false;
+                          _selectedIndices.clear();
+                          _removeFilterOverlay();
+                        }
+                      });
+                      if (opening && _entries.isNotEmpty) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _showFilterOverlay();
+                        });
+                      }
+                    },
+              icon: _TuneSlidersGlyph(
+                size: 22,
+                color: !appReady
+                    ? MedicalTokens.textSubtle
+                    : (_filterPanelOpen || _filtersActive
+                        ? Theme.of(context).colorScheme.primary
+                        : MedicalTokens.textMain),
+              ),
+            ),
+          ),
           IconButton(
             onPressed: (_entries.isEmpty || !appReady) ? null : _onTrashPressed,
             icon: const Icon(Icons.delete_outline),
@@ -311,7 +715,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           if (_selectionMode && _entries.isNotEmpty && appReady) ...[
             IconButton(
-              onPressed: _toggleSelectAll,
+              onPressed: _filteredEntries.isEmpty ? null : _toggleSelectAll,
               icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
               tooltip: allSelected ? '전체 선택 해제' : '전체 선택',
             ),
@@ -348,6 +752,499 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Material 아이콘 폰트가 웹 빌드 등에서 로드되지 않을 때를 대비해, 튜닝(가로 슬라이더)을 직접 그립니다.
+class _TuneSlidersGlyph extends StatelessWidget {
+  const _TuneSlidersGlyph({
+    required this.color,
+    this.size = 22,
+  });
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _TuneSlidersPainter(color),
+    );
+  }
+}
+
+class _TuneSlidersPainter extends CustomPainter {
+  _TuneSlidersPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final trackW = math.max(1.2, h * 0.075);
+    final knobR = math.max(2.2, h * 0.11);
+
+    final trackPaint = Paint()
+      ..color = color.withValues(alpha: 0.45)
+      ..strokeWidth = trackW
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final knobPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final pad = w * 0.12;
+    final xL = pad;
+    final xR = w - pad;
+    final ys = [h * 0.26, h * 0.5, h * 0.74];
+    final tKnob = [0.38, 0.66, 0.48];
+
+    for (var i = 0; i < 3; i++) {
+      final y = ys[i];
+      canvas.drawLine(Offset(xL, y), Offset(xR, y), trackPaint);
+      final span = (xR - xL);
+      var kx = xL + span * tKnob[i];
+      final lo = xL + knobR;
+      final hi = xR - knobR;
+      if (kx < lo) kx = lo;
+      if (kx > hi) kx = hi;
+      canvas.drawCircle(Offset(kx, y), knobR, knobPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TuneSlidersPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+/// 한 달만 표시하고 화살표로 월 이동하는 컴팩트 기간 선택(필터 패널 아래 오버레이용).
+class _CompactDateRangeCalendar extends StatefulWidget {
+  const _CompactDateRangeCalendar({
+    super.key,
+    required this.initialStart,
+    required this.initialEnd,
+  });
+
+  final DateTime? initialStart;
+  final DateTime? initialEnd;
+
+  @override
+  State<_CompactDateRangeCalendar> createState() =>
+      _CompactDateRangeCalendarState();
+}
+
+class _CompactDateRangeCalendarState extends State<_CompactDateRangeCalendar> {
+  static DateTime _onlyDay(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  late DateTime _monthPage;
+  DateTime? _pickStart;
+  DateTime? _pickEnd;
+
+  DateTime get _firstDate => DateTime(2000, 1, 1);
+  DateTime get _lastDate => DateTime(DateTime.now().year + 1, 12, 31);
+
+  @override
+  void initState() {
+    super.initState();
+    _pickStart = widget.initialStart != null ? _onlyDay(widget.initialStart!) : null;
+    _pickEnd = widget.initialEnd != null ? _onlyDay(widget.initialEnd!) : null;
+    final anchor = _pickStart ?? _pickEnd ?? DateTime.now();
+    _monthPage = DateTime(anchor.year, anchor.month, 1);
+    _clampMonth();
+  }
+
+  void _clampMonth() {
+    final minM = DateTime(_firstDate.year, _firstDate.month, 1);
+    final maxM = DateTime(_lastDate.year, _lastDate.month, 1);
+    if (_monthPage.isBefore(minM)) _monthPage = minM;
+    if (_monthPage.isAfter(maxM)) _monthPage = maxM;
+  }
+
+  bool _canGoPrev() {
+    final prev = DateTime(_monthPage.year, _monthPage.month - 1, 1);
+    return !prev.isBefore(DateTime(_firstDate.year, _firstDate.month, 1));
+  }
+
+  bool _canGoNext() {
+    final next = DateTime(_monthPage.year, _monthPage.month + 1, 1);
+    return !next.isAfter(DateTime(_lastDate.year, _lastDate.month, 1));
+  }
+
+  void _prevMonth() {
+    if (!_canGoPrev()) return;
+    setState(() {
+      _monthPage = DateTime(_monthPage.year, _monthPage.month - 1, 1);
+      _clampMonth();
+    });
+  }
+
+  void _nextMonth() {
+    if (!_canGoNext()) return;
+    setState(() {
+      _monthPage = DateTime(_monthPage.year, _monthPage.month + 1, 1);
+      _clampMonth();
+    });
+  }
+
+  void _onDayTap(DateTime raw) {
+    final day = _onlyDay(raw);
+    if (day.isBefore(_onlyDay(_firstDate)) || day.isAfter(_onlyDay(_lastDate))) {
+      return;
+    }
+    setState(() {
+      if (_pickStart == null || (_pickStart != null && _pickEnd != null)) {
+        _pickStart = day;
+        _pickEnd = null;
+      } else {
+        if (day.isBefore(_pickStart!)) {
+          _pickEnd = _pickStart;
+          _pickStart = day;
+        } else {
+          _pickEnd = day;
+        }
+      }
+    });
+  }
+
+  /// 패널 [확인] 시 선택 구간을 부모에 넘기기 위해 호출합니다.
+  DateTimeRange? commitPendingRange() {
+    if (_pickStart == null) return null;
+    final start = _onlyDay(_pickStart!);
+    final end = _onlyDay(_pickEnd ?? _pickStart!);
+    return DateTimeRange(start: start, end: end);
+  }
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  bool _inSelectedRange(DateTime day) {
+    if (_pickStart == null || _pickEnd == null) return false;
+    final d = _onlyDay(day);
+    return !d.isBefore(_pickStart!) && !d.isAfter(_pickEnd!);
+  }
+
+  String _monthTitle(MaterialLocalizations loc) {
+    return loc.formatMonthYear(_monthPage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = MaterialLocalizations.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final wdLabels = loc.narrowWeekdays;
+    final startIdx = loc.firstDayOfWeekIndex;
+
+    final daysInMonth = DateTime(_monthPage.year, _monthPage.month + 1, 0).day;
+    final leading = DateUtils.firstDayOffset(
+      _monthPage.year,
+      _monthPage.month,
+      loc,
+    );
+
+    final cells = <Widget?>[];
+    for (var i = 0; i < leading; i++) {
+      cells.add(null);
+    }
+    for (var d = 1; d <= daysInMonth; d++) {
+      final date = DateTime(_monthPage.year, _monthPage.month, d);
+      cells.add(_dayCell(context, date, cs));
+    }
+    while (cells.length % 7 != 0) {
+      cells.add(null);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              IconButton(
+                onPressed: _canGoPrev() ? _prevMonth : null,
+                icon: const Icon(Icons.chevron_left),
+                tooltip: '이전 달',
+              ),
+              Expanded(
+                child: Text(
+                  _monthTitle(loc),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: MedicalTokens.textMain,
+                      ),
+                ),
+              ),
+              IconButton(
+                onPressed: _canGoNext() ? _nextMonth : null,
+                icon: const Icon(Icons.chevron_right),
+                tooltip: '다음 달',
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: List.generate(7, (i) {
+              final idx = (startIdx + i) % 7;
+              return Expanded(
+                child: Center(
+                  child: Text(
+                    wdLabels[idx],
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: MedicalTokens.textSubtle,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 6),
+          ...List.generate(cells.length ~/ 7, (row) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: List.generate(7, (col) {
+                  final idx = row * 7 + col;
+                  final w = cells[idx];
+                  return Expanded(child: w ?? const SizedBox(height: 36));
+                }),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayCell(
+    BuildContext context,
+    DateTime date,
+    ColorScheme cs,
+  ) {
+    final dayOnly = _onlyDay(date);
+    if (dayOnly.isBefore(_onlyDay(_firstDate)) || dayOnly.isAfter(_onlyDay(_lastDate))) {
+      return const SizedBox(height: 36);
+    }
+
+    final label = '${date.day}';
+    final isStart = _pickStart != null && _sameDay(date, _pickStart!);
+    final isEnd = _pickEnd != null && _sameDay(date, _pickEnd!);
+    final inRange = _inSelectedRange(date);
+    final highlight = isStart || isEnd || inRange;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 1),
+      child: InkWell(
+        onTap: () => _onDayTap(date),
+        borderRadius: BorderRadius.circular(8),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: highlight ? MedicalTokens.primarySoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: isStart || isEnd
+                ? Border.all(color: cs.primary, width: 1.5)
+                : null,
+          ),
+          child: SizedBox(
+            height: 36,
+            child: Center(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: isStart || isEnd ? FontWeight.w800 : FontWeight.w500,
+                      color: MedicalTokens.textMain,
+                    ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryFilterPanel extends StatelessWidget {
+  const _HistoryFilterPanel({
+    required this.judgment,
+    required this.period,
+    required this.customStart,
+    required this.customEnd,
+    required this.onJudgmentChanged,
+    required this.onPeriodChanged,
+    required this.onDateRangeChipTap,
+  });
+
+  final _JudgmentFilter judgment;
+  final _PeriodFilter period;
+  final DateTime? customStart;
+  final DateTime? customEnd;
+  final ValueChanged<_JudgmentFilter> onJudgmentChanged;
+  final ValueChanged<_PeriodFilter> onPeriodChanged;
+  final VoidCallback onDateRangeChipTap;
+
+  static String _dateLabel(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateChipLabel = customStart != null && customEnd != null
+        ? '${_dateLabel(customStart!)} ~ ${_dateLabel(customEnd!)}'
+        : '날짜 범위 선택';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        MedicalTokens.spaceMd,
+        MedicalTokens.spaceSm,
+        MedicalTokens.spaceMd,
+        MedicalTokens.spaceMd,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                '판정',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: MedicalTokens.textMain,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HistoryFilterChip(
+                label: '전체',
+                selected: judgment == _JudgmentFilter.all,
+                onTap: () => onJudgmentChanged(_JudgmentFilter.all),
+              ),
+              _HistoryFilterChip(
+                label: '이상',
+                selected: judgment == _JudgmentFilter.abnormal,
+                onTap: () => onJudgmentChanged(_JudgmentFilter.abnormal),
+              ),
+              _HistoryFilterChip(
+                label: '정상',
+                selected: judgment == _JudgmentFilter.normal,
+                onTap: () => onJudgmentChanged(_JudgmentFilter.normal),
+              ),
+              _HistoryFilterChip(
+                label: '판정 없음',
+                selected: judgment == _JudgmentFilter.unknown,
+                onTap: () => onJudgmentChanged(_JudgmentFilter.unknown),
+              ),
+            ],
+          ),
+          const SizedBox(height: MedicalTokens.spaceMd),
+          Text(
+            '기간',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: MedicalTokens.textMain,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _HistoryFilterChip(
+                  label: '전체',
+                  dense: true,
+                  selected: period == _PeriodFilter.all,
+                  onTap: () => onPeriodChanged(_PeriodFilter.all),
+                ),
+                const SizedBox(width: 6),
+                _HistoryFilterChip(
+                  label: '오늘',
+                  dense: true,
+                  selected: period == _PeriodFilter.today,
+                  onTap: () => onPeriodChanged(_PeriodFilter.today),
+                ),
+                const SizedBox(width: 6),
+                _HistoryFilterChip(
+                  label: '최근 7일',
+                  dense: true,
+                  selected: period == _PeriodFilter.last7,
+                  onTap: () => onPeriodChanged(_PeriodFilter.last7),
+                ),
+                const SizedBox(width: 6),
+                _HistoryFilterChip(
+                  label: '최근 30일',
+                  dense: true,
+                  selected: period == _PeriodFilter.last30,
+                  onTap: () => onPeriodChanged(_PeriodFilter.last30),
+                ),
+                const SizedBox(width: 6),
+                _HistoryFilterChip(
+                  label: dateChipLabel,
+                  dense: true,
+                  selected: period == _PeriodFilter.custom,
+                  onTap: onDateRangeChipTap,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryFilterChip extends StatelessWidget {
+  const _HistoryFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.dense = false,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final hPad = dense ? 9.0 : 14.0;
+    final vPad = dense ? 7.0 : 8.0;
+    return Material(
+      color: selected ? MedicalTokens.primarySoft : const Color(0xFFF6F7FB),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: dense ? 12.5 : null,
+                  color: selected
+                      ? Theme.of(context).colorScheme.primary
+                      : MedicalTokens.textMain,
+                ),
+          ),
+        ),
       ),
     );
   }
@@ -789,7 +1686,7 @@ class _HistoryThumbnail extends StatelessWidget {
           fit: boxFit,
           loadingBuilder: (context, widget, prog) =>
               prog == null ? widget : const Center(child: CircularProgressIndicator()),
-          errorBuilder: (_, __, ___) => Center(
+          errorBuilder: (_, _, _) => Center(
             child: Icon(
               Icons.broken_image_outlined,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
