@@ -36,7 +36,7 @@ Widget _buildOriginalImageFit({
         if (progress == null) return child;
         return const Center(child: CircularProgressIndicator());
       },
-      errorBuilder: (_, __, ___) => const Center(
+      errorBuilder: (_, _, _) => const Center(
         child: Padding(
           padding: EdgeInsets.all(16),
           child: Text(
@@ -48,6 +48,83 @@ Widget _buildOriginalImageFit({
     );
   }
   return const Center(child: Text('이미지가 없습니다'));
+}
+
+/// Scaffold 하단 슬롯 전용 — Column 안에 넣지 않음(세로 무한 확장 방지).
+Widget _buildResultBottomBar({
+  required double maxContentWidth,
+  required VoidCallback onUpload,
+  required VoidCallback onHistory,
+}) {
+  return Material(
+    color: MedicalTokens.surface,
+    elevation: 4,
+    surfaceTintColor: Colors.transparent,
+    shadowColor: const Color(0x33000000),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 1, thickness: 1, color: MedicalTokens.border),
+        SafeArea(
+          top: false,
+          minimum: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: MedicalTokens.spaceMd,
+              vertical: 8,
+            ),
+            child: SizedBox(
+              height: 48,
+              width: double.infinity,
+              child: Align(
+                alignment: Alignment.center,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: MedicalTokens.textMain,
+                          backgroundColor: MedicalTokens.surface,
+                          side: const BorderSide(color: MedicalTokens.border),
+                          minimumSize: const Size(0, 44),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: onUpload,
+                        child: const Text('다시 업로드'),
+                      ),
+                      const SizedBox(width: MedicalTokens.spaceSm),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: MedicalTokens.primary,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(0, 44),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: onHistory,
+                        child: const Text('이력 보기'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class ResultScreen extends StatelessWidget {
@@ -72,6 +149,10 @@ class ResultScreen extends StatelessWidget {
         (explanationPath != null && explanationPath.isNotEmpty)
             ? ApiConfig.resolveAssetUrl(explanationPath)
             : null;
+
+    final screenW = MediaQuery.sizeOf(context).width;
+    final barMaxWidth = screenW >= 920 ? 920.0 : 680.0;
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -219,49 +300,30 @@ class ResultScreen extends StatelessWidget {
                             const MedicalSectionTitle('이상 확률'),
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _ProbabilityCard(response: res),
+                            const SizedBox(height: MedicalTokens.spaceMd),
                           ],
                         ),
                       ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    MedicalTokens.spaceMd,
-                    8,
-                    MedicalTokens.spaceMd,
-                    MedicalTokens.spaceMd,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: MedicalSecondaryButton(
-                          label: '다시 업로드',
-                          onPressed: () {
-                            Navigator.pushNamedAndRemoveUntil(
-                              context,
-                              '/upload',
-                              (route) => false,
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: MedicalTokens.spaceSm),
-                      Expanded(
-                        child: MedicalPrimaryButton(
-                          label: '이력 보기',
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/history');
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             );
           },
         ),
+      ),
+      bottomNavigationBar: _buildResultBottomBar(
+        maxContentWidth: barMaxWidth,
+        onUpload: () {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/upload',
+            (route) => false,
+          );
+        },
+        onHistory: () {
+          Navigator.pushNamed(context, '/history');
+        },
       ),
     );
   }
