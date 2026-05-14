@@ -47,6 +47,8 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v31_no_se_gated": "07_lesion_evidence",
     "v32_lesion_seg_evidence": "07_lesion_evidence",
     "v33_per_lesion_routing": "07_lesion_evidence",
+    "v34_calibrated_routing": "07_lesion_evidence",
+    "v35_warmstart_routing": "07_lesion_evidence",
 }
 
 

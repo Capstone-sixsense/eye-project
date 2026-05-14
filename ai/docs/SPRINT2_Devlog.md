@@ -89,17 +89,17 @@
   - DDR을 학습에 포함하려면 새로운 독립 외부 테스트셋 확보가 선행되어야 함.
 
 ## 5. 근거 파일
-- `ai/docs/AI_HANDOFF.md`: 현재 기준 문서. `DEVLOG.md`는 역사 로그로 취급해야 하며, 현재 배포 best가 `v17_focal_g2`임을 명시.
+- `ai/docs/AI_HANDOFF.md`: 현재 기준 문서. `DEVLOG.md`는 역사 로그로 취급한다.
 - `ai/docs/DEVLOG.md`: Sprint 2 상세 변경 이력. v7~v14, RETFound, v4/v4.1 정정, SSL 오염 검증, DG 전략 결정 기록.
-- `ai/artifacts/evaluations/external_test_v7_messidor_train_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v8_mixstyle_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v10_swad_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v11_fda_swad_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v12_fda_imagenet_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v13_fda_swad_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v14_ibn_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v4b_alpha_only_best_metrics.json`
-- `ai/artifacts/evaluations/external_test_v6_alpha_only_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v7_messidor_train/evaluations/external_test_v7_messidor_train_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v8_mixstyle/evaluations/external_test_v8_mixstyle_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v10_swad/evaluations/external_test_v10_swad_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v11_fda_swad/evaluations/external_test_v11_fda_swad_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v12_fda_imagenet/evaluations/external_test_v12_fda_imagenet_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v13_fda_swad/evaluations/external_test_v13_fda_swad_best_metrics.json`
+- `ai/artifacts/runs/02_domain_generalization/v14_ibn/evaluations/external_test_v14_ibn_best_metrics.json`
+- `ai/artifacts/runs/01_ssl_lineage/v4b_alpha_only/evaluations/external_test_v4b_alpha_only_best_metrics.json`
+- `ai/artifacts/runs/01_ssl_lineage/v6_alpha_only/evaluations/external_test_v6_alpha_only_best_metrics.json`
 - `ai/archive/retfound/artifacts/evaluations/external_test_retfound_v1_best_metrics.json`
 - `ai/archive/retfound/artifacts/evaluations/external_test_retfound_v2_best_metrics.json`
 - `ai/archive/retfound/artifacts/evaluations/external_test_retfound_simclr_ft_best_metrics.json`

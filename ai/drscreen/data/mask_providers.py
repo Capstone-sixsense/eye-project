@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+import cv2
 import numpy as np
 import torch
 
@@ -120,4 +121,49 @@ class IDRiDPerLesionMaskProvider(_IDRiDBaseMaskProvider):
             )
             for code in LESION_CODES
         ]
+        return torch.stack(channels, dim=0), True
+
+
+class MAPLESMaskProvider:
+    """Loads MAPLES-DR MA/HE/EX/CWS masks as four independent channels.
+
+    Channel order matches IDRiDPerLesionMaskProvider: MA / HE / EX / SE(CWS).
+    Works for MESSIDOR-domain images included in the MAPLES-DR dataset.
+    Returns zeros for any MESSIDOR image not present in MAPLES-DR.
+
+    Args:
+        annotations_dir: Path to the MAPLES-DR annotations directory,
+            e.g. "data/raw/MAPLES-DR/AdditionalData/annotations".
+            Expected subdirs: Microaneurysms, Hemorrhages, Exudates, CottonWoolSpots.
+    """
+
+    _CHANNEL_DIRS = ("Microaneurysms", "Hemorrhages", "Exudates", "CottonWoolSpots")
+
+    def __init__(self, annotations_dir: str | Path) -> None:
+        self._ann_dir = Path(annotations_dir)
+
+    def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
+        zeros = torch.zeros(4, size, size)
+        if domain.lower() != "messidor":
+            return zeros, False
+
+        stem = Path(image_path).stem
+        channels: list[torch.Tensor] = []
+        any_valid = False
+
+        for lesion_dir in self._CHANNEL_DIRS:
+            mask_path = self._ann_dir / lesion_dir / f"{stem}.png"
+            if mask_path.exists():
+                from PIL import Image as PILImage
+                arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
+                if arr.shape != (size, size):
+                    arr = cv2.resize(arr, (size, size), interpolation=cv2.INTER_NEAREST)
+                channels.append(torch.from_numpy(arr.astype(np.float32)))
+                any_valid = True
+            else:
+                channels.append(torch.zeros(size, size))
+
+        if not any_valid:
+            return zeros, False
+
         return torch.stack(channels, dim=0), True
