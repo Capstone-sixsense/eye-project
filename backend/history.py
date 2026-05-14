@@ -202,8 +202,19 @@ def _iter_metadata_files() -> list[tuple[str, str]]:
 #   메타데이터 dict들의 리스트. 각 dict의 스키마는 save_metadata에서 저장한 그것과 동일.
 def list_records(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     """저장된 분석 이력을 최신순으로 반환. 페이지네이션 지원."""
+    records, _ = list_records_with_total(limit=limit, offset=offset)
+    return records
+
+
+def list_records_with_total(
+    limit: int = 50, offset: int = 0
+) -> tuple[list[dict[str, Any]], int]:
+    """저장된 분석 이력을 최신순으로 반환하고 전체 건수를 함께 돌려준다.
+
+    단일 디스크 스캔으로 (items, total) 을 구성해 count_records() 별도 호출 불필요.
+    """
     pairs = _iter_metadata_files()
-    # ID가 타임스탬프 문자열이라 단순 역순 정렬 = 최신순
+    total = len(pairs)
     pairs.sort(key=lambda p: p[0], reverse=True)
 
     sliced = pairs[offset : offset + limit]
@@ -212,7 +223,7 @@ def list_records(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         record = load_record(rid)
         if record is not None:
             records.append(record)
-    return records
+    return records, total
 
 # ---------------------------------------------------------------
 # load_record
