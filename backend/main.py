@@ -124,22 +124,6 @@ def _health_payload() -> dict[str, Any]:
     }
 
 
-async def _predict_from_upload(image: UploadFile) -> dict[str, Any]:
-    if _session is None:
-        raise HTTPException(status_code=503, detail=f"Model not ready: {_session_error}")
-
-    image_bytes = await image.read()
-    try:
-        prediction = _session.predict_image_bytes(
-            image_bytes,
-            image_name=image.filename or "upload.png",
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    return prediction.payload
-
-
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"message": "eye-project backend is running"}
@@ -317,6 +301,8 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 @app.get("/image/raw/{record_id}")
 def serve_raw_image(record_id: str) -> Response:
     """복호화된 raw 이미지 바이트 응답."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="raw image not found")
     result = history.load_raw_bytes(record_id)
     if result is None:
         raise HTTPException(status_code=404, detail="raw image not found")
@@ -335,6 +321,8 @@ def serve_raw_image(record_id: str) -> Response:
 @app.get("/image/report/{record_id}")
 def serve_report_image(record_id: str) -> Response:
     """복호화된 분석 결과 이미지 응답 (PNG)."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="report image not found")
     data = history.load_report_bytes(record_id)
     if data is None:
         raise HTTPException(status_code=404, detail="report image not found")
@@ -390,6 +378,8 @@ def history_list(limit: int = 50, offset: int = 0) -> dict[str, Any]:
 @app.get("/history/{record_id}")
 def history_detail(record_id: str) -> dict[str, Any]:
     """특정 분석 이력 단건 조회."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="record not found")
     record = history.load_record(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")
@@ -398,6 +388,8 @@ def history_detail(record_id: str) -> dict[str, Any]:
 @app.delete("/history/{record_id}")
 def history_delete(record_id: str) -> dict[str, Any]:
     """특정 분석 이력과 관련 파일(raw, report, metadata) 일괄 삭제."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="record not found")
     record = history.load_record(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")

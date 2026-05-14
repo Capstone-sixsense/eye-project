@@ -4,9 +4,9 @@ AES-256-GCM 기반 파일 암복호화 유틸리티.
 설계:
 - 알고리즘: AES-256-GCM (AEAD, NIST 표준)
 - 키:      환경변수 IMAGE_ENCRYPTION_KEY (base64-encoded 32 bytes)
-- 파일 포맷: [12바이트 nonce][16바이트 GCM tag][암호문]
-            (cryptography의 AESGCM은 ciphertext와 tag를 합쳐서 돌려주므로
-             실제 디스크 포맷은 [nonce(12) | ciphertext+tag])
+- 파일 포맷: [nonce(12) | ciphertext | tag(16)]
+            (cryptography의 AESGCM은 ciphertext 뒤에 tag(16)를 붙여 반환한다.
+             실제 디스크 저장 순서: nonce → ciphertext → GCM tag)
 
 보안 주의:
 - nonce는 매 암호화마다 새로 생성한다 (os.urandom).
