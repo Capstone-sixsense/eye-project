@@ -44,6 +44,40 @@ class BinaryFocalLoss(nn.Module):
         return (focal_weight * bce).mean()
 
 
+class DiceBCELoss(nn.Module):
+    """Dice + BCE combined loss for binary segmentation.
+
+    Dice loss handles severe class imbalance (lesion pixels << background).
+    BCE provides stable per-pixel gradients early in training.
+
+    L = (1 - w) * BCE + w * Dice
+
+    Args:
+        dice_weight: Weight for Dice term; BCE weight = 1 - dice_weight. Default 0.5.
+        smooth: Laplace smoothing to avoid division by zero. Default 1.0.
+    """
+
+    def __init__(self, dice_weight: float = 0.5, smooth: float = 1.0) -> None:
+        super().__init__()
+        if not (0.0 <= dice_weight <= 1.0):
+            raise ValueError(f"dice_weight must be in [0, 1], got {dice_weight}")
+        self.dice_weight = dice_weight
+        self.bce_weight = 1.0 - dice_weight
+        self.smooth = smooth
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce = F.binary_cross_entropy_with_logits(logits, targets)
+
+        probs = torch.sigmoid(logits).view(-1)
+        flat_targets = targets.view(-1)
+        intersection = (probs * flat_targets).sum()
+        dice = 1.0 - (2.0 * intersection + self.smooth) / (
+            probs.sum() + flat_targets.sum() + self.smooth
+        )
+
+        return self.bce_weight * bce + self.dice_weight * dice
+
+
 class CoralLoss(nn.Module):
     """Deep CORAL: Correlation Alignment (Sun & Saenko, 2016, arXiv:1607.01719).
 

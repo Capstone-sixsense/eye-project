@@ -238,12 +238,17 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 
         prob = pred.payload.get("abnormal_probability", 0.0)
         decision_threshold = pred.payload.get("decision_threshold")
-        metrics = {
-            "accuracy": prob,
-            "precision": prob,
-            "recall": prob,
-            "specificity": 1.0 - prob,
-            "f1": prob,
+        eval_metrics = pred.payload.get("eval_metrics")
+        metrics = dict(eval_metrics) if isinstance(eval_metrics, dict) else {}
+        metrics.setdefault("decision_threshold", decision_threshold)
+        evidence = {
+            "evidence_type": pred.payload.get("evidence_type"),
+            "heatmap_path": pred.payload.get("heatmap_path"),
+            "lesion_map_path": pred.payload.get("lesion_map_path"),
+            "lesion_summary": pred.payload.get("lesion_summary"),
+            "evidence_warning": pred.payload.get("evidence_warning"),
+            "xai_error_code": pred.payload.get("xai_error_code"),
+            "xai_no_region": pred.payload.get("xai_no_region"),
         }
 
         # 이력 메타데이터 저장(URL은 동적 엔드포인트 경로)
@@ -256,6 +261,7 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             abnormal_probability=prob,
             quality=quality,
             metrics=metrics,
+            evidence=evidence,
         )
 
 
@@ -266,6 +272,15 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "label": pred.payload.get("predicted_label"),
             "abnormal_probability": prob,
             "decision_threshold": decision_threshold,
+            "metrics": metrics,
+            "eval_metrics": metrics,
+            "evidence_type": evidence["evidence_type"],
+            "heatmap_path": evidence["heatmap_path"],
+            "lesion_map_path": evidence["lesion_map_path"],
+            "lesion_summary": evidence["lesion_summary"],
+            "evidence_warning": evidence["evidence_warning"],
+            "xai_error_code": pred.payload.get("xai_error_code"),
+            "xai_no_region": pred.payload.get("xai_no_region"),
             "quality": quality,
             "quality_warning": quality_warning,
             "report_url": f"/image/report/{record_id}",
