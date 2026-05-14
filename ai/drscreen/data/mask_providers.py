@@ -33,8 +33,9 @@ class NullMaskProvider:
 class _IDRiDBaseMaskProvider:
     """Base loader for IDRiD lesion masks from the segmentation groundtruth directory.
 
-    Masks exist only for IDRiD images in the Disease Grading a. Training Set
-    with numeric IDs 1–81. Returns a zero tensor for all other images.
+    This training-time provider loads masks for IDRiD disease-grading training
+    rows whose numeric ID maps to the segmentation groundtruth naming. It
+    returns a zero tensor for all other rows.
     """
 
     def __init__(self, seg_mask_dir: str | Path, channels: int) -> None:
