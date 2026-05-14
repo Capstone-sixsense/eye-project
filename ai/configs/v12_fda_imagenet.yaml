@@ -6,9 +6,6 @@ data:
   use_fda: true
   fda_alpha: 0.05
 
-model:
-  use_mixstyle: false
-
 train:
   loss: focal
   focal_gamma: 0.0
@@ -18,5 +15,5 @@ train:
   backbone_learning_rate: 0.00004
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v12_fda_imagenet/best.pt
+  checkpoint_path: artifacts/runs/02_domain_generalization/v12_fda_imagenet/checkpoints/best.pt
   threshold: 0.5

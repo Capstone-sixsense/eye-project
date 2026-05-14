@@ -152,12 +152,14 @@ def train_one_epoch(
     gradient_clip_norm: float | None = None,
     coral_criterion: torch.nn.Module | None = None,
     lambda_coral: float = 0.0,
+    lambda_aux_seg: float = 0.0,
 ) -> EpochMetrics:
     model.train()
     if model_train_setup is not None:
         model_train_setup(model)
 
     use_coral = coral_criterion is not None and lambda_coral > 0.0 and _has_timm_feature_api(model)
+    use_aux_seg = lambda_aux_seg > 0.0
     total_loss = 0.0
     total_examples = 0
     all_logits: list[torch.Tensor] = []
@@ -176,8 +178,23 @@ def train_one_epoch(
                 coral_loss = _compute_coral_loss(coral_criterion, pooled, domains)
                 loss = cls_loss + lambda_coral * coral_loss
             else:
-                logits = model(images)
+                output = model(images)
+                if isinstance(output, tuple):
+                    logits, seg_logits = output
+                else:
+                    logits, seg_logits = output, None
                 loss = criterion(logits, targets)
+                if use_aux_seg and seg_logits is not None:
+                    valid = batch.get("seg_mask_valid")
+                    if valid is not None:
+                        valid = valid.to(device)
+                        if valid.any():
+                            seg_targets = batch["seg_mask"].to(device)
+                            import torch.nn.functional as F
+                            seg_loss = F.binary_cross_entropy_with_logits(
+                                seg_logits[valid], seg_targets[valid]
+                            )
+                            loss = loss + lambda_aux_seg * seg_loss
 
         if scaler is not None and scaler.is_enabled():
             scaler.scale(loss).backward()

@@ -6,9 +6,6 @@ data:
   use_fda: true
   fda_alpha: 0.05
 
-model:
-  use_mixstyle: false
-
 train:
   loss: focal
   focal_gamma: 2.0
@@ -16,8 +13,8 @@ train:
   head_epochs: 0
   finetune_epochs: 15
   backbone_learning_rate: 0.00004
-  pretrained_backbone_path: artifacts/checkpoints/v7_messidor_train/best.pt
+  pretrained_backbone_path: artifacts/runs/02_domain_generalization/v7_messidor_train/checkpoints/best.pt
 
 infer:
-  checkpoint_path: artifacts/checkpoints/v17_focal_g2/best.pt
-  threshold: 0.5
+  checkpoint_path: artifacts/runs/02_domain_generalization/v17_focal_g2/checkpoints/best.pt
+  threshold: 0.42

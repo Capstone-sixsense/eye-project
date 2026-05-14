@@ -5,7 +5,8 @@ from pathlib import Path
 from pprint import pprint
 
 from drscreen.settings import ensure_runtime_directories, load_app_config
-from drscreen.train.runner import describe_training_setup, run_split_evaluation, run_training
+from drscreen.train.evaluate import run_split_evaluation
+from drscreen.train.runner import describe_training_setup, run_training
 from drscreen.utils.logging import get_logger
 
 

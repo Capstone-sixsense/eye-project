@@ -10,8 +10,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
-EVAL_DIR = Path("artifacts/evaluations")
-OUTPUT_PATH = Path("artifacts/evaluations/performance_overview.png")
+from drscreen.settings import find_classification_metrics_path
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+OUTPUT_PATH = PROJECT_ROOT / "artifacts" / "runs" / "02_domain_generalization" / "_reports" / "performance_overview.png"
 
 # --- version metadata -----------------------------------------------------------
 # (file_stem_suffix, display_label, sprint, is_external, is_deployment_best)
@@ -33,7 +35,7 @@ SPRINT2_KEYS = {m[0] for m in VERSION_META if m[2] == 2}
 
 def load_metrics(version_key: str, external: bool) -> dict | None:
     prefix = "external_test" if external else "test"
-    path = EVAL_DIR / f"{prefix}_{version_key}_best_metrics.json"
+    path = find_classification_metrics_path(PROJECT_ROOT, version_key, split_name=prefix)
     if not path.exists():
         return None
     with open(path) as f:

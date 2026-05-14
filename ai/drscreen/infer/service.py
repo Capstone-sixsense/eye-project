@@ -14,6 +14,7 @@ import torch
 from PIL import Image
 
 from drscreen.data.transforms import FundusPreprocess, build_eval_transform
+from drscreen.infer.payload import InferencePayload
 from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
@@ -21,10 +22,12 @@ from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
     ensure_runtime_directories,
+    find_classification_metrics_path,
     load_app_config,
+    resolve_checkpoint_path,
     resolve_project_path,
 )
-from drscreen.train.runner import resolve_device
+from drscreen.train.model_setup import resolve_device
 from drscreen.xai.gradcam import generate_gradcam
 
 
@@ -49,6 +52,26 @@ def _sanitize_stem(name: str) -> str:
 def _build_timestamped_path(directory: Path, stem: str, suffix: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return directory / f"{stem}_{timestamp}{suffix}"
+
+
+def _as_valid_threshold(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 0.0 <= threshold <= 1.0:
+        return threshold
+    return None
+
+
+def _checkpoint_optimal_threshold(checkpoint: dict[str, Any]) -> float | None:
+    for key in ("optimal_threshold", "decision_threshold"):
+        threshold = _as_valid_threshold(checkpoint.get(key))
+        if threshold is not None:
+            return threshold
+    return None
 
 
 def _build_retina_mask(image: Image.Image) -> np.ndarray:
@@ -83,8 +106,12 @@ def _render_gradcam_overlay(
     resized *= retina_mask
 
     # Suppress weak activations so the overlay highlights only strong evidence regions.
-    threshold = 0.45
-    emphasized = np.clip((resized - threshold) / (1.0 - threshold), 0.0, 1.0)
+    activation_threshold = 0.45
+    emphasized = np.clip(
+        (resized - activation_threshold) / (1.0 - activation_threshold),
+        0.0,
+        1.0,
+    )
     emphasized = np.power(emphasized, 0.8, dtype=np.float32)
 
     retina_pixel_count = float(retina_mask.sum())
@@ -133,6 +160,7 @@ class InferenceSession:
     heatmap_dir: Path
     preprocessor: FundusPreprocess | None
     eval_metrics: dict | None
+    decision_threshold: float
 
     @classmethod
     def from_config_path(
@@ -142,7 +170,7 @@ class InferenceSession:
         checkpoint_path: str | Path | None = None,
     ) -> InferenceSession:
         resolved_config_path, project_root, config = _resolve_config_context(config_path)
-        resolved_checkpoint_path = resolve_project_path(
+        resolved_checkpoint_path = resolve_checkpoint_path(
             project_root,
             checkpoint_path or config["infer"]["checkpoint_path"],
         )
@@ -162,9 +190,11 @@ class InferenceSession:
             pretrained=False,
             num_outputs=num_outputs,
             use_attention=bool(effective_config["model"].get("use_attention", False)),
-            use_mixstyle=bool(effective_config["model"].get("use_mixstyle", False)),
             use_ibn=bool(effective_config["model"].get("use_ibn", False)),
-            classifier_dropout=float(effective_config["model"].get("classifier_dropout", 0.0)),
+            use_aux_seg=bool(effective_config["model"].get("use_aux_seg", False)),
+            aux_seg_block=int(effective_config["model"].get("aux_seg_block", 2)),
+            aux_seg_output_size=int(effective_config["model"].get("aux_seg_output_size", 512)),
+            use_mil_attention=bool(effective_config["model"].get("use_mil_attention", False)),
         ).to(device)
         load_state_from_checkpoint(model, checkpoint)
         model.eval()
@@ -191,14 +221,23 @@ class InferenceSession:
         prediction_dir.mkdir(parents=True, exist_ok=True)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
 
+        optimal_threshold = _checkpoint_optimal_threshold(checkpoint)
         version = str(effective_config.get("project", {}).get("version", ""))
-        eval_metrics_path = project_root / "artifacts" / "evaluations" / f"external_test_{version}_best_metrics.json"
+        eval_metrics_path = find_classification_metrics_path(
+            project_root,
+            version,
+            split_name="external_test",
+            checkpoint_stem="best",
+        )
         eval_metrics = None
         if eval_metrics_path.exists():
             try:
                 with open(eval_metrics_path, encoding="utf-8") as _f:
                     _data = json.load(_f)
                 _opt = _data.get("metrics_at_optimal_threshold", {})
+                eval_optimal_threshold = _as_valid_threshold(_data.get("optimal_threshold"))
+                if eval_optimal_threshold is not None and optimal_threshold is None:
+                    optimal_threshold = eval_optimal_threshold
                 eval_metrics = {
                     "auroc": _data.get("metrics", {}).get("auroc"),
                     "accuracy": _opt.get("accuracy"),
@@ -210,6 +249,15 @@ class InferenceSession:
                 }
             except Exception:
                 eval_metrics = None
+
+        decision_threshold = (
+            optimal_threshold
+            if optimal_threshold is not None
+            else _as_valid_threshold(infer_cfg.get("threshold")) or 0.5
+        )
+        effective_config.setdefault("infer", {})["threshold"] = decision_threshold
+        if eval_metrics is not None:
+            eval_metrics["decision_threshold"] = decision_threshold
 
         return cls(
             config_path=resolved_config_path,
@@ -224,6 +272,7 @@ class InferenceSession:
             heatmap_dir=heatmap_dir,
             preprocessor=preprocessor,
             eval_metrics=eval_metrics,
+            decision_threshold=decision_threshold,
         )
 
     def predict_image_path(
@@ -268,74 +317,56 @@ class InferenceSession:
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
-        infer_cfg = self.config.get("infer", {})
         result = run_single_image_inference(
             model=self.model,
             image_tensor=image_tensor,
             label_names=self.label_names,
-            threshold=float(infer_cfg.get("threshold", 0.5)),
+            threshold=self.decision_threshold,
         )
 
         heatmap_overlay = None
         xai_error_code = None
         xai_no_region = False
         try:
-            gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0))
+            gradcam_method = self.config.get("infer", {}).get("gradcam_method", "gradcam")
+            gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0), method=gradcam_method)
             heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
         except Exception:
-            heatmap_overlay = None
             xai_error_code = "XAI_001"
 
-        saved = SavedInferenceArtifacts(prediction_path=None, heatmap_path=None)
+        stem = _sanitize_stem(image_name)
+        prediction_path: Path | None = None
+        heatmap_path: Path | None = None
         if save_outputs:
-            saved = self._save_outputs(
-                image_name=image_name,
-                result=result,
-                heatmap_overlay=heatmap_overlay,
-            )
+            prediction_path = _build_timestamped_path(self.prediction_dir, stem, ".json")
+            if heatmap_overlay is not None:
+                heatmap_path = _build_timestamped_path(self.heatmap_dir, stem, ".png")
 
-        payload = result.to_dict()
-        payload["should_block"] = False
-        payload["quality_warning"] = None
-        payload["quality"] = None
-        payload["quality_grade"] = None
-        payload["quality_grade_confidence"] = None
-        payload["checkpoint_path"] = str(self.checkpoint_path)
-        payload["prediction_path"] = str(saved.prediction_path) if saved.prediction_path else None
-        payload["heatmap_path"] = str(saved.heatmap_path) if saved.heatmap_path else None
-        payload["xai_error_code"] = xai_error_code
-        payload["xai_no_region"] = xai_no_region
-        payload["eval_metrics"] = self.eval_metrics
+        payload = InferencePayload(
+            predicted_index=result.predicted_index,
+            predicted_label=result.predicted_label,
+            abnormal_probability=result.abnormal_probability,
+            decision_threshold=self.decision_threshold,
+            checkpoint_path=str(self.checkpoint_path),
+            prediction_path=str(prediction_path) if prediction_path else None,
+            heatmap_path=str(heatmap_path) if heatmap_path else None,
+            xai_error_code=xai_error_code,
+            xai_no_region=xai_no_region,
+            eval_metrics=self.eval_metrics,
+        ).to_dict()
+
+        if save_outputs:
+            if heatmap_overlay is not None and heatmap_path is not None:
+                heatmap_overlay.save(heatmap_path)
+            prediction_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
         return SingleImagePrediction(
             result=result,
             payload=payload,
             original_image=original_image,
             heatmap_overlay=heatmap_overlay,
-            saved=saved,
-        )
-
-    def _save_outputs(
-        self,
-        *,
-        image_name: str,
-        result: InferenceResult,
-        heatmap_overlay: Image.Image | None,
-    ) -> SavedInferenceArtifacts:
-        stem = _sanitize_stem(image_name)
-        prediction_path = _build_timestamped_path(self.prediction_dir, stem, ".json")
-        heatmap_path = None
-
-        if heatmap_overlay is not None:
-            heatmap_path = _build_timestamped_path(self.heatmap_dir, stem, ".png")
-            heatmap_overlay.save(heatmap_path)
-
-        payload = result.to_dict()
-        payload["checkpoint_path"] = str(self.checkpoint_path)
-        payload["heatmap_path"] = str(heatmap_path) if heatmap_path else None
-        prediction_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-        return SavedInferenceArtifacts(
-            prediction_path=prediction_path,
-            heatmap_path=heatmap_path,
+            saved=SavedInferenceArtifacts(
+                prediction_path=prediction_path,
+                heatmap_path=heatmap_path,
+            ),
         )

@@ -145,12 +145,14 @@ class AnalyzeResponse {
       label: json['label'] as String?,
       abnormalProbability:
           (json['abnormal_probability'] as num?)?.toDouble(),
-      reportUrl: json['report_url'] as String?,
-      originalUrl: json['raw_url'] as String?,
+      reportUrl: (json['report_url'] ?? json['reportUrl']) as String?,
+      originalUrl: (json['raw_url'] ?? json['original_url'] ?? json['rawUrl']) as String?,
       preprocessed: 1,
       errorCode: null,
       quality: QualitySummary.tryParse(json['quality']),
-      explanationImageUrl: null,
+      explanationImageUrl: (json['explanation_url'] ??
+          json['explanation_image_url'] ??
+          json['heatmap_url']) as String?,
       xaiErrorCode: null,
     );
   }
