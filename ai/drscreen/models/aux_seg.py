@@ -98,6 +98,10 @@ class MultiTaskModel(nn.Module):
             output_size,
             out_channels=self.seg_channels,
         )
+        if self.seg_channels > 1:
+            self.lesion_weights = nn.Parameter(torch.zeros(self.seg_channels))
+        else:
+            self.register_parameter("lesion_weights", None)
 
     @staticmethod
     def _seg_logits_to_gate(seg_logits: torch.Tensor) -> torch.Tensor:
@@ -113,12 +117,16 @@ class MultiTaskModel(nn.Module):
             raise ValueError("Gated pooling requires a timm-style backbone.")
 
         feat_map = self.backbone.forward_features(x)
-        gate_logits = self.seg_head.forward_logits(
+        seg_logits = self.seg_head.forward_logits(
             self._feat["x"],
             output_size=feat_map.shape[-2:],
         )
-        gate_logits = self._seg_logits_to_gate(gate_logits)
-        gate = torch.sigmoid(gate_logits)
+        if self.seg_channels > 1 and self.lesion_weights is not None:
+            # Per-lesion weighted gate: independent sigmoid per channel, learnable sum
+            weights = torch.softmax(self.lesion_weights, dim=0).view(1, -1, 1, 1)
+            gate = (torch.sigmoid(seg_logits) * weights).sum(dim=1, keepdim=True)
+        else:
+            gate = torch.sigmoid(seg_logits)
         gate = gate / gate.mean(dim=(2, 3), keepdim=True).clamp_min(1e-6)
         pooled = self.backbone.forward_head(feat_map * gate, pre_logits=True)
         return self.backbone.classifier(pooled)
