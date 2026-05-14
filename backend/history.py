@@ -24,13 +24,14 @@ RESULTS_DIR = "results"
 
 # 메타데이터 암호 파일은 'report_<id>.json.enc'
 ID_PATTERN = re.compile(r"^report_(?P<id>\d{8}_\d{6}_\d{3})\.json\.enc$")
+RECORD_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}$")
 
 # ---------------------------------------------------------------
 # ID 발급
 # ---------------------------------------------------------------
 def make_record_id(now: datetime | None = None) -> str:
     """타임스탬프 기반 분석 ID 생성. 예: '20260428_165403_123'."""
-    now = now or datetime.now()
+    now = now or datetime.now(timezone.utc)
     return now.strftime("%Y%m%d_%H%M%S_") + f"{now.microsecond // 1000:03d}"
 
 
@@ -250,7 +251,21 @@ def load_record(record_id: str) -> dict[str, Any] | None:
         payload = json.loads(plaintext.decode("utf-8"))
     except (OSError, json.JSONDecodeError, crypto.DecryptionFailed):
         return None
-    
+
+    # raw_url 파일 존재 검증
+    raw_exists = False
+    if os.path.isdir(UPLOAD_DIR):
+        raw_exists = any(
+            fname.startswith(f"raw_{record_id}.") and fname.endswith(crypto.ENC_SUFFIX)
+            for fname in os.listdir(UPLOAD_DIR)
+        )
+    if not raw_exists:
+        payload["raw_url"] = None
+
+    # report_url 파일 존재 검증
+    if not os.path.exists(report_image_path_for(record_id)):
+        payload["report_url"] = None
+
     return payload
 
 def load_raw_bytes(record_id: str) -> tuple[bytes, str] | None:
