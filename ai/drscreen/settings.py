@@ -46,6 +46,7 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v30_gated_pooling": "06_xai_classifier_routing",
     "v31_no_se_gated": "07_lesion_evidence",
     "v32_lesion_seg_evidence": "07_lesion_evidence",
+    "v33_per_lesion_routing": "07_lesion_evidence",
 }
 
 
