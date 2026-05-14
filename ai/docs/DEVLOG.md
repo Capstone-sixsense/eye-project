@@ -8,6 +8,43 @@
 
 ---
 
+## 2026-05-14 MAPLES-DR XAI eval (v31/v35) — clean-cohort 수치 확인
+
+### 목적
+
+IDRiD XAI 수치에 학습 도메인 편향이 포함됐을 가능성을 검증하기 위해,
+완전히 별개 코호트(MESSIDOR → MAPLES-DR 어노테이션)에서 v31/v35 XAI를 측정했다.
+
+### 구현 내용
+
+- `drscreen/xai/iou.py`: `load_maples_masks()` 추가 (MAPLES-DR 어노테이션 로더)
+- `drscreen/xai/evaluation.py`: `evaluate_maples()` 추가 + `_process_image`에 `mask_loader` 파라미터 추가
+- `eval_xai_maples.py`: MAPLES-DR XAI eval CLI 진입점 신규 생성
+- MESSIDOR 이미지 경로: `data/raw/messidor/images/{stem}.tif`
+- MAPLES-DR split: test 60장 / train 138장 (`dataset_record.yaml` 기준)
+
+### 결과 (test split, 60장, block4 Layer-CAM)
+
+| Model | PG | AUPRC | AUC-IoU | IoU top20% |
+|-------|:---:|:---:|:---:|:---:|
+| v31 (IDRiD 참고) | 0.3704 | 0.1409 | 0.0496 | 0.0785 |
+| v35 (IDRiD 참고) | 0.4074 | 0.1537 | 0.0525 | 0.0796 |
+| **v31 (MAPLES-DR)** | **0.0500** | **0.0172** | **0.0051** | **0.0113** |
+| **v35 (MAPLES-DR)** | **0.0500** | **0.0166** | **0.0053** | **0.0098** |
+
+### 해석
+
+**IDRiD XAI 수치는 과대평가였다.** MAPLES-DR clean-cohort 기준:
+1. 전 지표 약 10× 하락 — 진짜 로컬라이제이션 일반화 능력은 IDRiD 수치가 시사한 것과 전혀 다름
+2. v31 vs v35 차이 소멸 — v33~v35 XAI 개선(AUPRC +0.013)은 IDRiD-특화 패턴 강화였으며 OOD에서 재현 불가
+3. PG 0.0500 (3/60) = 사실상 무작위 수준
+4. IDRiD 수치를 XAI 개선 지표로 사용하는 실험 방향 재검토 필요
+
+**결론**: 현 아키텍처(v31~v35)는 외부 코호트에서 의미있는 병변 로컬라이제이션을 보이지 않는다.
+다음 단계: anatomy-guided CAM masking — optic disc 영역 CAM 제외로 false positive 억제 후 재평가.
+
+---
+
 ## 2026-05-14 실험 계획 재수립 / MAPLES-DR 확보 / MAPLESMaskProvider 구현
 
 ### 실험 계획 재분류

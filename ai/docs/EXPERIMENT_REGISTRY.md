@@ -166,7 +166,7 @@ External test means the `external_test_*_best_metrics.json` artifact stored unde
 | `v6_gamma_only` | 469 | 0.993053 | 0.86 | 0.9449 | 0.9742 |
 | `v7_512_messidor_train` | 469 | 0.989643 | 0.90 | 0.9534 | 0.9571 |
 
-## XAI Summary
+## XAI Summary (IDRiD)
 
 All XAI rows below use IDRiD lesion masks.
 
@@ -200,6 +200,19 @@ All XAI rows below use IDRiD lesion masks.
 | `v35_warmstart_routing` | test | block4 Layer-CAM | 27 | 0.4074 | **0.1537** | 0.0525 | 0.0796 |
 | `v32_lesion_seg_evidence` | train | seg_head | 54 | 0.2222 | 0.0538 | 0.0208 | 0.0364 |
 
+## XAI Summary (MAPLES-DR)
+
+Clean-cohort eval on MESSIDOR images with MAPLES-DR pixel-level annotations (MA/HE/EX/CWS).
+No training data overlap. Script: `eval_xai_maples.py`.
+
+| Run | Split | Target/Method | N | PG | AUPRC | AUC-IoU | IoU top-20 |
+|---|---|---|---:|---:|---:|---:|---:|
+| `v31_no_se_gated` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0172 | 0.0051 | 0.0113 |
+| `v35_warmstart_routing` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0166 | 0.0053 | 0.0098 |
+
+**해석**: IDRiD XAI 수치(v31: AUPRC 0.1409) 대비 약 10× 하락. v31 vs v35 차이 소멸.
+IDRiD XAI 수치는 학습 도메인 편향에 의한 과대평가였음. 현 아키텍처는 외부 코호트 병변 로컬라이제이션 능력이 거의 없음.
+
 ## XAI Method Comparison on v24
 
 | Method | AUPRC | AUC-IoU | IoU top-20 | PG |
@@ -229,5 +242,6 @@ All XAI rows below use IDRiD lesion masks.
 - `v34_calibrated_routing` (test split): PG **0.5185**, AUPRC 0.1492 — PG 기준 최고. lambda_aux_seg=0.3 변경으로 XAI 소폭 개선. 그러나 DDR AUROC 0.9129 < v31 0.9160, 분류 기준 미달 — v31 배포 유지.
 - `v35_warmstart_routing` (external_test): DDR AUROC 0.9081, optimal thr 0.18, Sens 0.7932, Spec 0.8739. test XAI AUPRC **0.1537** — AUPRC 기준 최고이나 AUC-IoU 0.0525, PG 0.4074로 v33/v34 대비 지표별 우위가 갈린다. 분류 회귀로 배포 미승격.
 - **4ch per-lesion routing 구조 trade-off 최종 확정 (v33~v35)**: lambda 조정(v34), v31 warmstart(v35) 모두 DDR 회귀 미해소. v35 warmstart는 오히려 DDR AUROC 0.9081로 최저 — 4ch routing이 OOD 일반화를 구조적으로 희생. XAI 개선(AUPRC ↑)과 DDR 일반화(AUROC ↓)는 현 아키텍처에서 trade-off 관계.
-- **실험 방향 전환**: 4ch per-lesion routing 추가 실험 중단. 현재 배포(v31)는 분류 최우선 기준으로 유지. XAI 개선은 분류에 영향 없는 방법 탐색으로 전환하되, (1) anatomy-guided CAM masking과 (2) MAPLES-DR clean-cohort XAI eval은 먼저 평가 CLI/metric wiring이 필요하다.
-- 다음 단계: MAPLES-DR 기반 v31/v35 XAI eval 구현 및 측정 (clean-cohort, IDRiD contamination 없음).
+- **실험 방향 전환**: 4ch per-lesion routing 추가 실험 중단. 현재 배포(v31)는 분류 최우선 기준으로 유지. XAI 개선은 분류에 영향 없는 방법 탐색으로 전환.
+- **MAPLES-DR clean-cohort 확인 완료**: v31/v35 모두 PG 0.0500, AUPRC ~0.017, AUC-IoU ~0.005 — IDRiD 수치 대비 10× 하락. IDRiD XAI 수치는 학습 도메인 편향 과대평가. 현 아키텍처의 XAI 일반화 능력 부재 확인.
+- 다음 단계: anatomy-guided CAM masking — optic disc 영역 post-hoc 제외로 false positive 억제 후 MAPLES-DR 재평가.
