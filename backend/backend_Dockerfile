@@ -1,16 +1,14 @@
-FROM python:3.11
+FROM python:3.11.12-slim
 
 # 2. 작업 디렉토리 설정
 WORKDIR /app
 
 # 시스템 패키지 설치
-RUN apt-get update && apt-get install -y \
-    git \
-    git-lfs \
-    fonts-noto-cjk \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
-    build-essential \
+    libgomp1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # 의존성 파일 복사 및 설치
@@ -21,8 +19,7 @@ ENV TORCH_HOME=/app/.cache/torch
 ENV HF_HOME=/app/.cache/huggingface
 
 # 디렉토리 구조 미리 생성
-RUN mkdir -p /app/data /app/storage /app/results /app/models \
-             /app/.cache/torch /app/.cache/huggingface
+RUN mkdir -p /app/.cache/torch /app/.cache/huggingface
 
 # AI 패키지 경로 등록 (/ai 는 docker-compose 볼륨으로 마운트)
 ENV PYTHONPATH=/ai
