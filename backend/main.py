@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os, shutil, logging, datetime, time
+import os, logging, datetime, time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -114,32 +114,6 @@ app.add_middleware(
 )
 
 
-def _health_payload() -> dict[str, Any]:
-    if _session is None:
-        raise HTTPException(status_code=503, detail=f"Model not ready: {_session_error}")
-    return {
-        "status": "ok",
-        "config_path": str(_session.config_path),
-        "checkpoint_path": str(_session.checkpoint_path),
-    }
-
-
-async def _predict_from_upload(image: UploadFile) -> dict[str, Any]:
-    if _session is None:
-        raise HTTPException(status_code=503, detail=f"Model not ready: {_session_error}")
-
-    image_bytes = await image.read()
-    try:
-        prediction = _session.predict_image_bytes(
-            image_bytes,
-            image_name=image.filename or "upload.png",
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    return prediction.payload
-
-
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"message": "eye-project backend is running"}
@@ -189,22 +163,25 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
     t0 = time.perf_counter()
 
     try:
-        # 이미지 수신 및 원본 저장
+        # 이미지 수신
         content = await image.read()
         print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
 
-        raw_path = history.save_raw_image(record_id, content, ext=ext)
-        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
-
-        # 이미지 로드 /  메모리에서 PIL 로드 (디스크 평문 경로 거치지 않음)
+        # 유효성 검사 먼저 — 손상된 파일은 저장하지 않음
         try:
             raw_img = Image.open(io.BytesIO(content)).convert("RGB")
         except Exception:
             raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
 
+        # 유효성 확인 후 원본 암호화 저장
+        raw_path = history.save_raw_image(record_id, content, ext=ext)
+        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
+
         #QuickQual 전처리 + 품질 평가
         t_qq = time.perf_counter()
-        preprocessed_img, quality = _quickqual.preprocess_and_score(raw_img)
+        preprocessed_img, quality = await run_in_threadpool(
+            _quickqual.preprocess_and_score, raw_img
+        )
         print(
             f"[analyze] QuickQual 완료 ({time.perf_counter() - t_qq:.2f}s) "
             f"label={quality['label']} bad={quality['bad']:.3f}",
@@ -234,15 +211,12 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             flush=True,
         )
 
-        """
-        # AI 추론 (CPU + EfficientNet 등은 여기서 대부분의 시간 소요)
-        with open(proc_path, "rb") as f:
-            pred = _session.predict_image_bytes(f.read(), image_name=name)
-        """
         # 진단 추론 — 전처리된 이미지를 바이트로 직접 전달 (proc_path 디스크 쓰기 제거)
         proc_buf = io.BytesIO()
         preprocessed_img.save(proc_buf, format="PNG")
-        pred = _session.predict_image_bytes(proc_buf.getvalue(), image_name=name)
+        pred = await run_in_threadpool(
+            _session.predict_image_bytes, proc_buf.getvalue(), image_name=name
+        )
 
         # 리포트 이미지 합성
         # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
@@ -289,14 +263,13 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "abnormal_probability": prob,
             "decision_threshold": decision_threshold,
             "metrics": metrics,
-            "eval_metrics": metrics,
             "evidence_type": evidence["evidence_type"],
             "heatmap_path": evidence["heatmap_path"],
             "lesion_map_path": evidence["lesion_map_path"],
             "lesion_summary": evidence["lesion_summary"],
             "evidence_warning": evidence["evidence_warning"],
-            "xai_error_code": pred.payload.get("xai_error_code"),
-            "xai_no_region": pred.payload.get("xai_no_region"),
+            "xai_error_code": evidence["xai_error_code"],
+            "xai_no_region": evidence["xai_no_region"],
             "quality": quality,
             "quality_warning": quality_warning,
             "report_url": f"/image/report/{record_id}",
@@ -317,6 +290,8 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 @app.get("/image/raw/{record_id}")
 def serve_raw_image(record_id: str) -> Response:
     """복호화된 raw 이미지 바이트 응답."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="raw image not found")
     result = history.load_raw_bytes(record_id)
     if result is None:
         raise HTTPException(status_code=404, detail="raw image not found")
@@ -335,6 +310,8 @@ def serve_raw_image(record_id: str) -> Response:
 @app.get("/image/report/{record_id}")
 def serve_report_image(record_id: str) -> Response:
     """복호화된 분석 결과 이미지 응답 (PNG)."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="report image not found")
     data = history.load_report_bytes(record_id)
     if data is None:
         raise HTTPException(status_code=404, detail="report image not found")
@@ -379,9 +356,9 @@ def history_list(limit: int = 50, offset: int = 0) -> dict[str, Any]:
     if offset < 0:
         raise HTTPException(status_code=400, detail="offset must be >= 0")
 
-    records = history.list_records(limit=limit, offset=offset)
+    records, total = history.list_records_with_total(limit=limit, offset=offset)
     return {
-        "total": history.count_records(),
+        "total": total,
         "limit": limit,
         "offset": offset,
         "items": records,
@@ -390,6 +367,8 @@ def history_list(limit: int = 50, offset: int = 0) -> dict[str, Any]:
 @app.get("/history/{record_id}")
 def history_detail(record_id: str) -> dict[str, Any]:
     """특정 분석 이력 단건 조회."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="record not found")
     record = history.load_record(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")
@@ -398,6 +377,8 @@ def history_detail(record_id: str) -> dict[str, Any]:
 @app.delete("/history/{record_id}")
 def history_delete(record_id: str) -> dict[str, Any]:
     """특정 분석 이력과 관련 파일(raw, report, metadata) 일괄 삭제."""
+    if not history.RECORD_ID_PATTERN.match(record_id):
+        raise HTTPException(status_code=404, detail="record not found")
     record = history.load_record(record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")

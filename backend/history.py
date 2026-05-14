@@ -24,13 +24,14 @@ RESULTS_DIR = "results"
 
 # 메타데이터 암호 파일은 'report_<id>.json.enc'
 ID_PATTERN = re.compile(r"^report_(?P<id>\d{8}_\d{6}_\d{3})\.json\.enc$")
+RECORD_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}$")
 
 # ---------------------------------------------------------------
 # ID 발급
 # ---------------------------------------------------------------
 def make_record_id(now: datetime | None = None) -> str:
     """타임스탬프 기반 분석 ID 생성. 예: '20260428_165403_123'."""
-    now = now or datetime.now()
+    now = now or datetime.now(timezone.utc)
     return now.strftime("%Y%m%d_%H%M%S_") + f"{now.microsecond // 1000:03d}"
 
 
@@ -201,8 +202,19 @@ def _iter_metadata_files() -> list[tuple[str, str]]:
 #   메타데이터 dict들의 리스트. 각 dict의 스키마는 save_metadata에서 저장한 그것과 동일.
 def list_records(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     """저장된 분석 이력을 최신순으로 반환. 페이지네이션 지원."""
+    records, _ = list_records_with_total(limit=limit, offset=offset)
+    return records
+
+
+def list_records_with_total(
+    limit: int = 50, offset: int = 0
+) -> tuple[list[dict[str, Any]], int]:
+    """저장된 분석 이력을 최신순으로 반환하고 전체 건수를 함께 돌려준다.
+
+    단일 디스크 스캔으로 (items, total) 을 구성해 count_records() 별도 호출 불필요.
+    """
     pairs = _iter_metadata_files()
-    # ID가 타임스탬프 문자열이라 단순 역순 정렬 = 최신순
+    total = len(pairs)
     pairs.sort(key=lambda p: p[0], reverse=True)
 
     sliced = pairs[offset : offset + limit]
@@ -211,7 +223,7 @@ def list_records(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         record = load_record(rid)
         if record is not None:
             records.append(record)
-    return records
+    return records, total
 
 # ---------------------------------------------------------------
 # load_record
@@ -252,7 +264,21 @@ def load_record(record_id: str) -> dict[str, Any] | None:
         payload = json.loads(plaintext.decode("utf-8"))
     except (OSError, json.JSONDecodeError, crypto.DecryptionFailed):
         return None
-    
+
+    # raw_url 파일 존재 검증
+    raw_exists = False
+    if os.path.isdir(UPLOAD_DIR):
+        raw_exists = any(
+            fname.startswith(f"raw_{record_id}.") and fname.endswith(crypto.ENC_SUFFIX)
+            for fname in os.listdir(UPLOAD_DIR)
+        )
+    if not raw_exists:
+        payload["raw_url"] = None
+
+    # report_url 파일 존재 검증
+    if not os.path.exists(report_image_path_for(record_id)):
+        payload["report_url"] = None
+
     return payload
 
 def load_raw_bytes(record_id: str) -> tuple[bytes, str] | None:
@@ -286,7 +312,8 @@ def load_report_bytes(record_id: str) -> bytes | None:
         return None
 
 def count_records() -> int:
-    return len(_iter_metadata_files())
+    _, total = list_records_with_total(limit=0, offset=0)
+    return total
 
 
 def delete_record_files(record_id: str) -> None:
