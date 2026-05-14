@@ -165,11 +165,19 @@ def build_model_for_training(config: dict[str, Any], device: torch.device) -> nn
         pretrained=bool(config["model"]["pretrained"]),
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
+        attention_mode=config["model"].get("attention_mode"),
         use_ibn=bool(config["model"].get("use_ibn", False)),
         grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
         use_aux_seg=bool(config["model"].get("use_aux_seg", False)),
         aux_seg_block=int(config["model"].get("aux_seg_block", 2)),
         aux_seg_output_size=int(config["data"].get("image_size", 512)),
+        aux_seg_channels=int(
+            config["model"].get(
+                "aux_seg_channels",
+                config.get("data", {}).get("seg_mask_channels", 1),
+            )
+        ),
+        use_gated_pooling=bool(config["model"].get("use_gated_pooling", False)),
         use_mil_attention=bool(config["model"].get("use_mil_attention", False)),
         in_channels=int(config["model"].get("in_channels", 3)),
     ).to(device)
@@ -181,10 +189,18 @@ def build_model_for_eval(config: dict[str, Any], device: torch.device) -> nn.Mod
         pretrained=False,
         num_outputs=int(config["model"]["num_outputs"]),
         use_attention=bool(config["model"].get("use_attention", False)),
+        attention_mode=config["model"].get("attention_mode"),
         use_ibn=bool(config["model"].get("use_ibn", False)),
         use_aux_seg=bool(config["model"].get("use_aux_seg", False)),
         aux_seg_block=int(config["model"].get("aux_seg_block", 2)),
         aux_seg_output_size=int(config["model"].get("aux_seg_output_size", 512)),
+        aux_seg_channels=int(
+            config["model"].get(
+                "aux_seg_channels",
+                config.get("data", {}).get("seg_mask_channels", 1),
+            )
+        ),
+        use_gated_pooling=bool(config["model"].get("use_gated_pooling", False)),
         use_mil_attention=bool(config["model"].get("use_mil_attention", False)),
         in_channels=int(config["model"].get("in_channels", 3)),
     ).to(device)
@@ -203,7 +219,13 @@ def load_pretrained_backbone(
         LOGGER.warning("pretrained_backbone_path not found: %s", path)
         return
     backbone_ckpt = torch.load(path, map_location="cpu", weights_only=False)
-    missing, unexpected = load_state_from_checkpoint(model, backbone_ckpt, strict=False)
+    state = backbone_ckpt.get("model_state_dict", backbone_ckpt)
+    if hasattr(model, "backbone") and not any(
+        str(key).startswith("backbone.") for key in state
+    ):
+        missing, unexpected = model.backbone.load_state_dict(state, strict=False)
+    else:
+        missing, unexpected = load_state_from_checkpoint(model, backbone_ckpt, strict=False)
     LOGGER.info(
         "Loaded pretrained backbone from %s (missing=%d unexpected=%d)",
         path, len(missing), len(unexpected),

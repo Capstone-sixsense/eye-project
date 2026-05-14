@@ -6,6 +6,12 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
+from drscreen.data.mask_providers import (
+    IDRiDMaskProvider,
+    IDRiDPerLesionMaskProvider,
+    LesionMaskProvider,
+    NullMaskProvider,
+)
 from drscreen.data.datasets import FDAManifestDataset, ManifestDataset
 from drscreen.data.transforms import build_eval_transform, build_train_transform
 from drscreen.models.profiles import get_model_profile
@@ -32,6 +38,26 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
     return train_transform, eval_transform
 
 
+def _build_mask_provider(
+    config: dict[str, Any],
+    seg_mask_dir,
+) -> LesionMaskProvider:
+    data_cfg = config["data"]
+    model_cfg = config.get("model", {})
+    mask_mode = str(data_cfg.get("seg_mask_mode", "union")).strip().lower()
+    seg_channels = int(
+        model_cfg.get("aux_seg_channels", data_cfg.get("seg_mask_channels", 1))
+    )
+
+    if mask_mode in {"none", "null", "off"}:
+        return NullMaskProvider(channels=seg_channels)
+    if mask_mode in {"per_lesion", "per-lesion", "multi", "multichannel"}:
+        return IDRiDPerLesionMaskProvider(seg_mask_dir)
+    if mask_mode in {"union", "binary"}:
+        return IDRiDMaskProvider(seg_mask_dir)
+    raise ValueError(f"Unsupported data.seg_mask_mode: {mask_mode!r}")
+
+
 def _build_datasets(
     config: dict[str, Any],
     project_root: Path,
@@ -53,6 +79,7 @@ def _build_datasets(
         else project_root / "data" / "raw" / "IDRiD" / "A. Segmentation" / "2. All Segmentation Groundtruths"
     )
     seg_mask_size = int(data_cfg.get("image_size", 512))
+    mask_provider = _build_mask_provider(config, seg_mask_dir)
 
     use_fda = bool(data_cfg.get("use_fda", False))
     if use_fda:
@@ -60,13 +87,13 @@ def _build_datasets(
         train_dataset: ManifestDataset = FDAManifestDataset(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform, fda_alpha=fda_alpha,
-            seg_mask_dir=seg_mask_dir, seg_mask_size=seg_mask_size,
+            seg_mask_size=seg_mask_size, mask_provider=mask_provider,
         )
     else:
         train_dataset = ManifestDataset(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform,
-            seg_mask_dir=seg_mask_dir, seg_mask_size=seg_mask_size,
+            seg_mask_size=seg_mask_size, mask_provider=mask_provider,
         )
     val_dataset = ManifestDataset(
         manifest_path=manifest_path, image_root=image_root,

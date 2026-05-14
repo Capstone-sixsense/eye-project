@@ -1,5 +1,5 @@
 project:
-  version: v28_no_attention
+  version: v31_no_se_gated
   task: binary_dr_screening
   output_root: artifacts
 
@@ -31,8 +31,11 @@ model:
   pretrained: true
   num_outputs: 1
   use_attention: false
+  attention_mode: none
   use_aux_seg: true
-  aux_seg_block: 2
+  aux_seg_block: 4
+  aux_seg_channels: 1
+  use_gated_pooling: true
   use_ibn: false
   grad_checkpointing: false
 train:
@@ -59,5 +62,7 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
-  threshold: 0.45
+  threshold: 0.35
   gradcam_method: layercam
+  gradcam_target_block: 4
+  evidence_type: cam_research

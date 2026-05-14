@@ -112,6 +112,7 @@ def save_metadata(
     abnormal_probability: float,
     quality: dict | None,
     metrics: dict,
+    evidence: dict | None = None,
 ) -> str:
     """분석 메타데이터를 JSON으로 저장. 저장 경로 반환."""
     payload = {
@@ -124,6 +125,7 @@ def save_metadata(
         "abnormal_probability": abnormal_probability,
         "quality": quality,
         "metrics": metrics,
+        "evidence": evidence,
     }
     path = metadata_path_for(record_id)
     blob = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")

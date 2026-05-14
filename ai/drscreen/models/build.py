@@ -62,6 +62,70 @@ class _EcaSpatialAttn(nn.Module):
         return self.spatial(self.eca(x))
 
 
+class IdentitySE(nn.Module):
+    """No-op replacement for EfficientNet SE/ECA modules.
+
+    timm falls back to the default SqueezeExcite block when se_layer=None, so a
+    real identity module is required for true no-attention ablation runs.
+    """
+
+    def __init__(self, channels: int, **kwargs) -> None:
+        super().__init__()
+        del channels, kwargs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
+
+def resolve_attention_mode(
+    *,
+    use_attention: bool = False,
+    attention_mode: str | None = None,
+) -> str:
+    """Return the normalized EfficientNet attention mode.
+
+    Legacy configs only carry use_attention:
+    - True  -> eca_spatial (ECA channel + CBAM spatial)
+    - False -> eca         (ECA channel at the SE location)
+
+    New configs can set attention_mode=none for a true no-SE/no-ECA run.
+    """
+
+    if attention_mode is None:
+        return "eca_spatial" if use_attention else "eca"
+
+    mode = str(attention_mode).strip().lower().replace("-", "_")
+    aliases = {
+        "true": "eca_spatial",
+        "full": "eca_spatial",
+        "eca_cbam": "eca_spatial",
+        "eca_spatial": "eca_spatial",
+        "spatial": "eca_spatial",
+        "false": "eca",
+        "legacy": "eca",
+        "eca": "eca",
+        "none": "none",
+        "identity": "none",
+        "no_attention": "none",
+    }
+    if mode not in aliases:
+        raise ValueError(
+            "Unsupported attention_mode "
+            f"{attention_mode!r}; expected one of eca_spatial, eca, none."
+        )
+    return aliases[mode]
+
+
+def _attention_se_layer(attention_mode: str) -> type[nn.Module]:
+    if attention_mode == "eca_spatial":
+        return _EcaSpatialAttn
+    if attention_mode == "eca":
+        return EcaModule
+    if attention_mode == "none":
+        return IdentitySE
+    raise ValueError(f"Unsupported attention_mode: {attention_mode}")
+
+
 # ---------------------------------------------------------------------------
 # Variant builders (internal) — called by build_model() dispatcher
 # ---------------------------------------------------------------------------
@@ -71,11 +135,16 @@ def _build_efficientnet_b5(
     pretrained: bool,
     num_outputs: int,
     use_attention: bool,
+    attention_mode: str | None,
     use_ibn: bool,
     grad_checkpointing: bool,
     in_channels: int = 3,
 ) -> nn.Module:
-    se_layer = _EcaSpatialAttn if use_attention else EcaModule
+    resolved_attention_mode = resolve_attention_mode(
+        use_attention=use_attention,
+        attention_mode=attention_mode,
+    )
+    se_layer = _attention_se_layer(resolved_attention_mode)
     model = timm.create_model(
         "efficientnet_b5",
         pretrained=pretrained,
@@ -95,20 +164,30 @@ def _build_multitask_aux_seg(
     pretrained: bool,
     num_outputs: int,
     use_attention: bool,
+    attention_mode: str | None,
     use_ibn: bool,
     grad_checkpointing: bool,
     aux_seg_block: int,
     aux_seg_output_size: int,
+    aux_seg_channels: int,
+    use_gated_pooling: bool,
 ) -> nn.Module:
     from drscreen.models.aux_seg import MultiTaskModel
     backbone = _build_efficientnet_b5(
         pretrained=pretrained,
         num_outputs=num_outputs,
         use_attention=use_attention,
+        attention_mode=attention_mode,
         use_ibn=use_ibn,
         grad_checkpointing=grad_checkpointing,
     )
-    return MultiTaskModel(backbone, block_index=aux_seg_block, output_size=aux_seg_output_size)
+    return MultiTaskModel(
+        backbone,
+        block_index=aux_seg_block,
+        output_size=aux_seg_output_size,
+        seg_channels=aux_seg_channels,
+        use_gated_pooling=use_gated_pooling,
+    )
 
 
 def _build_mil_attention(
@@ -116,6 +195,7 @@ def _build_mil_attention(
     pretrained: bool,
     num_outputs: int,
     use_attention: bool,
+    attention_mode: str | None,
     use_ibn: bool,
     grad_checkpointing: bool,
 ) -> nn.Module:
@@ -124,6 +204,7 @@ def _build_mil_attention(
         pretrained=pretrained,
         num_outputs=num_outputs,
         use_attention=use_attention,
+        attention_mode=attention_mode,
         use_ibn=use_ibn,
         grad_checkpointing=grad_checkpointing,
     )
@@ -139,11 +220,14 @@ def build_model(
     pretrained: bool = True,
     num_outputs: int = 1,
     use_attention: bool = False,
+    attention_mode: str | None = None,
     use_ibn: bool = False,
     grad_checkpointing: bool = False,
     use_aux_seg: bool = False,
     aux_seg_block: int = 2,
     aux_seg_output_size: int = 512,
+    aux_seg_channels: int = 1,
+    use_gated_pooling: bool = False,
     use_mil_attention: bool = False,
     in_channels: int = 3,
 ) -> nn.Module:
@@ -153,16 +237,20 @@ def build_model(
                 pretrained=pretrained,
                 num_outputs=num_outputs,
                 use_attention=use_attention,
+                attention_mode=attention_mode,
                 use_ibn=use_ibn,
                 grad_checkpointing=grad_checkpointing,
                 aux_seg_block=aux_seg_block,
                 aux_seg_output_size=aux_seg_output_size,
+                aux_seg_channels=aux_seg_channels,
+                use_gated_pooling=use_gated_pooling,
             )
         if use_mil_attention:
             return _build_mil_attention(
                 pretrained=pretrained,
                 num_outputs=num_outputs,
                 use_attention=use_attention,
+                attention_mode=attention_mode,
                 use_ibn=use_ibn,
                 grad_checkpointing=grad_checkpointing,
             )
@@ -170,6 +258,7 @@ def build_model(
             pretrained=pretrained,
             num_outputs=num_outputs,
             use_attention=use_attention,
+            attention_mode=attention_mode,
             use_ibn=use_ibn,
             grad_checkpointing=grad_checkpointing,
             in_channels=in_channels,

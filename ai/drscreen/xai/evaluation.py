@@ -147,7 +147,7 @@ def _agg_scalar(per_image: list[dict], key: str) -> dict | None:
     vals = [r[key] for r in per_image if r.get(key) is not None]
     if not vals:
         return None
-    return {"mean": float(np.mean(vals)), "n": len(vals)}
+    return {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "n": len(vals)}
 
 
 def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
@@ -290,13 +290,13 @@ def evaluate(
     print("=== Aggregate ===")
     if aggregate["pointing_game"]:
         pg = aggregate["pointing_game"]
-        print(f"Pointing game : {pg['mean']:.4f}  (n={pg['n']})")
+        print(f"Pointing game : {pg['mean']:.4f} ± {pg['std']:.4f}  (n={pg['n']})")
     if aggregate["auprc"]:
         ap = aggregate["auprc"]
-        print(f"AUPRC         : {ap['mean']:.4f}  (n={ap['n']})")
+        print(f"AUPRC         : {ap['mean']:.4f} ± {ap['std']:.4f}  (n={ap['n']})")
     if aggregate["auc_iou"]:
         ai = aggregate["auc_iou"]
-        print(f"AUC-IoU       : {ai['mean']:.4f}  (n={ai['n']})")
+        print(f"AUC-IoU       : {ai['mean']:.4f} ± {ai['std']:.4f}  (n={ai['n']})")
     for top_pct in top_percents:
         key = f"top{int(top_pct * 100):02d}"
         agg_t = aggregate["thresholds"][key]
@@ -309,12 +309,43 @@ def evaluate(
         print("=== Baselines ===")
         for name, bagg in aggregate["baselines"].items():
             ap_b = bagg["auprc"]["mean"] if bagg["auprc"] else None
+            ai_b = bagg["auc_iou"]
             iou20_b = bagg["thresholds"].get("top20", {}).get("mean_iou_union")
+            auc_iou_str = (
+                f"  AUC-IoU={ai_b['mean']:.4f}±{ai_b['std']:.4f}" if ai_b else "  AUC-IoU=N/A"
+            )
             print(
                 f"  {name:20s}  AUPRC={ap_b:.4f}" if ap_b is not None else
                 f"  {name:20s}  AUPRC=N/A",
+                auc_iou_str,
                 f"  IoU-top20={iou20_b:.4f}" if iou20_b is not None else "  IoU-top20=N/A",
             )
+
+        model_auc = aggregate["auc_iou"]["mean"] if aggregate["auc_iou"] else None
+        cg_bagg = aggregate["baselines"].get("center_gaussian")
+        if model_auc is not None and cg_bagg and cg_bagg["auc_iou"]:
+            cg = cg_bagg["auc_iou"]
+            threshold = cg["mean"] + 2 * cg["std"]
+            gate = model_auc > threshold
+            print()
+            print("=== Phase-0 Gate (AUC-IoU > center_gaussian + 2σ) ===")
+            print(f"  Model AUC-IoU  : {model_auc:.4f}")
+            print(f"  Threshold      : {cg['mean']:.4f} + 2×{cg['std']:.4f} = {threshold:.4f}")
+            print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
+
+    phase0_gate: dict | None = None
+    cg_bagg = aggregate.get("baselines", {}).get("center_gaussian") if run_baselines else None
+    model_auc = aggregate["auc_iou"]["mean"] if aggregate.get("auc_iou") else None
+    if model_auc is not None and cg_bagg and cg_bagg.get("auc_iou"):
+        cg = cg_bagg["auc_iou"]
+        threshold = cg["mean"] + 2 * cg["std"]
+        phase0_gate = {
+            "model_auc_iou": model_auc,
+            "center_gaussian_mean": cg["mean"],
+            "center_gaussian_std": cg["std"],
+            "threshold": threshold,
+            "pass": bool(model_auc > threshold),
+        }
 
     output = {
         "version": version,
@@ -324,6 +355,7 @@ def evaluate(
         "split": split,
         "n_images": len(per_image),
         "top_percents": top_percents,
+        "phase0_gate": phase0_gate,
         "aggregate": aggregate,
         "per_image": per_image,
     }
