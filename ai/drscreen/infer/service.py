@@ -23,12 +23,14 @@ from drscreen.settings import (
     build_effective_checkpoint_config,
     ensure_runtime_directories,
     find_classification_metrics_path,
+    get_run_evaluation_dir,
     load_app_config,
     resolve_checkpoint_path,
     resolve_project_path,
 )
 from drscreen.train.model_setup import resolve_device
 from drscreen.xai.gradcam import generate_gradcam
+from drscreen.xai.iou import LESION_CODES
 
 
 def _resolve_config_context(config_path: str | Path) -> tuple[Path, Path, dict[str, Any]]:
@@ -72,6 +74,95 @@ def _checkpoint_optimal_threshold(checkpoint: dict[str, Any]) -> float | None:
         if threshold is not None:
             return threshold
     return None
+
+
+def _mean_metric(section: Any) -> float | None:
+    if not isinstance(section, dict):
+        return None
+    return _as_valid_threshold(section.get("mean"))
+
+
+def _xai_block_label(infer_cfg: dict[str, Any]) -> str:
+    raw = infer_cfg.get("gradcam_target_block")
+    if raw is None:
+        return "default"
+    if isinstance(raw, int):
+        return f"block{raw}"
+    value = str(raw).strip().lower()
+    if not value or value in {"default", "last"}:
+        return "default"
+    if value.isdigit():
+        return f"block{value}"
+    return value
+
+
+def _xai_block_index(infer_cfg: dict[str, Any]) -> int | None:
+    raw = infer_cfg.get("gradcam_target_block")
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    value = str(raw).strip().lower()
+    if not value or value in {"default", "last"}:
+        return None
+    if value.startswith("block"):
+        value = value.removeprefix("block")
+    if value.isdigit():
+        return int(value)
+    raise ValueError(f"Unsupported gradcam_target_block: {raw!r}")
+
+
+def _resolve_xai_target_layer(
+    model: torch.nn.Module,
+    infer_cfg: dict[str, Any],
+) -> torch.nn.Module | None:
+    block_index = _xai_block_index(infer_cfg)
+    if block_index is None:
+        return None
+    blocks = getattr(model, "blocks", getattr(model, "features", None))
+    if blocks is None:
+        raise ValueError("Model has neither .blocks nor .features attribute")
+    return blocks[block_index]
+
+
+def _load_xai_eval_metrics(
+    project_root: Path,
+    version: str,
+    infer_cfg: dict[str, Any],
+) -> dict[str, Any] | None:
+    block_label = _xai_block_label(infer_cfg)
+    split = str(infer_cfg.get("xai_eval_split", "test"))
+    path = (
+        get_run_evaluation_dir(project_root, version)
+        / f"xai_iou_{version}_{block_label}_{split}.json"
+    )
+    if not path.exists():
+        return None
+
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None
+
+    aggregate = data.get("aggregate", {})
+    thresholds = aggregate.get("thresholds", {}) if isinstance(aggregate, dict) else {}
+
+    metrics: dict[str, Any] = {
+        "xai_eval_split": data.get("split", split),
+        "xai_eval_target_block": data.get("target_block", block_label),
+        "xai_eval_n": data.get("n_images"),
+        "xai_pointing_game": _mean_metric(aggregate.get("pointing_game")),
+        "xai_auprc": _mean_metric(aggregate.get("auprc")),
+        "xai_auc_iou": _mean_metric(aggregate.get("auc_iou")),
+    }
+    for top_key in ("top10", "top20", "top30"):
+        top_metrics = thresholds.get(top_key, {})
+        if isinstance(top_metrics, dict):
+            value = _as_valid_threshold(top_metrics.get("mean_iou_union"))
+            metrics[f"xai_iou_{top_key}"] = value
+
+    return {key: value for key, value in metrics.items() if value is not None}
 
 
 def _build_retina_mask(image: Image.Image) -> np.ndarray:
@@ -131,10 +222,120 @@ def _render_gradcam_overlay(
     return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
 
+_LESION_COLORS = {
+    "MA": np.array([52.0, 152.0, 219.0], dtype=np.float32),
+    "HE": np.array([231.0, 76.0, 60.0], dtype=np.float32),
+    "EX": np.array([241.0, 196.0, 15.0], dtype=np.float32),
+    "SE": np.array([46.0, 204.0, 113.0], dtype=np.float32),
+    "union": np.array([255.0, 92.0, 64.0], dtype=np.float32),
+}
+
+
+def _resize_probability_channels(
+    lesion_prob: torch.Tensor,
+    image_size: tuple[int, int],
+) -> np.ndarray:
+    probabilities = lesion_prob.detach().cpu().float().clamp(0.0, 1.0)
+    if probabilities.ndim == 2:
+        probabilities = probabilities.unsqueeze(0)
+    if probabilities.ndim != 3:
+        raise ValueError(f"Expected lesion probability [C,H,W], got {tuple(probabilities.shape)}")
+    channels = probabilities.numpy().astype(np.float32)
+    return np.stack(
+        [
+            cv2.resize(channel, dsize=image_size, interpolation=cv2.INTER_LINEAR)
+            for channel in channels
+        ],
+        axis=0,
+    )
+
+
+def _summarize_lesion_probabilities(
+    channels: np.ndarray,
+    retina_mask: np.ndarray,
+    threshold: float,
+) -> dict[str, Any]:
+    active = retina_mask > 0
+    retina_pixel_count = float(active.sum())
+    if retina_pixel_count <= 0:
+        retina_pixel_count = float(channels.shape[-1] * channels.shape[-2])
+        active = np.ones(channels.shape[-2:], dtype=bool)
+
+    summary: dict[str, Any] = {}
+    if channels.shape[0] == len(LESION_CODES):
+        labels = list(LESION_CODES)
+    else:
+        labels = [f"channel_{idx}" for idx in range(channels.shape[0])]
+
+    for idx, label in enumerate(labels):
+        channel = channels[idx] * retina_mask
+        active_values = channel[active]
+        summary[label] = {
+            "presence_score": float(active_values.max()) if active_values.size else 0.0,
+            "mean_score": float(active_values.mean()) if active_values.size else 0.0,
+            "area_ratio": float(((channel >= threshold) & active).sum()) / retina_pixel_count,
+        }
+
+    union = channels.max(axis=0) * retina_mask
+    union_active = union[active]
+    summary["union"] = {
+        "presence_score": float(union_active.max()) if union_active.size else 0.0,
+        "mean_score": float(union_active.mean()) if union_active.size else 0.0,
+        "area_ratio": float(((union >= threshold) & active).sum()) / retina_pixel_count,
+        "threshold": float(threshold),
+    }
+    return summary
+
+
+def _render_lesion_overlay(
+    image: Image.Image,
+    lesion_prob: torch.Tensor,
+    *,
+    lesion_threshold: float = 0.5,
+) -> tuple[Image.Image, bool, dict[str, Any], str | None]:
+    retina_mask = _build_retina_mask(image)
+    channels = _resize_probability_channels(lesion_prob, image.size)
+    channels *= retina_mask[None, ...]
+    union = channels.max(axis=0)
+
+    summary = _summarize_lesion_probabilities(channels, retina_mask, lesion_threshold)
+    union_summary = summary["union"]
+    xai_no_region = (
+        float(union_summary["presence_score"]) < lesion_threshold
+        or float(union_summary["area_ratio"]) < 0.001
+    )
+    evidence_warning = "LESION_EVIDENCE_LOW_CONFIDENCE" if xai_no_region else None
+
+    denominator = max(1.0 - lesion_threshold, 1e-6)
+    emphasized = np.clip((union - lesion_threshold) / denominator, 0.0, 1.0)
+    emphasized = np.power(emphasized, 0.7, dtype=np.float32)
+
+    if channels.shape[0] == len(LESION_CODES):
+        color_map = np.zeros((*union.shape, 3), dtype=np.float32)
+        for idx, code in enumerate(LESION_CODES):
+            color_map += channels[idx][..., None] * _LESION_COLORS[code]
+        color_map = np.clip(color_map, 0.0, 255.0)
+    else:
+        heat_uint8 = np.uint8(np.clip(union, 0.0, 1.0) * 255.0)
+        heat_bgr = cv2.applyColorMap(heat_uint8, cv2.COLORMAP_TURBO)
+        color_map = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+
+    original = np.asarray(image.convert("RGB"), dtype=np.float32)
+    alpha_mask = emphasized[..., None] * 0.82
+    overlay = (original * (1.0 - alpha_mask)) + (color_map * alpha_mask)
+    return (
+        Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))),
+        xai_no_region,
+        summary,
+        evidence_warning,
+    )
+
+
 @dataclass(slots=True)
 class SavedInferenceArtifacts:
     prediction_path: Path | None
     heatmap_path: Path | None
+    lesion_map_path: Path | None
 
 
 @dataclass(slots=True)
@@ -190,10 +391,13 @@ class InferenceSession:
             pretrained=False,
             num_outputs=num_outputs,
             use_attention=bool(effective_config["model"].get("use_attention", False)),
+            attention_mode=effective_config["model"].get("attention_mode"),
             use_ibn=bool(effective_config["model"].get("use_ibn", False)),
             use_aux_seg=bool(effective_config["model"].get("use_aux_seg", False)),
             aux_seg_block=int(effective_config["model"].get("aux_seg_block", 2)),
             aux_seg_output_size=int(effective_config["model"].get("aux_seg_output_size", 512)),
+            aux_seg_channels=int(effective_config["model"].get("aux_seg_channels", 1)),
+            use_gated_pooling=bool(effective_config["model"].get("use_gated_pooling", False)),
             use_mil_attention=bool(effective_config["model"].get("use_mil_attention", False)),
         ).to(device)
         load_state_from_checkpoint(model, checkpoint)
@@ -258,6 +462,9 @@ class InferenceSession:
         effective_config.setdefault("infer", {})["threshold"] = decision_threshold
         if eval_metrics is not None:
             eval_metrics["decision_threshold"] = decision_threshold
+        xai_eval_metrics = _load_xai_eval_metrics(project_root, version, infer_cfg)
+        if xai_eval_metrics:
+            eval_metrics = {**(eval_metrics or {}), **xai_eval_metrics}
 
         return cls(
             config_path=resolved_config_path,
@@ -327,20 +534,61 @@ class InferenceSession:
         heatmap_overlay = None
         xai_error_code = None
         xai_no_region = False
-        try:
-            gradcam_method = self.config.get("infer", {}).get("gradcam_method", "gradcam")
-            gradcam = generate_gradcam(self.model, image_tensor.unsqueeze(0), method=gradcam_method)
-            heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
-        except Exception:
-            xai_error_code = "XAI_001"
+        lesion_summary = None
+        evidence_warning = None
+        infer_cfg = self.config.get("infer", {})
+        evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
+        if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
+            evidence_type = "lesion_segmentation"
+            try:
+                if not hasattr(self.model, "predict_seg"):
+                    raise ValueError("Model does not expose predict_seg().")
+                lesion_prob = self.model.predict_seg(image_tensor.unsqueeze(0))[0]
+                lesion_threshold = (
+                    _as_valid_threshold(infer_cfg.get("lesion_threshold"))
+                    or 0.5
+                )
+                (
+                    heatmap_overlay,
+                    xai_no_region,
+                    lesion_summary,
+                    evidence_warning,
+                ) = _render_lesion_overlay(
+                    original_image,
+                    lesion_prob,
+                    lesion_threshold=lesion_threshold,
+                )
+            except Exception:
+                xai_error_code = "XAI_002"
+                evidence_warning = "LESION_EVIDENCE_UNAVAILABLE"
+        else:
+            evidence_type = "cam_research"
+            try:
+                gradcam_method = infer_cfg.get("gradcam_method", "gradcam")
+                target_layer = _resolve_xai_target_layer(
+                    self.model,
+                    infer_cfg,
+                )
+                gradcam = generate_gradcam(
+                    self.model,
+                    image_tensor.unsqueeze(0),
+                    target_layer=target_layer,
+                    method=gradcam_method,
+                )
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+            except Exception:
+                xai_error_code = "XAI_001"
 
         stem = _sanitize_stem(image_name)
         prediction_path: Path | None = None
         heatmap_path: Path | None = None
+        lesion_map_path: Path | None = None
         if save_outputs:
             prediction_path = _build_timestamped_path(self.prediction_dir, stem, ".json")
             if heatmap_overlay is not None:
                 heatmap_path = _build_timestamped_path(self.heatmap_dir, stem, ".png")
+                if evidence_type == "lesion_segmentation":
+                    lesion_map_path = heatmap_path
 
         payload = InferencePayload(
             predicted_index=result.predicted_index,
@@ -352,6 +600,10 @@ class InferenceSession:
             heatmap_path=str(heatmap_path) if heatmap_path else None,
             xai_error_code=xai_error_code,
             xai_no_region=xai_no_region,
+            evidence_type=evidence_type,
+            lesion_map_path=str(lesion_map_path) if lesion_map_path else None,
+            lesion_summary=lesion_summary,
+            evidence_warning=evidence_warning,
             eval_metrics=self.eval_metrics,
         ).to_dict()
 
@@ -368,5 +620,6 @@ class InferenceSession:
             saved=SavedInferenceArtifacts(
                 prediction_path=prediction_path,
                 heatmap_path=heatmap_path,
+                lesion_map_path=lesion_map_path,
             ),
         )

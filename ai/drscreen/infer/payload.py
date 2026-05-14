@@ -19,6 +19,10 @@ class InferencePayload:
     # XAI
     xai_error_code: str | None
     xai_no_region: bool
+    evidence_type: str | None = None
+    lesion_map_path: str | None = None
+    lesion_summary: dict[str, Any] | None = None
+    evidence_warning: str | None = None
     # Quality fields — reserved, always None (populated by quality model when added)
     quality: None = None
     quality_warning: None = None

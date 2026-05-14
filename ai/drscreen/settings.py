@@ -43,6 +43,9 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v27_mil_attention": "04_lesion_supervision",
     "v28_no_attention": "05_xai_attention_ablation",
     "v29_with_attention": "05_xai_attention_ablation",
+    "v30_gated_pooling": "06_xai_classifier_routing",
+    "v31_no_se_gated": "07_lesion_evidence",
+    "v32_lesion_seg_evidence": "07_lesion_evidence",
 }
 
 
@@ -201,6 +204,10 @@ def build_effective_checkpoint_config(
                     "use_attention",
                     effective_config["model"].get("use_attention", False),
                 ),
+                "attention_mode": checkpoint_model_config.get(
+                    "attention_mode",
+                    effective_config["model"].get("attention_mode"),
+                ),
                 "use_ibn": checkpoint_model_config.get(
                     "use_ibn",
                     effective_config["model"].get("use_ibn", False),
@@ -208,6 +215,30 @@ def build_effective_checkpoint_config(
                 "grad_checkpointing": checkpoint_model_config.get(
                     "grad_checkpointing",
                     effective_config["model"].get("grad_checkpointing", False),
+                ),
+                "use_aux_seg": checkpoint_model_config.get(
+                    "use_aux_seg",
+                    effective_config["model"].get("use_aux_seg", False),
+                ),
+                "aux_seg_block": checkpoint_model_config.get(
+                    "aux_seg_block",
+                    effective_config["model"].get("aux_seg_block", 2),
+                ),
+                "aux_seg_output_size": checkpoint_model_config.get(
+                    "aux_seg_output_size",
+                    effective_config["model"].get("aux_seg_output_size", 512),
+                ),
+                "aux_seg_channels": checkpoint_model_config.get(
+                    "aux_seg_channels",
+                    effective_config["model"].get("aux_seg_channels", 1),
+                ),
+                "use_gated_pooling": checkpoint_model_config.get(
+                    "use_gated_pooling",
+                    effective_config["model"].get("use_gated_pooling", False),
+                ),
+                "use_mil_attention": checkpoint_model_config.get(
+                    "use_mil_attention",
+                    effective_config["model"].get("use_mil_attention", False),
                 ),
                 "pretrained": False,
             },
