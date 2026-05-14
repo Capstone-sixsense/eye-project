@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: backend_Dockerfile
+    platform: linux/amd64
     container_name: eye-backend-service
     # 개발용 hot-reload. 프로덕션에서는 이 command 블록을 삭제하면 Dockerfile CMD가 사용됩니다.
     command: >
