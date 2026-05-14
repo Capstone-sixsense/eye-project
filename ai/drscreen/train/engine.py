@@ -153,6 +153,7 @@ def train_one_epoch(
     coral_criterion: torch.nn.Module | None = None,
     lambda_coral: float = 0.0,
     lambda_aux_seg: float = 0.0,
+    seg_loss_type: str = "bce",
 ) -> EpochMetrics:
     model.train()
     if model_train_setup is not None:
@@ -160,6 +161,14 @@ def train_one_epoch(
 
     use_coral = coral_criterion is not None and lambda_coral > 0.0 and _has_timm_feature_api(model)
     use_aux_seg = lambda_aux_seg > 0.0
+
+    _seg_criterion: torch.nn.Module | None = None
+    if use_aux_seg:
+        if seg_loss_type == "dice_bce":
+            from drscreen.train.loss import DiceBCELoss
+            _seg_criterion = DiceBCELoss().to(device)
+        else:
+            _seg_criterion = None  # use F.binary_cross_entropy_with_logits inline
     total_loss = 0.0
     total_examples = 0
     all_logits: list[torch.Tensor] = []
@@ -191,9 +200,12 @@ def train_one_epoch(
                         if valid.any():
                             seg_targets = batch["seg_mask"].to(device)
                             import torch.nn.functional as F
-                            seg_loss = F.binary_cross_entropy_with_logits(
-                                seg_logits[valid], seg_targets[valid]
-                            )
+                            if _seg_criterion is not None:
+                                seg_loss = _seg_criterion(seg_logits[valid], seg_targets[valid])
+                            else:
+                                seg_loss = F.binary_cross_entropy_with_logits(
+                                    seg_logits[valid], seg_targets[valid]
+                                )
                             loss = loss + lambda_aux_seg * seg_loss
 
         if scaler is not None and scaler.is_enabled():

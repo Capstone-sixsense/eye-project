@@ -16,7 +16,8 @@ train:
   head_epochs: 0
   finetune_epochs: 15
   backbone_learning_rate: 0.00004
-  lambda_aux_seg: 0.3
+  lambda_aux_seg: 0.5
+  seg_loss_type: dice_bce
   pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
 
 infer:
