@@ -4,14 +4,6 @@ from PIL import Image
 from tqdm import tqdm
 from torchvision.transforms import functional as F
 
-kaggle_path = Path('/home/justinengelmann/datastorage/kaggle/train')
-kaggle_path_preprocessed = Path('/home/justinengelmann/datastorage/kaggle/train_preprocessed')
-kaggle_path_preprocessed.mkdir(exist_ok=True)
-
-kaggle_path_test = Path('/home/justinengelmann/datastorage/kaggle/test')
-kaggle_path_test_preprocessed = Path('/home/justinengelmann/datastorage/kaggle/test_preprocessed')
-kaggle_path_test_preprocessed.mkdir(exist_ok=True)
-
 
 def preprocess_img(img, threshold=15):
     """
@@ -85,15 +77,22 @@ def preprocess_imgs_mp(img_paths, save_dir, threshold=15, n_workers=mp.cpu_count
         list(tqdm(pool.imap_unordered(partial(preprocess_img_mp, save_dir=save_dir, threshold=threshold), img_paths),
                   total=len(img_paths)))
 
-print('Preprocessing images...')
 
-train_imgs = list(kaggle_path.iterdir())
+if __name__ == "__main__":
+    kaggle_path = Path('/home/justinengelmann/datastorage/kaggle/train')
+    kaggle_path_preprocessed = Path('/home/justinengelmann/datastorage/kaggle/train_preprocessed')
+    kaggle_path_preprocessed.mkdir(exist_ok=True)
 
-preprocess_imgs_mp(train_imgs, kaggle_path_preprocessed)
+    kaggle_path_test = Path('/home/justinengelmann/datastorage/kaggle/test')
+    kaggle_path_test_preprocessed = Path('/home/justinengelmann/datastorage/kaggle/test_preprocessed')
+    kaggle_path_test_preprocessed.mkdir(exist_ok=True)
 
-test_imgs = list(kaggle_path_test.iterdir())
+    print('Preprocessing images...')
 
-preprocess_imgs_mp(test_imgs, kaggle_path_test_preprocessed)
+    train_imgs = list(kaggle_path.iterdir())
+    preprocess_imgs_mp(train_imgs, kaggle_path_preprocessed)
 
-print('Done!')
+    test_imgs = list(kaggle_path_test.iterdir())
+    preprocess_imgs_mp(test_imgs, kaggle_path_test_preprocessed)
 
+    print('Done!')

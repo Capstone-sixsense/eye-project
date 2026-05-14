@@ -211,11 +211,6 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             flush=True,
         )
 
-        """
-        # AI 추론 (CPU + EfficientNet 등은 여기서 대부분의 시간 소요)
-        with open(proc_path, "rb") as f:
-            pred = _session.predict_image_bytes(f.read(), image_name=name)
-        """
         # 진단 추론 — 전처리된 이미지를 바이트로 직접 전달 (proc_path 디스크 쓰기 제거)
         proc_buf = io.BytesIO()
         preprocessed_img.save(proc_buf, format="PNG")

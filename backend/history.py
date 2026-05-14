@@ -312,7 +312,8 @@ def load_report_bytes(record_id: str) -> bytes | None:
         return None
 
 def count_records() -> int:
-    return len(_iter_metadata_files())
+    _, total = list_records_with_total(limit=0, offset=0)
+    return total
 
 
 def delete_record_files(record_id: str) -> None:
