@@ -3,6 +3,9 @@ project:
 
 model:
   use_mil_attention: true
+  use_aux_seg: false
+  use_attention: true
+  attention_mode: eca_spatial
 
 train:
   loss: focal
