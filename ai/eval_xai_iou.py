@@ -63,6 +63,10 @@ def main() -> None:
         help="Also evaluate random / center-Gaussian / retina-uniform baseline heatmaps"
     )
     parser.add_argument(
+        "--gate-sigma", type=float, default=2.0,
+        help="Phase-0 gate threshold multiplier: AUC-IoU > center_gaussian + N*sigma (default: 2.0)"
+    )
+    parser.add_argument(
         "--methods", nargs="+",
         choices=["gradcam", "layercam", "gradcam++", "scorecam", "ig"],
         help="Compare multiple XAI methods side by side (overrides single-method mode)"
@@ -90,6 +94,7 @@ def main() -> None:
             use_seg_head=args.use_seg_head,
             use_mil_attention=args.use_mil_attention,
             run_baselines=args.baselines,
+            gate_sigma=args.gate_sigma,
         )
 
 

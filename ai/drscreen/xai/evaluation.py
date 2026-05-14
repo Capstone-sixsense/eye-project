@@ -215,6 +215,7 @@ def evaluate(
     use_seg_head: bool = False,
     use_mil_attention: bool = False,
     run_baselines: bool = False,
+    gate_sigma: float = 2.0,
 ) -> dict:
     if top_percents is None:
         top_percents = [0.10, 0.20, 0.30]
@@ -325,12 +326,12 @@ def evaluate(
         cg_bagg = aggregate["baselines"].get("center_gaussian")
         if model_auc is not None and cg_bagg and cg_bagg["auc_iou"]:
             cg = cg_bagg["auc_iou"]
-            threshold = cg["mean"] + 2 * cg["std"]
+            threshold = cg["mean"] + gate_sigma * cg["std"]
             gate = model_auc > threshold
             print()
-            print("=== Phase-0 Gate (AUC-IoU > center_gaussian + 2σ) ===")
+            print(f"=== Phase-0 Gate (AUC-IoU > center_gaussian + {gate_sigma}σ) ===")
             print(f"  Model AUC-IoU  : {model_auc:.4f}")
-            print(f"  Threshold      : {cg['mean']:.4f} + 2×{cg['std']:.4f} = {threshold:.4f}")
+            print(f"  Threshold      : {cg['mean']:.4f} + {gate_sigma}×{cg['std']:.4f} = {threshold:.4f}")
             print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
 
     phase0_gate: dict | None = None
