@@ -208,10 +208,13 @@ No training data overlap. Script: `eval_xai_maples.py`.
 | Run | Split | Target/Method | N | PG | AUPRC | AUC-IoU | IoU top-20 |
 |---|---|---|---:|---:|---:|---:|---:|
 | `v31_no_se_gated` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0172 | 0.0051 | 0.0113 |
+| `v31_no_se_gated` | test | block4 + OD mask | 60 | 0.0500 | 0.0173 | 0.0052 | 0.0113 |
 | `v35_warmstart_routing` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0166 | 0.0053 | 0.0098 |
+| `v35_warmstart_routing` | test | block4 + OD mask | 60 | 0.0500 | 0.0167 | 0.0053 | 0.0099 |
 
 **해석**: IDRiD XAI 수치(v31: AUPRC 0.1409) 대비 약 10× 하락. v31 vs v35 차이 소멸.
 IDRiD XAI 수치는 학습 도메인 편향에 의한 과대평가였음. 현 아키텍처는 외부 코호트 병변 로컬라이제이션 능력이 거의 없음.
+OD masking 효과: AUPRC +0.0001 (측정 노이즈 수준) — OD는 CAM confound 아님. MAPLES-DR 저성능은 도메인 일반화 실패가 원인.
 
 ## XAI Method Comparison on v24
 
@@ -244,4 +247,5 @@ IDRiD XAI 수치는 학습 도메인 편향에 의한 과대평가였음. 현 �
 - **4ch per-lesion routing 구조 trade-off 최종 확정 (v33~v35)**: lambda 조정(v34), v31 warmstart(v35) 모두 DDR 회귀 미해소. v35 warmstart는 오히려 DDR AUROC 0.9081로 최저 — 4ch routing이 OOD 일반화를 구조적으로 희생. XAI 개선(AUPRC ↑)과 DDR 일반화(AUROC ↓)는 현 아키텍처에서 trade-off 관계.
 - **실험 방향 전환**: 4ch per-lesion routing 추가 실험 중단. 현재 배포(v31)는 분류 최우선 기준으로 유지. XAI 개선은 분류에 영향 없는 방법 탐색으로 전환.
 - **MAPLES-DR clean-cohort 확인 완료**: v31/v35 모두 PG 0.0500, AUPRC ~0.017, AUC-IoU ~0.005 — IDRiD 수치 대비 10× 하락. IDRiD XAI 수치는 학습 도메인 편향 과대평가. 현 아키텍처의 XAI 일반화 능력 부재 확인.
-- 다음 단계: anatomy-guided CAM masking — optic disc 영역 post-hoc 제외로 false positive 억제 후 MAPLES-DR 재평가.
+- **Anatomy-guided CAM masking 효과 없음**: OD 마스킹 후 AUPRC +0.0001 (노이즈 수준). OD가 CAM confound가 아님을 확인. MAPLES-DR 저성능은 도메인 일반화 실패가 근본 원인.
+- **Sprint 3 XAI 실험 완료**: v31~v35 + MAPLES-DR clean-cohort + OD masking. XAI 개선을 위해서는 도메인 불변 feature 학습 등 아키텍처 수준 접근 필요. v31 배포 유지.

@@ -33,6 +33,24 @@ _SPLIT_IMAGE_SUBDIR = {
 }
 
 
+def _load_od_mask(od_path: Path, target_size: tuple[int, int], dilation_px: int = 0) -> np.ndarray | None:
+    """Load optic disc mask, resize to target_size (w, h), and optionally dilate."""
+    if not od_path.exists():
+        return None
+    arr = cv2.imread(str(od_path), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return None
+    binary = (arr > 0).astype(np.uint8)
+    w, h = target_size
+    if binary.shape != (h, w):
+        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_NEAREST)
+    if dilation_px > 0:
+        ks = dilation_px * 2 + 1
+        kernel = np.ones((ks, ks), dtype=np.uint8)
+        binary = cv2.dilate(binary, kernel)
+    return binary
+
+
 def _build_retina_mask(image: Image.Image) -> np.ndarray:
     rgb = np.asarray(image.convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
@@ -96,6 +114,7 @@ def _process_image(
     method_override: str | None = None,
     use_mil_attention: bool = False,
     mask_loader=None,
+    od_mask_loader=None,
 ) -> dict:
     image_stem = image_path.stem
     pil_image = Image.open(image_path).convert("RGB")
@@ -121,6 +140,11 @@ def _process_image(
             target_layer=target_layer,
         )
         cam = gradcam.heatmap[0].detach().cpu().numpy()
+
+    if od_mask_loader is not None:
+        od_mask = od_mask_loader(image_stem, (cam_w, cam_h))
+        if od_mask is not None:
+            cam = cam * (1.0 - od_mask.astype(np.float32))
 
     pil_resized = pil_image.resize((cam_w, cam_h), Image.BILINEAR)
     retina_mask = _build_retina_mask(pil_resized)
@@ -221,6 +245,8 @@ def evaluate(
     use_mil_attention: bool = False,
     run_baselines: bool = False,
     gate_sigma: float = 2.0,
+    mask_optic_disc: bool = False,
+    od_dilation_px: int = 0,
 ) -> dict:
     if top_percents is None:
         top_percents = [0.10, 0.20, 0.30]
@@ -264,6 +290,13 @@ def evaluate(
     if not image_paths:
         raise FileNotFoundError(f"No images found in {image_dir}")
 
+    od_dir = mask_base_dir / "5. Optic Disc" if mask_optic_disc else None
+
+    def _idrid_od_loader(stem: str, target_size: tuple[int, int]) -> np.ndarray | None:
+        if od_dir is None:
+            return None
+        return _load_od_mask(od_dir / f"{stem}_OD.tif", target_size, od_dilation_px)
+
     print(f"Config    : {config_path}")
     print(f"Version   : {version}")
     print(f"Method    : {gradcam_method}")
@@ -271,6 +304,7 @@ def evaluate(
     print(f"Split     : {split}  ({len(image_paths)} images)")
     print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
     print(f"Baselines : {run_baselines}")
+    print(f"OD mask   : {mask_optic_disc} (dilation={od_dilation_px}px)")
     print()
 
     per_image: list[dict] = []
@@ -279,6 +313,7 @@ def evaluate(
             session, image_path, mask_base_dir, gradcam_method, top_percents, target_layer,
             use_seg_head=use_seg_head, use_mil_attention=use_mil_attention,
             run_baselines=run_baselines,
+            od_mask_loader=_idrid_od_loader if mask_optic_disc else None,
         )
         iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
@@ -485,6 +520,8 @@ def evaluate_maples(
     output_path: str | None = None,
     run_baselines: bool = False,
     gate_sigma: float = 2.0,
+    mask_optic_disc: bool = False,
+    od_dilation_px: int = 0,
 ) -> dict:
     """XAI evaluation against MAPLES-DR lesion masks on MESSIDOR images."""
     import yaml
@@ -536,6 +573,13 @@ def evaluate_maples(
     def _mask_loader(image_stem: str, target_size: tuple[int, int]) -> dict:
         return load_maples_masks(annotations_dir, image_stem, target_size)
 
+    od_dir = annotations_dir / "OpticDisc" if mask_optic_disc else None
+
+    def _od_mask_loader(image_stem: str, target_size: tuple[int, int]) -> np.ndarray | None:
+        if od_dir is None:
+            return None
+        return _load_od_mask(od_dir / f"{image_stem}.png", target_size, od_dilation_px)
+
     print(f"Config    : {config_path}")
     print(f"Version   : {version}")
     print(f"Method    : {gradcam_method}")
@@ -550,6 +594,7 @@ def evaluate_maples(
         rec = _process_image(
             session, image_path, None, gradcam_method, top_percents, target_layer,
             run_baselines=run_baselines, mask_loader=_mask_loader,
+            od_mask_loader=_od_mask_loader if mask_optic_disc else None,
         )
         iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
@@ -641,7 +686,8 @@ def evaluate_maples(
     if output_path is None:
         eval_dir = get_run_evaluation_dir(project_root, str(version))
         eval_dir.mkdir(parents=True, exist_ok=True)
-        output_path = str(eval_dir / f"xai_maples_{version}_{block_label}_{split}.json")
+        od_suffix = "_od" if mask_optic_disc else ""
+        output_path = str(eval_dir / f"xai_maples_{version}_{block_label}_{split}{od_suffix}.json")
 
     Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"\nSaved: {output_path}")

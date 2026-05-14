@@ -71,6 +71,14 @@ def main() -> None:
         choices=["gradcam", "layercam", "gradcam++", "scorecam", "ig"],
         help="Compare multiple XAI methods side by side (overrides single-method mode)"
     )
+    parser.add_argument(
+        "--mask-optic-disc", action="store_true",
+        help="Zero out optic disc region in CAM before evaluation (anatomy-guided masking)"
+    )
+    parser.add_argument(
+        "--od-dilation", type=int, default=0,
+        help="Pixels to dilate the optic disc mask (default: 0)"
+    )
     args = parser.parse_args()
 
     if args.methods:
@@ -95,6 +103,8 @@ def main() -> None:
             use_mil_attention=args.use_mil_attention,
             run_baselines=args.baselines,
             gate_sigma=args.gate_sigma,
+            mask_optic_disc=args.mask_optic_disc,
+            od_dilation_px=args.od_dilation,
         )
 
 

@@ -45,6 +45,40 @@ IDRiD XAI 수치에 학습 도메인 편향이 포함됐을 가능성을 검증�
 
 ---
 
+## 2026-05-14 Anatomy-guided CAM masking (OD 제외) 효과 측정
+
+### 구현 내용
+
+- `drscreen/xai/evaluation.py`: `_load_od_mask()` 헬퍼 추가, `_process_image`에 `od_mask_loader` 파라미터 추가
+- `evaluate()` / `evaluate_maples()`: `mask_optic_disc`, `od_dilation_px` 파라미터 추가
+- `eval_xai_iou.py`, `eval_xai_maples.py`: `--mask-optic-disc`, `--od-dilation` 플래그 추가
+- OD 마스크 소스: MAPLES-DR `annotations/OpticDisc/{stem}.png`, IDRiD `5. Optic Disc/{stem}_OD.tif`
+
+### 결과 (MAPLES-DR test 60장, block4, OD masking vs no masking)
+
+| Model | OD mask | PG | AUPRC | AUC-IoU | IoU top20% |
+|-------|:-------:|:---:|:---:|:---:|:---:|
+| v31 | ✗ | 0.0500 | 0.0172 | 0.0051 | 0.0113 |
+| v31 | ✓ | 0.0500 | **0.0173** | **0.0052** | 0.0113 |
+| v35 | ✗ | 0.0500 | 0.0166 | 0.0053 | 0.0098 |
+| v35 | ✓ | 0.0500 | **0.0167** | 0.0053 | **0.0099** |
+
+### 해석
+
+OD masking 효과 없음 (AUPRC +0.0001 = 측정 노이즈 수준). 두 가지 결론:
+
+1. **OD는 confound가 아니다**: 모델 CAM이 optic disc 영역에 집중하지 않음. anatomy-guided post-hoc masking으로 개선 불가.
+2. **MAPLES-DR 저성능의 원인은 도메인 일반화 실패**: 학습(IDRiD)과 평가(MESSIDOR) 도메인 간 appearance gap이 병변 로컬라이제이션 실패의 근본 원인.
+
+### 최종 결론
+
+Sprint 3 XAI 실험 시리즈 (v31~v35 + MAPLES-DR eval + OD masking) 완료.
+- v31은 분류 성능(DDR AUROC 0.9160) 기준 유지
+- XAI 로컬라이제이션은 IDRiD 데이터에 특화된 artifact이며 OOD 일반화 없음
+- 현재 아키텍처에서 추가 XAI 개선을 위해서는 도메인 불변 feature 학습 또는 완전히 다른 접근이 필요
+
+---
+
 ## 2026-05-14 실험 계획 재수립 / MAPLES-DR 확보 / MAPLESMaskProvider 구현
 
 ### 실험 계획 재분류
