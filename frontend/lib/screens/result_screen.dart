@@ -300,10 +300,7 @@ class ResultScreen extends StatelessWidget {
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _JudgmentCard(response: res),
                             const SizedBox(height: MedicalTokens.spaceLg),
-                            const MedicalSectionTitle('성능 지표'),
-                            const SizedBox(height: MedicalTokens.spaceSm),
-                            _ReportMetricsCard(response: res),
-                            const SizedBox(height: MedicalTokens.spaceLg),
+                            _ReportMetricsSection(response: res),
                             const MedicalSectionTitle('이상 확률'),
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _ProbabilityCard(response: res),
@@ -452,13 +449,15 @@ Future<Uint8List> _buildResultPdf({
         ),
         pw.SizedBox(height: 8),
         _pdfInfoCard(_buildJudgmentPdf(response)),
-        pw.SizedBox(height: 16),
-        pw.Text(
-          '성능 지표',
-          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.SizedBox(height: 8),
-        _pdfInfoCard(_buildMetricsPdf(response)),
+        if (response?.evalMetrics != null) ...[
+          pw.SizedBox(height: 16),
+          pw.Text(
+            '성능 지표',
+            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          _pdfInfoCard(_buildMetricsPdf(response)),
+        ],
         pw.SizedBox(height: 16),
         pw.Text(
           '이상 확률',
@@ -812,6 +811,99 @@ class _JudgmentCard extends StatelessWidget {
   }
 }
 
+/// 성능 지표 블록 — eval_metrics 없으면 기본 숨김, 탭하면 안내만 펼침.
+class _ReportMetricsSection extends StatefulWidget {
+  const _ReportMetricsSection({required this.response});
+
+  final AnalyzeResponse? response;
+
+  @override
+  State<_ReportMetricsSection> createState() => _ReportMetricsSectionState();
+}
+
+class _ReportMetricsSectionState extends State<_ReportMetricsSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final res = widget.response;
+    if (res == null || !res.canShowInferenceResults) {
+      return const SizedBox.shrink();
+    }
+
+    final metrics = res.evalMetrics;
+    if (metrics != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const MedicalSectionTitle(
+            '성능 지표',
+            subtitle: 'external test 기준 모델 성능 요약',
+          ),
+          const SizedBox(height: MedicalTokens.spaceSm),
+          _ReportMetricsCard(response: res),
+          const SizedBox(height: MedicalTokens.spaceLg),
+        ],
+      );
+    }
+
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '성능 지표',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: MedicalTokens.textSubtle,
+                    ),
+                  ),
+                ),
+                Text(
+                  _expanded ? '접기' : '평가 데이터 없음',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: MedicalTokens.textSubtle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  _expanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  size: 20,
+                  color: MedicalTokens.textSubtle,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded) ...[
+          const SizedBox(height: MedicalTokens.spaceSm),
+          _InfoCard(
+            child: Text(
+              '모델 평가 지표(JSON)가 아직 없어 성능 수치를 표시하지 않습니다.\n'
+              'AI 팀에서 base.yaml 버전에 맞는 '
+              'external_test_*_best_metrics.json을 제공하면 표시됩니다.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: MedicalTokens.spaceLg),
+      ],
+    );
+  }
+}
+
 /// 백엔드 `/analyze` · 이력 `metrics` (AI external test eval_metrics).
 class _ReportMetricsCard extends StatelessWidget {
   const _ReportMetricsCard({required this.response});
@@ -834,12 +926,7 @@ class _ReportMetricsCard extends StatelessWidget {
 
     final metrics = res.evalMetrics;
     if (metrics == null) {
-      return const _InfoCard(
-        child: Text(
-          '모델 평가 지표(external test) JSON이 없습니다.\n'
-          'AI 평가 JSON이 없거나, 예전 확률 기반 placeholder 데이터입니다.\n'
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     final rows = metrics.displayRows;
