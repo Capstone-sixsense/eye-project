@@ -245,7 +245,10 @@ class _UploadScreenState extends State<UploadScreen> {
                     subtitle: '선명한 안저 이미지를 선택한 뒤 분석을 진행하세요.',
                   ),
                   const SizedBox(height: MedicalTokens.spaceMd),
-                  const _UploadFormatNoticeBanner(),
+                  const MedicalNoticeBanner(
+                    title: '업로드 형식',
+                    body: '업로드 가능한 확장자는 jpg, jpeg, png 3가지입니다.',
+                  ),
                   const SizedBox(height: MedicalTokens.spaceMd),
                   MedicalCard(
                     child: Column(
@@ -339,31 +342,3 @@ class _UploadPreview extends StatelessWidget {
 
 String _kb(int bytes) => (bytes / 1024).toStringAsFixed(1);
 
-class _UploadFormatNoticeBanner extends StatelessWidget {
-  const _UploadFormatNoticeBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E8),
-        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
-        border: Border.all(color: const Color(0xFFF3D2AE)),
-      ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: MedicalTokens.spaceSm,
-          vertical: 10,
-        ),
-        child: Text(
-          '업로드 가능한 확장자는 jpg, jpeg, png 3가지 입니다.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF9A5E20),
-          ),
-        ),
-      ),
-    );
-  }
-}

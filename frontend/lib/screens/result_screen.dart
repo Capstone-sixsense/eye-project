@@ -15,6 +15,11 @@ import '../ui/medical_ui.dart';
 
 const double _kResultImageMaxHeight = 300;
 
+const String _kMedicalDisclaimerTitle = '보조 판독 안내';
+const String _kMedicalDisclaimerBody =
+    '본 결과는 확정 진단이 아닌, AI가 참고한 영역을 색으로 표시한 보조 시각화입니다.\n'
+    '표시된 색 영역이 병변 위치를 직접 뜻하지 않을 수 있습니다.';
+
 String? _originalAssetAbsoluteUrl(AnalyzeResponse? res) {
   final path = res?.originalUrl;
   if (path == null || path.isEmpty) return null;
@@ -201,16 +206,6 @@ class ResultScreen extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    MedicalTokens.spaceMd,
-                    MedicalTokens.spaceMd,
-                    MedicalTokens.spaceMd,
-                    0,
-                  ),
-                  child: _MedicalDisclaimerBanner(),
-                ),
-                const SizedBox(height: MedicalTokens.spaceSm),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(MedicalTokens.spaceMd),
@@ -220,6 +215,11 @@ class ResultScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            const MedicalNoticeBanner(
+                              title: _kMedicalDisclaimerTitle,
+                              body: _kMedicalDisclaimerBody,
+                            ),
+                            const SizedBox(height: MedicalTokens.spaceMd),
                             if (wide)
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,10 +300,11 @@ class ResultScreen extends StatelessWidget {
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _JudgmentCard(response: res),
                             const SizedBox(height: MedicalTokens.spaceLg),
-                            _ReportMetricsSection(response: res),
                             const MedicalSectionTitle('이상 확률'),
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _ProbabilityCard(response: res),
+                            const SizedBox(height: MedicalTokens.spaceLg),
+                            _ReportMetricsSection(response: res),
                             const SizedBox(height: MedicalTokens.spaceMd),
                           ],
                         ),
@@ -407,15 +408,9 @@ Future<Uint8List> _buildResultPdf({
           style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
         ),
         pw.SizedBox(height: 10),
-        pw.Container(
-          width: double.infinity,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: pw.BoxDecoration(
-            color: PdfColor.fromHex('#FFF4E8'),
-            border: pw.Border.all(color: PdfColor.fromHex('#F3D2AE')),
-            borderRadius: pw.BorderRadius.circular(6),
-          ),
-          child: pw.Text('본 결과는 의료적 확정 진단이 아닌 보조 판별 결과입니다.'),
+        _pdfNoticeBanner(
+          title: _kMedicalDisclaimerTitle,
+          body: _kMedicalDisclaimerBody,
         ),
         pw.SizedBox(height: 16),
         pw.Text(
@@ -449,6 +444,13 @@ Future<Uint8List> _buildResultPdf({
         ),
         pw.SizedBox(height: 8),
         _pdfInfoCard(_buildJudgmentPdf(response)),
+        pw.SizedBox(height: 16),
+        pw.Text(
+          '이상 확률',
+          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 8),
+        _pdfInfoCard(pw.Text(_buildProbabilityPdf(response))),
         if (response?.evalMetrics != null) ...[
           pw.SizedBox(height: 16),
           pw.Text(
@@ -458,13 +460,6 @@ Future<Uint8List> _buildResultPdf({
           pw.SizedBox(height: 8),
           _pdfInfoCard(_buildMetricsPdf(response)),
         ],
-        pw.SizedBox(height: 16),
-        pw.Text(
-          '이상 확률',
-          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.SizedBox(height: 8),
-        _pdfInfoCard(pw.Text(_buildProbabilityPdf(response))),
       ],
     ),
   );
@@ -497,6 +492,36 @@ pw.Widget _pdfImageBox(pw.Widget child) {
       borderRadius: pw.BorderRadius.circular(8),
     ),
     child: child,
+  );
+}
+
+pw.Widget _pdfNoticeBanner({String? title, required String body}) {
+  return pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.fromLTRB(12, 10, 12, 10),
+    decoration: pw.BoxDecoration(
+      color: PdfColor.fromHex('#E8F4FA'),
+      border: pw.Border(
+        left: pw.BorderSide(color: PdfColor.fromHex('#72A9C7'), width: 4),
+        top: pw.BorderSide(color: PdfColor.fromHex('#D6E2EB')),
+        right: pw.BorderSide(color: PdfColor.fromHex('#D6E2EB')),
+        bottom: pw.BorderSide(color: PdfColor.fromHex('#D6E2EB')),
+      ),
+      borderRadius: pw.BorderRadius.circular(6),
+    ),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        if (title != null && title.isNotEmpty) ...[
+          pw.Text(
+            title,
+            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 4),
+        ],
+        pw.Text(body, style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 4)),
+      ],
+    ),
   );
 }
 
@@ -887,15 +912,11 @@ class _ReportMetricsSectionState extends State<_ReportMetricsSection> {
         ),
         if (_expanded) ...[
           const SizedBox(height: MedicalTokens.spaceSm),
-          _InfoCard(
-            child: Text(
-              '모델 평가 지표(JSON)가 아직 없어 성능 수치를 표시하지 않습니다.\n'
-              'AI 팀에서 base.yaml 버전에 맞는 '
-              'external_test_*_best_metrics.json을 제공하면 표시됩니다.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
+          const MedicalNoticeBanner(
+            title: '성능 지표',
+            body: '모델 평가 지표(JSON)가 아직 없어 성능 수치를 표시하지 않습니다.\n'
+                'AI 팀에서 base.yaml 버전에 맞는 '
+                'external_test_*_best_metrics.json을 제공하면 표시됩니다.',
           ),
         ],
         const SizedBox(height: MedicalTokens.spaceLg),
@@ -1087,31 +1108,3 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-class _MedicalDisclaimerBanner extends StatelessWidget {
-  const _MedicalDisclaimerBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E8),
-        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
-        border: Border.all(color: const Color(0xFFF3D2AE)),
-      ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: MedicalTokens.spaceSm,
-          vertical: 10,
-        ),
-        child: Text(
-          '본 결과는 의료적 확정 진단이 아닌 보조 판별 결과입니다.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF9A5E20),
-          ),
-        ),
-      ),
-    );
-  }
-}
