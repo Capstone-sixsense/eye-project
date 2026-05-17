@@ -1,0 +1,25 @@
+project:
+  version: v30_gated_pooling
+
+model:
+  use_attention: false
+  attention_mode: eca
+  use_aux_seg: true
+  aux_seg_block: 4
+  use_gated_pooling: true
+
+train:
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  lambda_aux_seg: 0.3
+  pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
+
+infer:
+  checkpoint_path: artifacts/runs/06_xai_classifier_routing/v30_gated_pooling/checkpoints/best.pt
+  threshold: 0.31
+  gradcam_method: layercam
+  gradcam_target_block: 4

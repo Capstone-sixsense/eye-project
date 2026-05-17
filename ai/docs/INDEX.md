@@ -1,0 +1,35 @@
+# AI Docs Index
+
+This directory contains the documentation for the `eye-project/ai` module.
+The primary documentation has been consolidated into `AI_HANDOFF.md`.
+
+## Current Documentation Structure
+
+1. **[AI_HANDOFF.md](./AI_HANDOFF.md)**
+   - **Primary Source of Truth**.
+   - Read this first for the current architecture, configuration, and runtime flow.
+   - Includes implementation details for inference and training.
+
+2. **[DEVLOG.md](./DEVLOG.md)**
+   - **Historical Reference Only**.
+   - Contains the project history, experimental logs, and previous design iterations.
+   - Use this to understand *why* certain decisions were made in the past.
+
+3. **[EXPERIMENT_REGISTRY.md](./EXPERIMENT_REGISTRY.md)**
+   - Canonical classification index for existing checkpoints, evaluation JSONs, and XAI results.
+   - Groups runs by research question and documents the migrated `artifacts/runs/<primary_group>/<run_id>/` layout.
+
+4. **[SPRINT1_Devlog.md](./SPRINT1_Devlog.md)**
+   - Sprint 1 retrospective / submission summary for the AI part.
+
+5. **[SPRINT2_Devlog.md](./SPRINT2_Devlog.md)**
+   - Sprint 2 retrospective / submission summary for the AI part.
+
+6. **[SPRINT3_Devlog.md](./SPRINT3_Devlog.md)**
+   - Sprint 3 retrospective / submission summary for the AI part.
+
+---
+
+**Notes:**
+- When documentation conflicts with the current `eye-project/ai` code or active configs (`configs/base.yaml`), **always trust the code and configs**.
+- Historical documents may still contain paths or names from the original `fundus_dr_ai` project.

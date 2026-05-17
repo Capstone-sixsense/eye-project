@@ -18,6 +18,7 @@ from drscreen.xai.iou import (
     compute_auprc,
     compute_iou,
     load_lesion_masks,
+    load_maples_masks,
     make_center_gaussian_cam,
     make_random_cam,
     make_retina_uniform_cam,
@@ -30,6 +31,24 @@ _SPLIT_IMAGE_SUBDIR = {
     "train": "a. Training Set",
     "test": "b. Testing Set",
 }
+
+
+def _load_od_mask(od_path: Path, target_size: tuple[int, int], dilation_px: int = 0) -> np.ndarray | None:
+    """Load optic disc mask, resize to target_size (w, h), and optionally dilate."""
+    if not od_path.exists():
+        return None
+    arr = cv2.imread(str(od_path), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return None
+    binary = (arr > 0).astype(np.uint8)
+    w, h = target_size
+    if binary.shape != (h, w):
+        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_NEAREST)
+    if dilation_px > 0:
+        ks = dilation_px * 2 + 1
+        kernel = np.ones((ks, ks), dtype=np.uint8)
+        binary = cv2.dilate(binary, kernel)
+    return binary
 
 
 def _build_retina_mask(image: Image.Image) -> np.ndarray:
@@ -94,6 +113,8 @@ def _process_image(
     run_baselines: bool = False,
     method_override: str | None = None,
     use_mil_attention: bool = False,
+    mask_loader=None,
+    od_mask_loader=None,
 ) -> dict:
     image_stem = image_path.stem
     pil_image = Image.open(image_path).convert("RGB")
@@ -120,9 +141,17 @@ def _process_image(
         )
         cam = gradcam.heatmap[0].detach().cpu().numpy()
 
+    if od_mask_loader is not None:
+        od_mask = od_mask_loader(image_stem, (cam_w, cam_h))
+        if od_mask is not None:
+            cam = cam * (1.0 - od_mask.astype(np.float32))
+
     pil_resized = pil_image.resize((cam_w, cam_h), Image.BILINEAR)
     retina_mask = _build_retina_mask(pil_resized)
-    gt_masks = load_lesion_masks(mask_base_dir, image_stem, target_size=(cam_w, cam_h))
+    if mask_loader is not None:
+        gt_masks = mask_loader(image_stem, (cam_w, cam_h))
+    else:
+        gt_masks = load_lesion_masks(mask_base_dir, image_stem, target_size=(cam_w, cam_h))
     gt_union = union_mask(gt_masks)
 
     metrics = _eval_cam(cam, retina_mask, gt_masks, gt_union, top_percents)
@@ -147,7 +176,7 @@ def _agg_scalar(per_image: list[dict], key: str) -> dict | None:
     vals = [r[key] for r in per_image if r.get(key) is not None]
     if not vals:
         return None
-    return {"mean": float(np.mean(vals)), "n": len(vals)}
+    return {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "n": len(vals)}
 
 
 def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
@@ -215,6 +244,9 @@ def evaluate(
     use_seg_head: bool = False,
     use_mil_attention: bool = False,
     run_baselines: bool = False,
+    gate_sigma: float = 2.0,
+    mask_optic_disc: bool = False,
+    od_dilation_px: int = 0,
 ) -> dict:
     if top_percents is None:
         top_percents = [0.10, 0.20, 0.30]
@@ -258,6 +290,13 @@ def evaluate(
     if not image_paths:
         raise FileNotFoundError(f"No images found in {image_dir}")
 
+    od_dir = mask_base_dir / "5. Optic Disc" if mask_optic_disc else None
+
+    def _idrid_od_loader(stem: str, target_size: tuple[int, int]) -> np.ndarray | None:
+        if od_dir is None:
+            return None
+        return _load_od_mask(od_dir / f"{stem}_OD.tif", target_size, od_dilation_px)
+
     print(f"Config    : {config_path}")
     print(f"Version   : {version}")
     print(f"Method    : {gradcam_method}")
@@ -265,6 +304,7 @@ def evaluate(
     print(f"Split     : {split}  ({len(image_paths)} images)")
     print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
     print(f"Baselines : {run_baselines}")
+    print(f"OD mask   : {mask_optic_disc} (dilation={od_dilation_px}px)")
     print()
 
     per_image: list[dict] = []
@@ -273,6 +313,7 @@ def evaluate(
             session, image_path, mask_base_dir, gradcam_method, top_percents, target_layer,
             use_seg_head=use_seg_head, use_mil_attention=use_mil_attention,
             run_baselines=run_baselines,
+            od_mask_loader=_idrid_od_loader if mask_optic_disc else None,
         )
         iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
@@ -290,13 +331,13 @@ def evaluate(
     print("=== Aggregate ===")
     if aggregate["pointing_game"]:
         pg = aggregate["pointing_game"]
-        print(f"Pointing game : {pg['mean']:.4f}  (n={pg['n']})")
+        print(f"Pointing game : {pg['mean']:.4f} ± {pg['std']:.4f}  (n={pg['n']})")
     if aggregate["auprc"]:
         ap = aggregate["auprc"]
-        print(f"AUPRC         : {ap['mean']:.4f}  (n={ap['n']})")
+        print(f"AUPRC         : {ap['mean']:.4f} ± {ap['std']:.4f}  (n={ap['n']})")
     if aggregate["auc_iou"]:
         ai = aggregate["auc_iou"]
-        print(f"AUC-IoU       : {ai['mean']:.4f}  (n={ai['n']})")
+        print(f"AUC-IoU       : {ai['mean']:.4f} ± {ai['std']:.4f}  (n={ai['n']})")
     for top_pct in top_percents:
         key = f"top{int(top_pct * 100):02d}"
         agg_t = aggregate["thresholds"][key]
@@ -309,12 +350,43 @@ def evaluate(
         print("=== Baselines ===")
         for name, bagg in aggregate["baselines"].items():
             ap_b = bagg["auprc"]["mean"] if bagg["auprc"] else None
+            ai_b = bagg["auc_iou"]
             iou20_b = bagg["thresholds"].get("top20", {}).get("mean_iou_union")
+            auc_iou_str = (
+                f"  AUC-IoU={ai_b['mean']:.4f}±{ai_b['std']:.4f}" if ai_b else "  AUC-IoU=N/A"
+            )
             print(
                 f"  {name:20s}  AUPRC={ap_b:.4f}" if ap_b is not None else
                 f"  {name:20s}  AUPRC=N/A",
+                auc_iou_str,
                 f"  IoU-top20={iou20_b:.4f}" if iou20_b is not None else "  IoU-top20=N/A",
             )
+
+        model_auc = aggregate["auc_iou"]["mean"] if aggregate["auc_iou"] else None
+        cg_bagg = aggregate["baselines"].get("center_gaussian")
+        if model_auc is not None and cg_bagg and cg_bagg["auc_iou"]:
+            cg = cg_bagg["auc_iou"]
+            threshold = cg["mean"] + gate_sigma * cg["std"]
+            gate = model_auc > threshold
+            print()
+            print(f"=== Phase-0 Gate (AUC-IoU > center_gaussian + {gate_sigma}σ) ===")
+            print(f"  Model AUC-IoU  : {model_auc:.4f}")
+            print(f"  Threshold      : {cg['mean']:.4f} + {gate_sigma}×{cg['std']:.4f} = {threshold:.4f}")
+            print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
+
+    phase0_gate: dict | None = None
+    cg_bagg = aggregate.get("baselines", {}).get("center_gaussian") if run_baselines else None
+    model_auc = aggregate["auc_iou"]["mean"] if aggregate.get("auc_iou") else None
+    if model_auc is not None and cg_bagg and cg_bagg.get("auc_iou"):
+        cg = cg_bagg["auc_iou"]
+        threshold = cg["mean"] + 2 * cg["std"]
+        phase0_gate = {
+            "model_auc_iou": model_auc,
+            "center_gaussian_mean": cg["mean"],
+            "center_gaussian_std": cg["std"],
+            "threshold": threshold,
+            "pass": bool(model_auc > threshold),
+        }
 
     output = {
         "version": version,
@@ -324,6 +396,7 @@ def evaluate(
         "split": split,
         "n_images": len(per_image),
         "top_percents": top_percents,
+        "phase0_gate": phase0_gate,
         "aggregate": aggregate,
         "per_image": per_image,
     }
@@ -431,6 +504,190 @@ def compare_xai_methods(
         eval_dir.mkdir(parents=True, exist_ok=True)
         method_tag = "_".join(methods)
         output_path = str(eval_dir / f"xai_compare_{version}_{method_tag}_{split}.json")
+
+    Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
+    print(f"\nSaved: {output_path}")
+    return output
+
+
+def evaluate_maples(
+    config_path: str,
+    split: str = "test",
+    maples_root: str | None = None,
+    messidor_images_dir: str | None = None,
+    top_percents: list[float] | None = None,
+    target_block: int | None = None,
+    output_path: str | None = None,
+    run_baselines: bool = False,
+    gate_sigma: float = 2.0,
+    mask_optic_disc: bool = False,
+    od_dilation_px: int = 0,
+) -> dict:
+    """XAI evaluation against MAPLES-DR lesion masks on MESSIDOR images."""
+    import yaml
+
+    if top_percents is None:
+        top_percents = [0.10, 0.20, 0.30]
+
+    project_root = Path(config_path).resolve().parents[1]
+    maples_root_path = (
+        Path(maples_root) if maples_root
+        else project_root / "data" / "raw" / "MAPLES-DR" / "AdditionalData"
+    )
+    annotations_dir = maples_root_path / "annotations"
+    messidor_dir = (
+        Path(messidor_images_dir) if messidor_images_dir
+        else project_root / "data" / "raw" / "messidor" / "images"
+    )
+
+    with open(maples_root_path / "dataset_record.yaml") as f:
+        record = yaml.safe_load(f)
+    if split not in ("train", "test"):
+        raise ValueError(f"split must be 'train' or 'test', got {split!r}")
+    stems: list[str] = record[split]
+
+    image_paths: list[Path] = []
+    for stem in stems:
+        for ext in (".tif", ".jpg", ".png"):
+            p = messidor_dir / f"{stem}{ext}"
+            if p.exists():
+                image_paths.append(p)
+                break
+    if not image_paths:
+        raise FileNotFoundError(f"No MESSIDOR images found in {messidor_dir}")
+
+    session = InferenceSession.from_config_path(config_path)
+    session.preprocessor = None
+    gradcam_method = session.config.get("infer", {}).get("gradcam_method", "gradcam")
+    version = session.config.get("project", {}).get("version", "unknown")
+
+    target_layer = None
+    block_label = "default"
+    if target_block is not None:
+        blocks = getattr(session.model, "blocks", getattr(session.model, "features", None))
+        if blocks is None:
+            raise ValueError("Model has neither .blocks nor .features attribute")
+        target_layer = blocks[target_block]
+        block_label = f"block{target_block}"
+
+    def _mask_loader(image_stem: str, target_size: tuple[int, int]) -> dict:
+        return load_maples_masks(annotations_dir, image_stem, target_size)
+
+    od_dir = annotations_dir / "OpticDisc" if mask_optic_disc else None
+
+    def _od_mask_loader(image_stem: str, target_size: tuple[int, int]) -> np.ndarray | None:
+        if od_dir is None:
+            return None
+        return _load_od_mask(od_dir / f"{image_stem}.png", target_size, od_dilation_px)
+
+    print(f"Config    : {config_path}")
+    print(f"Version   : {version}")
+    print(f"Method    : {gradcam_method}")
+    print(f"Layer     : {block_label}")
+    print(f"Dataset   : MAPLES-DR ({split}, {len(image_paths)} images)")
+    print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
+    print(f"Baselines : {run_baselines}")
+    print()
+
+    per_image: list[dict] = []
+    for i, image_path in enumerate(image_paths, 1):
+        rec = _process_image(
+            session, image_path, None, gradcam_method, top_percents, target_layer,
+            run_baselines=run_baselines, mask_loader=_mask_loader,
+            od_mask_loader=_od_mask_loader if mask_optic_disc else None,
+        )
+        iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
+        print(
+            f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}"
+            f"  iou={iou20:.4f}" if iou20 is not None else
+            f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}  iou=N/A",
+            f"  auprc={rec['auprc']:.4f}" if rec["auprc"] is not None else "  auprc=N/A",
+            f"  pg={rec['pointing_game']}",
+        )
+        per_image.append(rec)
+
+    aggregate = _aggregate(per_image, top_percents)
+
+    print()
+    print("=== Aggregate ===")
+    if aggregate["pointing_game"]:
+        pg = aggregate["pointing_game"]
+        print(f"Pointing game : {pg['mean']:.4f} ± {pg['std']:.4f}  (n={pg['n']})")
+    if aggregate["auprc"]:
+        ap = aggregate["auprc"]
+        print(f"AUPRC         : {ap['mean']:.4f} ± {ap['std']:.4f}  (n={ap['n']})")
+    if aggregate["auc_iou"]:
+        ai = aggregate["auc_iou"]
+        print(f"AUC-IoU       : {ai['mean']:.4f} ± {ai['std']:.4f}  (n={ai['n']})")
+    for top_pct in top_percents:
+        key = f"top{int(top_pct * 100):02d}"
+        agg_t = aggregate["thresholds"][key]
+        miou = agg_t["mean_iou_union"]
+        miou_str = f"{miou:.4f}" if miou is not None else "N/A"
+        print(f"IoU top{int(top_pct*100):02d}%    : {miou_str}  (n={agg_t['n_images_with_gt']})")
+
+    if run_baselines and "baselines" in aggregate:
+        print()
+        print("=== Baselines ===")
+        for name, bagg in aggregate["baselines"].items():
+            ap_b = bagg["auprc"]["mean"] if bagg["auprc"] else None
+            ai_b = bagg["auc_iou"]
+            iou20_b = bagg["thresholds"].get("top20", {}).get("mean_iou_union")
+            auc_iou_str = (
+                f"  AUC-IoU={ai_b['mean']:.4f}±{ai_b['std']:.4f}" if ai_b else "  AUC-IoU=N/A"
+            )
+            print(
+                f"  {name:20s}  AUPRC={ap_b:.4f}" if ap_b is not None else
+                f"  {name:20s}  AUPRC=N/A",
+                auc_iou_str,
+                f"  IoU-top20={iou20_b:.4f}" if iou20_b is not None else "  IoU-top20=N/A",
+            )
+
+        model_auc = aggregate["auc_iou"]["mean"] if aggregate["auc_iou"] else None
+        cg_bagg = aggregate["baselines"].get("center_gaussian")
+        if model_auc is not None and cg_bagg and cg_bagg["auc_iou"]:
+            cg = cg_bagg["auc_iou"]
+            threshold = cg["mean"] + gate_sigma * cg["std"]
+            gate = model_auc > threshold
+            print()
+            print(f"=== Phase-0 Gate (AUC-IoU > center_gaussian + {gate_sigma}σ) ===")
+            print(f"  Model AUC-IoU  : {model_auc:.4f}")
+            print(f"  Threshold      : {cg['mean']:.4f} + {gate_sigma}×{cg['std']:.4f} = {threshold:.4f}")
+            print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
+
+    phase0_gate: dict | None = None
+    cg_bagg = aggregate.get("baselines", {}).get("center_gaussian") if run_baselines else None
+    model_auc = aggregate["auc_iou"]["mean"] if aggregate.get("auc_iou") else None
+    if model_auc is not None and cg_bagg and cg_bagg.get("auc_iou"):
+        cg = cg_bagg["auc_iou"]
+        threshold = cg["mean"] + 2 * cg["std"]
+        phase0_gate = {
+            "model_auc_iou": model_auc,
+            "center_gaussian_mean": cg["mean"],
+            "center_gaussian_std": cg["std"],
+            "threshold": threshold,
+            "pass": bool(model_auc > threshold),
+        }
+
+    output = {
+        "version": version,
+        "checkpoint_path": str(session.checkpoint_path),
+        "gradcam_method": gradcam_method,
+        "target_block": block_label,
+        "split": split,
+        "dataset": "maples",
+        "n_images": len(per_image),
+        "top_percents": top_percents,
+        "phase0_gate": phase0_gate,
+        "aggregate": aggregate,
+        "per_image": per_image,
+    }
+
+    if output_path is None:
+        eval_dir = get_run_evaluation_dir(project_root, str(version))
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        od_suffix = "_od" if mask_optic_disc else ""
+        output_path = str(eval_dir / f"xai_maples_{version}_{block_label}_{split}{od_suffix}.json")
 
     Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"\nSaved: {output_path}")

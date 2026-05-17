@@ -1,7 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 데이터/결과 디렉토리 (볼륨으로 마운트됨)
+data/
 storage/
 results/
-data/
-.cache/
-__pycache__/
+
+# 연구용 스크립트
+QuickQual/
+
+# 개발 도구
 *.log
-.git/
+server_errors.log
+.env

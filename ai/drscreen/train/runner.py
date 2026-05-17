@@ -91,6 +91,7 @@ def run_training(
     use_coral = bool(config["train"].get("use_coral", False))
     lambda_coral = float(config["train"].get("lambda_coral", 1.0))
     lambda_aux_seg = float(config["train"].get("lambda_aux_seg", 0.0))
+    seg_loss_type = str(config["train"].get("seg_loss_type", "bce"))
     coral_criterion: torch.nn.Module | None = None
     if use_coral:
         from drscreen.train.loss import CoralLoss
@@ -142,6 +143,7 @@ def run_training(
                 coral_criterion=coral_criterion,
                 lambda_coral=lambda_coral,
                 lambda_aux_seg=lambda_aux_seg,
+                seg_loss_type=seg_loss_type,
             )
             val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
             if scheduler is not None:
