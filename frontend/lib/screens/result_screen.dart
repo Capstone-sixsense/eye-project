@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
+import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
 
@@ -36,7 +37,7 @@ Widget _buildOriginalImageFit({
         if (progress == null) return child;
         return const Center(child: CircularProgressIndicator());
       },
-      errorBuilder: (_, __, ___) => const Center(
+      errorBuilder: (_, _, _) => const Center(
         child: Padding(
           padding: EdgeInsets.all(16),
           child: Text(
@@ -48,6 +49,89 @@ Widget _buildOriginalImageFit({
     );
   }
   return const Center(child: Text('이미지가 없습니다'));
+}
+
+/// Scaffold 하단 슬롯 전용 — Column 안에 넣지 않음(세로 무한 확장 방지).
+Widget _buildResultBottomBar({
+  required double maxContentWidth,
+  required VoidCallback onUpload,
+  required VoidCallback onHistory,
+}) {
+  return Material(
+    color: MedicalTokens.surface,
+    elevation: 4,
+    surfaceTintColor: Colors.transparent,
+    shadowColor: const Color(0x33000000),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 1, thickness: 1, color: MedicalTokens.border),
+        SafeArea(
+          top: false,
+          minimum: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: MedicalTokens.spaceMd,
+              vertical: 8,
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final barWidth = constraints.maxWidth.isFinite
+                    ? constraints.maxWidth.clamp(0.0, maxContentWidth)
+                    : maxContentWidth;
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: barWidth,
+                    height: 44,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: MedicalTokens.textMain,
+                              backgroundColor: MedicalTokens.surface,
+                              side: const BorderSide(
+                                color: MedicalTokens.border,
+                              ),
+                              minimumSize: const Size.fromHeight(44),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onPressed: onUpload,
+                            child: const Text('다시 업로드'),
+                          ),
+                        ),
+                        const SizedBox(width: MedicalTokens.spaceSm),
+                        Expanded(
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: MedicalTokens.primary,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size.fromHeight(44),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onPressed: onHistory,
+                            child: const Text('이력 보기'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class ResultScreen extends StatelessWidget {
@@ -72,6 +156,10 @@ class ResultScreen extends StatelessWidget {
         (explanationPath != null && explanationPath.isNotEmpty)
             ? ApiConfig.resolveAssetUrl(explanationPath)
             : null;
+
+    final screenW = MediaQuery.sizeOf(context).width;
+    final barMaxWidth = screenW >= 920 ? 920.0 : 680.0;
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -212,56 +300,34 @@ class ResultScreen extends StatelessWidget {
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _JudgmentCard(response: res),
                             const SizedBox(height: MedicalTokens.spaceLg),
-                            const MedicalSectionTitle('성능 지표'),
-                            const SizedBox(height: MedicalTokens.spaceSm),
-                            _ReportMetricsCard(response: res),
-                            const SizedBox(height: MedicalTokens.spaceLg),
+                            _ReportMetricsSection(response: res),
                             const MedicalSectionTitle('이상 확률'),
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _ProbabilityCard(response: res),
+                            const SizedBox(height: MedicalTokens.spaceMd),
                           ],
                         ),
                       ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    MedicalTokens.spaceMd,
-                    8,
-                    MedicalTokens.spaceMd,
-                    MedicalTokens.spaceMd,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: MedicalSecondaryButton(
-                          label: '다시 업로드',
-                          onPressed: () {
-                            Navigator.pushNamedAndRemoveUntil(
-                              context,
-                              '/upload',
-                              (route) => false,
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: MedicalTokens.spaceSm),
-                      Expanded(
-                        child: MedicalPrimaryButton(
-                          label: '이력 보기',
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/history');
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             );
           },
         ),
+      ),
+      bottomNavigationBar: _buildResultBottomBar(
+        maxContentWidth: barMaxWidth,
+        onUpload: () {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/upload',
+            (route) => false,
+          );
+        },
+        onHistory: () {
+          Navigator.pushNamed(context, '/history');
+        },
       ),
     );
   }
@@ -383,13 +449,15 @@ Future<Uint8List> _buildResultPdf({
         ),
         pw.SizedBox(height: 8),
         _pdfInfoCard(_buildJudgmentPdf(response)),
-        pw.SizedBox(height: 16),
-        pw.Text(
-          '성능 지표',
-          style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.SizedBox(height: 8),
-        _pdfInfoCard(_buildMetricsPdf(response)),
+        if (response?.evalMetrics != null) ...[
+          pw.SizedBox(height: 16),
+          pw.Text(
+            '성능 지표',
+            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          _pdfInfoCard(_buildMetricsPdf(response)),
+        ],
         pw.SizedBox(height: 16),
         pw.Text(
           '이상 확률',
@@ -459,29 +527,22 @@ pw.Widget _buildMetricsPdf(AnalyzeResponse? response) {
     return pw.Text('전처리를 통과하지 않아 리포트 지표를 표시할 수 없습니다.');
   }
 
-  final prob = response.abnormalProbability;
-  if (prob == null) {
-    return pw.Text('이상 확률 값이 없어 리포트 지표를 계산할 수 없습니다.');
+  final metrics = response.evalMetrics;
+  if (metrics == null) {
+    return pw.Text('모델 평가 지표가 없어 리포트 지표를 표시할 수 없습니다.');
   }
 
-  const labels = [
-    ('Accuracy', '전체 성능 판단'),
-    ('Precision', '불필요 오진 최소화'),
-    ('Sensitivity', '놓치는 환자 최소화'),
-    ('Specificity', '정상 오진 방지'),
-    ('F1-score', '정밀도와 재현율 조화'),
-  ];
-
-  double metricValue(int index) => index == 3 ? 1.0 - prob : prob;
-
+  final rows = metrics.displayRows;
   return pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     children: [
-      for (var i = 0; i < labels.length; i++) ...[
+      for (var i = 0; i < rows.length; i++) ...[
         if (i > 0) pw.SizedBox(height: 8),
-        pw.Text('${labels[i].$1}: ${(metricValue(i) * 100).toStringAsFixed(1)}%'),
+        pw.Text(
+          '${rows[i].title}: ${ReportMetrics.formatPercent(rows[i].ratio)}',
+        ),
         pw.SizedBox(height: 2),
-        pw.Text(labels[i].$2, style: const pw.TextStyle(fontSize: 10)),
+        pw.Text(rows[i].subtitle, style: const pw.TextStyle(fontSize: 10)),
       ],
     ],
   );
@@ -750,26 +811,104 @@ class _JudgmentCard extends StatelessWidget {
   }
 }
 
-/// 백엔드 `make_result_img` / `analyze` 의 metrics dict와 동일한 5지표.
+/// 성능 지표 블록 — eval_metrics 없으면 기본 숨김, 탭하면 안내만 펼침.
+class _ReportMetricsSection extends StatefulWidget {
+  const _ReportMetricsSection({required this.response});
+
+  final AnalyzeResponse? response;
+
+  @override
+  State<_ReportMetricsSection> createState() => _ReportMetricsSectionState();
+}
+
+class _ReportMetricsSectionState extends State<_ReportMetricsSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final res = widget.response;
+    if (res == null || !res.canShowInferenceResults) {
+      return const SizedBox.shrink();
+    }
+
+    final metrics = res.evalMetrics;
+    if (metrics != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const MedicalSectionTitle(
+            '성능 지표',
+            subtitle: 'external test 기준 모델 성능 요약',
+          ),
+          const SizedBox(height: MedicalTokens.spaceSm),
+          _ReportMetricsCard(response: res),
+          const SizedBox(height: MedicalTokens.spaceLg),
+        ],
+      );
+    }
+
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '성능 지표',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: MedicalTokens.textSubtle,
+                    ),
+                  ),
+                ),
+                Text(
+                  _expanded ? '접기' : '평가 데이터 없음',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: MedicalTokens.textSubtle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  _expanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  size: 20,
+                  color: MedicalTokens.textSubtle,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded) ...[
+          const SizedBox(height: MedicalTokens.spaceSm),
+          _InfoCard(
+            child: Text(
+              '모델 평가 지표(JSON)가 아직 없어 성능 수치를 표시하지 않습니다.\n'
+              'AI 팀에서 base.yaml 버전에 맞는 '
+              'external_test_*_best_metrics.json을 제공하면 표시됩니다.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: MedicalTokens.spaceLg),
+      ],
+    );
+  }
+}
+
+/// 백엔드 `/analyze` · 이력 `metrics` (AI external test eval_metrics).
 class _ReportMetricsCard extends StatelessWidget {
   const _ReportMetricsCard({required this.response});
 
   final AnalyzeResponse? response;
-
-  static const List<(String, String)> _labels = [
-    ('Accuracy', '전체 성능 판단'),
-    ('Precision', '불필요 오진 최소화'),
-    ('Sensitivity', '놓치는 환자 최소화'),
-    ('Specificity', '정상 오진 방지'),
-    ('F1-score', '정밀도와 재현율 조화'),
-  ];
-
-  static double _metricValue(int index, double prob) {
-    if (index == 3) {
-      return 1.0 - prob;
-    }
-    return prob;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -785,25 +924,24 @@ class _ReportMetricsCard extends StatelessWidget {
       );
     }
 
-    final prob = res.abnormalProbability;
-    if (prob == null) {
-      return const _InfoCard(
-        child: Text('이상 확률 값이 없어 리포트 지표를 계산할 수 없습니다.'),
-      );
+    final metrics = res.evalMetrics;
+    if (metrics == null) {
+      return const SizedBox.shrink();
     }
 
+    final rows = metrics.displayRows;
     final theme = Theme.of(context);
     return _InfoCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < _labels.length; i++) ...[
+          for (var i = 0; i < rows.length; i++) ...[
             if (i > 0) const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: Text(
-                    _labels[i].$1,
+                    rows[i].title,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: MedicalTokens.textMain,
@@ -811,13 +949,13 @@ class _ReportMetricsCard extends StatelessWidget {
                   ),
                 ),
                 MedicalBadge(
-                  text: '${(_metricValue(i, prob) * 100).toStringAsFixed(1)}%',
+                  text: ReportMetrics.formatPercent(rows[i].ratio),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              _labels[i].$2,
+              rows[i].subtitle,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

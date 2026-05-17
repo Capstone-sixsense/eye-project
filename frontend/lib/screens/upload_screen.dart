@@ -10,6 +10,20 @@ import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
 
+const int _kMaxUploadBytes = 10 * 1024 * 1024;
+const Set<String> _kAllowedImageExtensions = {'jpg', 'jpeg', 'png'};
+
+String? _normalizedExtension(PlatformFile f) {
+  final fromPicker = f.extension?.trim().toLowerCase();
+  if (fromPicker != null && fromPicker.isNotEmpty) {
+    return fromPicker.startsWith('.') ? fromPicker.substring(1) : fromPicker;
+  }
+  final name = f.name;
+  final dot = name.lastIndexOf('.');
+  if (dot < 0 || dot >= name.length - 1) return null;
+  return name.substring(dot + 1).toLowerCase();
+}
+
 class UploadScreen extends StatefulWidget {
   const UploadScreen({super.key});
 
@@ -34,6 +48,35 @@ class _UploadScreenState extends State<UploadScreen> {
     if (result == null || result.files.isEmpty) return;
 
     final f = result.files.single;
+    final ext = _normalizedExtension(f);
+    if (ext == null || !_kAllowedImageExtensions.contains(ext)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'jpg, jpeg, png 형식만 업로드할 수 있습니다.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
+    final int sizeBytes =
+        f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+    if (sizeBytes > _kMaxUploadBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('10MB를 초과하는 파일은 업로드할 수 없습니다.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
     final bytes = f.bytes;
     if (bytes == null) {
       if (mounted) {
@@ -44,6 +87,18 @@ class _UploadScreenState extends State<UploadScreen> {
               '다른 이미지로 다시 시도하거나 크롬/엣지를 사용해 보세요.',
             ),
             duration: Duration(seconds: 5),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (bytes.length > _kMaxUploadBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('10MB를 초과하는 파일은 업로드할 수 없습니다.'),
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -190,6 +245,8 @@ class _UploadScreenState extends State<UploadScreen> {
                     subtitle: '선명한 안저 이미지를 선택한 뒤 분석을 진행하세요.',
                   ),
                   const SizedBox(height: MedicalTokens.spaceMd),
+                  const _UploadFormatNoticeBanner(),
+                  const SizedBox(height: MedicalTokens.spaceMd),
                   MedicalCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -281,3 +338,32 @@ class _UploadPreview extends StatelessWidget {
 }
 
 String _kb(int bytes) => (bytes / 1024).toStringAsFixed(1);
+
+class _UploadFormatNoticeBanner extends StatelessWidget {
+  const _UploadFormatNoticeBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E8),
+        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+        border: Border.all(color: const Color(0xFFF3D2AE)),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: MedicalTokens.spaceSm,
+          vertical: 10,
+        ),
+        child: Text(
+          '업로드 가능한 확장자는 jpg, jpeg, png 3가지 입니다.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF9A5E20),
+          ),
+        ),
+      ),
+    );
+  }
+}
