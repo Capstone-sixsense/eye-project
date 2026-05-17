@@ -107,14 +107,13 @@ class QuickQualWrapper:
         x = TF.normalize(x, [0.5] * 3, [0.5] * 3).unsqueeze(0).to(self.device)
 
         feats = self.backbone(x).squeeze().cpu().reshape(1, -1).numpy()
-        probs = self.clf.predict_proba(feats)[0]  # [good, usable, bad]
+        probs = self.clf.predict_proba(feats)[0]
 
-        return {
-            "good": float(probs[0]),
-            "usable": float(probs[1]),
-            "bad": float(probs[2]),
-            "label": self.QUALITY_LABELS[int(np.argmax(probs))],
-        }
+        # clf.classes_ 순서로 확률을 매핑 (훈련 시 레이블 순서에 무관하게 정확히 매핑)
+        label_map = {0: "good", 1: "usable", 2: "bad"}
+        prob_by_label = {label_map[c]: float(p) for c, p in zip(self.clf.classes_, probs)}
+        prob_by_label["label"] = label_map[self.clf.classes_[int(np.argmax(probs))]]
+        return prob_by_label
 
     def preprocess_and_score(
         self, pil_image: Image.Image
