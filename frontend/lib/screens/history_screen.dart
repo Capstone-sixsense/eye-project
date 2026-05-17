@@ -499,12 +499,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
             content: Text('선택한 $count건의 이력을 삭제할까요?\n삭제 후에는 되돌릴 수 없습니다.'),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('취소'),
-              ),
-              TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('삭제'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('취소'),
               ),
             ],
           ),
