@@ -11,15 +11,6 @@ cd "$ROOT"
 
 echo "⚙️  Eye-Project 환경 구축을 시작합니다..."
 
-# Docker Compose: Mac Apple Silicon은 PyTorch CUDA 휠 이슈로 amd64 백엔드 오버레이 사용
-eye_compose() {
-    if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
-        docker compose -f docker-compose.yml -f docker-compose-mac.yml "$@"
-    else
-        docker compose "$@"
-    fi
-}
-
 open_browser() {
     local url="$1"
     if command -v open >/dev/null 2>&1; then
@@ -64,11 +55,8 @@ docker run --rm -v "$(pwd)/frontend:/app" -w /app \
 echo "✅ Flutter 쪽 준비가 완료되었습니다."
 
 # 5. Docker Compose + 브라우저
-if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
-    echo '🍎 Apple Silicon 감지: docker-compose-mac.yml (백엔드 linux/amd64)을 함께 사용합니다.'
-fi
 echo "🚀 Docker Compose 로 서비스를 띄웁니다..."
-if ! eye_compose up --build -d; then
+if ! docker compose up --build -d; then
     echo "❌ docker compose 가 실패했습니다. Docker Desktop 실행 여부와 오류 메시지를 확인하세요."
     exit 1
 fi
@@ -84,8 +72,8 @@ for ((i = 0; i < 120; i++)); do
 done
 if [ "$BACKEND_OK" -ne 1 ]; then
     echo '⚠️  120초 안에 백엔드(8000)가 응답하지 않습니다.'
-    eye_compose ps || true
-    echo "   로그: Apple Silicon이면 -f docker-compose.yml -f docker-compose-mac.yml 로 실행한 compose 기준으로 backend 로그 확인"
+    docker compose ps || true
+    echo "   로그: docker compose logs backend | tail -n 120"
 fi
 
 echo '⏳ 프론트(8080) 준비 대기… (최초 빌드는 수 분 걸릴 수 있습니다)'
@@ -103,15 +91,11 @@ if [ "$FRONTEND_OK" -eq 1 ]; then
     echo "🌐 브라우저 열기: $URL"
     open_browser "$URL"
     echo "✅ 모든 준비가 완료되었습니다."
-    if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
-        echo "   종료: docker compose -f docker-compose.yml -f docker-compose-mac.yml down"
-    else
-        echo "   종료: docker compose down"
-    fi
+    echo "   종료: docker compose down"
 else
     echo "❌ 8080에 연결되지 않아 브라우저를 열지 않았습니다."
     echo "   직접 열기: $URL"
-    eye_compose ps || true
-    echo '   docker compose logs frontend | tail -n 120  (위와 동일 -f 조합으로 로그 확인)'
+    docker compose ps || true
+    echo '   docker compose logs frontend | tail -n 120'
     exit 1
 fi

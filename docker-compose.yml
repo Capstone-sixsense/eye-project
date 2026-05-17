@@ -1,5 +1,8 @@
 services:
   backend:
+    # PyTorch 등 바이너리 휠 호환: arm64 호스트(Apple Silicon)에서도 amd64 이미지로 실행.
+    # x86_64 Docker 호스트에서는 네이티브 amd64와 동일하게 동작합니다.
+    platform: linux/amd64
     build:
       context: ./backend
       dockerfile: backend_Dockerfile

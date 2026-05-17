@@ -1,6 +1,0 @@
-# Mac Apple Silicon: 백엔드를 linux/amd64로 빌드·실행 (PyTorch CUDA 휠 호환).
-# setup.sh 가 arm64 맥에서 자동으로 이 파일을 함께 사용합니다.
-# 수동 실행: docker compose -f docker-compose.yml -f docker-compose-mac.yml up --build
-services:
-  backend:
-    platform: linux/amd64

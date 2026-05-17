@@ -14,6 +14,16 @@ def load_state_from_checkpoint(
     strict: bool = True,
 ) -> tuple[list[str], list[str]]:
     state = checkpoint.get("model_state_dict", checkpoint)
+    if not strict:
+        model_state = model.state_dict()
+        shape_mismatched = [
+            k for k, v in state.items()
+            if k in model_state and model_state[k].shape != v.shape
+        ]
+        if shape_mismatched:
+            state = {k: v for k, v in state.items() if k not in shape_mismatched}
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        return list(missing) + shape_mismatched, unexpected
     missing, unexpected = model.load_state_dict(state, strict=strict)
     return missing, unexpected
 

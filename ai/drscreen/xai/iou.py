@@ -12,6 +12,13 @@ _LESION_DIR = {
     "SE": "4. Soft Exudates",
 }
 
+_MAPLES_LESION_DIR = {
+    "MA": "Microaneurysms",
+    "HE": "Hemorrhages",
+    "EX": "Exudates",
+    "SE": "CottonWoolSpots",
+}
+
 
 def load_lesion_masks(
     mask_base_dir,
@@ -35,6 +42,40 @@ def load_lesion_masks(
     masks: dict[str, np.ndarray] = {}
     for code, subdir in _LESION_DIR.items():
         path = Path(mask_base_dir) / subdir / f"{image_stem}_{code}.tif"
+        if not path.exists():
+            continue
+        arr = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if arr is None:
+            continue
+        binary = (arr > 0).astype(np.uint8)
+        if target_size is not None:
+            binary = cv2.resize(binary, target_size, interpolation=cv2.INTER_NEAREST)
+        masks[code] = binary
+    return masks
+
+
+def load_maples_masks(
+    annotations_dir,
+    image_stem: str,
+    target_size: tuple[int, int] | None = None,
+) -> dict[str, np.ndarray]:
+    """Load MAPLES-DR lesion masks for one MESSIDOR image.
+
+    Args:
+        annotations_dir: Path to MAPLES-DR annotations dir
+            (e.g. ".../MAPLES-DR/AdditionalData/annotations")
+        image_stem: Filename stem, e.g. "20051019_38557_0100_PP"
+        target_size: (width, height) to resize masks. None keeps original size.
+
+    Returns:
+        dict of lesion_code -> uint8 binary mask (0/1).
+        Only present codes are included.
+    """
+    from pathlib import Path
+
+    masks: dict[str, np.ndarray] = {}
+    for code, subdir in _MAPLES_LESION_DIR.items():
+        path = Path(annotations_dir) / subdir / f"{image_stem}.png"
         if not path.exists():
             continue
         arr = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)

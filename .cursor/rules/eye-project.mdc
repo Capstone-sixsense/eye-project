@@ -1,0 +1,66 @@
+---
+description: eye-project monorepo layout, branch policy, AI/backend integration, Docker, and LFS conventions.
+alwaysApply: true
+---
+
+# eye-project conventions
+
+당뇨병성 망막병증 보조 판별 MVP. 의료 보조 용도이므로 **속도보다 정확성·재현성·설정 일관성**을 우선한다. 사용자-facing 설명은 **한국어**로 한다.
+
+## Repository layout
+
+| Path | Role |
+|------|------|
+| `ai/` | `drscreen` Python 패키지, 학습/추론 설정(`configs/`), 체크포인트(`artifacts/`) |
+| `backend/` | FastAPI (`main.py`), QuickQual, 이미지·이력 저장 (`storage/`, `results/`) |
+| `frontend/` | Flutter Web 클라이언트 (`:8080`) |
+| `docker-compose.yml` | `backend` + `frontend` 오케스트레이션 |
+
+브랜치 운영 (`README.md` 기준): 팀별 `ai` / `backend` / `frontend` → `main` 머지.
+
+## AI ↔ Backend integration
+
+- Docker에서 `./ai` → 컨테이너 `/ai`, `PYTHONPATH=/ai` (`backend/backend_Dockerfile`).
+- 추론 설정 기본값: `FUNDUS_CONFIG_PATH=/ai/configs/base.yaml` (`docker-compose.yml`).
+- 선택적 체크포인트 오버라이드: `FUNDUS_CHECKPOINT_PATH`.
+- `backend`는 `from drscreen.infer.service import InferenceSession` 등 **`ai/drscreen`을 직접 import**한다.
+- `ai/configs/base.yaml`의 `model` / `infer` 필드를 바꿀 때는 `drscreen/infer/service.py`·`payload.py`와 `backend/main.py` 응답 스키마(`metrics`, `evidence`, `xai_*`)가 **함께 맞는지** 확인한다.
+
+## Working on `ai/` only
+
+- AI 코드·설정만 `origin/ai`와 맞출 때:
+  ```bash
+  git fetch origin
+  git checkout origin/ai -- ai/
+  git lfs pull
+  ```
+- `ai/`만 가져와도 `backend`·`frontend`는 그대로 둔다. 다만 API/페이로드 불일치가 없는지 확인한다.
+
+## Git LFS
+
+- `ai/artifacts/checkpoints/best.pt` 등은 **LFS 포인터**일 수 있다. 수백 바이트 파일이면 실제 가중치가 아님 → `git lfs install` 후 `git lfs pull`.
+- LFS 파일에 merge conflict(`<<<<<<<`)가 있으면 **한쪽 oid만 남기고** 다시 `git lfs pull`. 포인터 텍스트를 PyTorch로 로드하지 말 것.
+
+## Merge and config hygiene
+
+- 커밋에 `<<<<<<<`, `=======`, `>>>>>>>` 가 남으면 안 된다. YAML/Python이 즉시 깨진다.
+- `ai/configs/base.yaml`은 Docker 추론의 **단일 기준 설정**이다. 실험용은 `configs/v*.yaml`에 두고, 배포 기준 변경은 `base.yaml`을 의도적으로 갱신한다.
+
+## Run and verify
+
+```bash
+./setup.sh
+docker compose up -d
+```
+
+- UI: `http://localhost:8080`, API: `http://localhost:8000`, 헬스: `GET /health`.
+- 분석 플로우: `POST /analyze` (품질 + 추론 + GradCAM + 리포트).
+- 로컬 `ai/data/`는 git에 없을 수 있음. 학습·manifest 작업은 데이터를 별도 준비한다.
+
+## Agent behavior in this repo
+
+- 요청 범위 밖 디렉터리는 수정하지 않는다 (예: `frontend` 작업 시 `ai` 설정을 임의로 바꾸지 않음).
+- `git commit` / `git push` / force push는 **사용자가 명시할 때만** 수행한다.
+- `CURSOR.md`·`CLAUDE.md`는 사람/다른 도구용 문서이며, Cursor 규칙 본문은 **`.cursor/rules/*.mdc`** 가 기준이다. (CURSOR.md는 확인이 끝나 제거 by frontend)
+
+- frontend 브랜치 내의 커밋 요청은 다음과 같은 기준을 따른다. 절대 agent가 커밋하고 말고, 커밋 명령어만 제공해야한다. 커밋로그는 "컨벤션(현재 브랜치 이름): 영어로 된 작업 요약"의 양식을 준수해야 한다.("ex: feat(frontend): add something...") 이후의 상세 description은 한국어로 적어야한다.

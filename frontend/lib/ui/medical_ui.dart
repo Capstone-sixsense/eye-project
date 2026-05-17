@@ -133,18 +133,20 @@ class MedicalPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final labelWidget = Text(label);
     return FilledButton(
       onPressed: onPressed,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (leading != null) ...[
-            leading!,
-            const SizedBox(width: 8),
-          ],
-          Text(label),
-        ],
-      ),
+      child: leading == null
+          ? labelWidget
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                leading!,
+                const SizedBox(width: 8),
+                labelWidget,
+              ],
+            ),
     );
   }
 }
