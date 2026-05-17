@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
+import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
 
@@ -74,51 +75,57 @@ Widget _buildResultBottomBar({
               horizontal: MedicalTokens.spaceMd,
               vertical: 8,
             ),
-            child: SizedBox(
-              height: 48,
-              width: double.infinity,
-              child: Align(
-                alignment: Alignment.center,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: maxContentWidth),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: MedicalTokens.textMain,
-                          backgroundColor: MedicalTokens.surface,
-                          side: const BorderSide(color: MedicalTokens.border),
-                          minimumSize: const Size(0, 44),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final barWidth = constraints.maxWidth.isFinite
+                    ? constraints.maxWidth.clamp(0.0, maxContentWidth)
+                    : maxContentWidth;
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: barWidth,
+                    height: 44,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: MedicalTokens.textMain,
+                              backgroundColor: MedicalTokens.surface,
+                              side: const BorderSide(
+                                color: MedicalTokens.border,
+                              ),
+                              minimumSize: const Size.fromHeight(44),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onPressed: onUpload,
+                            child: const Text('다시 업로드'),
                           ),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        onPressed: onUpload,
-                        child: const Text('다시 업로드'),
-                      ),
-                      const SizedBox(width: MedicalTokens.spaceSm),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: MedicalTokens.primary,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 44),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
+                        const SizedBox(width: MedicalTokens.spaceSm),
+                        Expanded(
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: MedicalTokens.primary,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size.fromHeight(44),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onPressed: onHistory,
+                            child: const Text('이력 보기'),
                           ),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        onPressed: onHistory,
-                        child: const Text('이력 보기'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -521,29 +528,22 @@ pw.Widget _buildMetricsPdf(AnalyzeResponse? response) {
     return pw.Text('전처리를 통과하지 않아 리포트 지표를 표시할 수 없습니다.');
   }
 
-  final prob = response.abnormalProbability;
-  if (prob == null) {
-    return pw.Text('이상 확률 값이 없어 리포트 지표를 계산할 수 없습니다.');
+  final metrics = response.evalMetrics;
+  if (metrics == null) {
+    return pw.Text('모델 평가 지표가 없어 리포트 지표를 표시할 수 없습니다.');
   }
 
-  const labels = [
-    ('Accuracy', '전체 성능 판단'),
-    ('Precision', '불필요 오진 최소화'),
-    ('Sensitivity', '놓치는 환자 최소화'),
-    ('Specificity', '정상 오진 방지'),
-    ('F1-score', '정밀도와 재현율 조화'),
-  ];
-
-  double metricValue(int index) => index == 3 ? 1.0 - prob : prob;
-
+  final rows = metrics.displayRows;
   return pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     children: [
-      for (var i = 0; i < labels.length; i++) ...[
+      for (var i = 0; i < rows.length; i++) ...[
         if (i > 0) pw.SizedBox(height: 8),
-        pw.Text('${labels[i].$1}: ${(metricValue(i) * 100).toStringAsFixed(1)}%'),
+        pw.Text(
+          '${rows[i].title}: ${ReportMetrics.formatPercent(rows[i].ratio)}',
+        ),
         pw.SizedBox(height: 2),
-        pw.Text(labels[i].$2, style: const pw.TextStyle(fontSize: 10)),
+        pw.Text(rows[i].subtitle, style: const pw.TextStyle(fontSize: 10)),
       ],
     ],
   );
@@ -812,26 +812,11 @@ class _JudgmentCard extends StatelessWidget {
   }
 }
 
-/// 백엔드 `make_result_img` / `analyze` 의 metrics dict와 동일한 5지표.
+/// 백엔드 `/analyze` · 이력 `metrics` (AI external test eval_metrics).
 class _ReportMetricsCard extends StatelessWidget {
   const _ReportMetricsCard({required this.response});
 
   final AnalyzeResponse? response;
-
-  static const List<(String, String)> _labels = [
-    ('Accuracy', '전체 성능 판단'),
-    ('Precision', '불필요 오진 최소화'),
-    ('Sensitivity', '놓치는 환자 최소화'),
-    ('Specificity', '정상 오진 방지'),
-    ('F1-score', '정밀도와 재현율 조화'),
-  ];
-
-  static double _metricValue(int index, double prob) {
-    if (index == 3) {
-      return 1.0 - prob;
-    }
-    return prob;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -847,25 +832,29 @@ class _ReportMetricsCard extends StatelessWidget {
       );
     }
 
-    final prob = res.abnormalProbability;
-    if (prob == null) {
+    final metrics = res.evalMetrics;
+    if (metrics == null) {
       return const _InfoCard(
-        child: Text('이상 확률 값이 없어 리포트 지표를 계산할 수 없습니다.'),
+        child: Text(
+          '모델 평가 지표(external test) JSON이 없습니다.\n'
+          'AI 평가 JSON이 없거나, 예전 확률 기반 placeholder 데이터입니다.\n'
+        ),
       );
     }
 
+    final rows = metrics.displayRows;
     final theme = Theme.of(context);
     return _InfoCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < _labels.length; i++) ...[
+          for (var i = 0; i < rows.length; i++) ...[
             if (i > 0) const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: Text(
-                    _labels[i].$1,
+                    rows[i].title,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: MedicalTokens.textMain,
@@ -873,13 +862,13 @@ class _ReportMetricsCard extends StatelessWidget {
                   ),
                 ),
                 MedicalBadge(
-                  text: '${(_metricValue(i, prob) * 100).toStringAsFixed(1)}%',
+                  text: ReportMetrics.formatPercent(rows[i].ratio),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              _labels[i].$2,
+              rows[i].subtitle,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
