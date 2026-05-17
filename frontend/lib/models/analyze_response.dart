@@ -1,3 +1,5 @@
+import 'report_metrics.dart';
+
 /// 품질 정보(백엔드 `quality` 블록 등 — 필드는 API에 맞게 확장).
 class QualitySummary {
   const QualitySummary({
@@ -43,6 +45,7 @@ class AnalyzeResponse {
     this.quality,
     this.explanationImageUrl,
     this.xaiErrorCode,
+    this.evalMetrics,
   });
 
   final String status;
@@ -69,6 +72,9 @@ class AnalyzeResponse {
 
   /// 설명 이미지 생성 실패 시 `XAI_001` 등.
   final String? xaiErrorCode;
+
+  /// external test 등 모델 평가 지표 (`metrics` / `eval_metrics`).
+  final ReportMetrics? evalMetrics;
 
   /// 네트워크 이미지용 상대 경로. XAI 실패 시에는 null (실패 UI).
   String? get resolvedExplanationPath {
@@ -127,21 +133,22 @@ class AnalyzeResponse {
       explanationImageUrl: explanation,
       xaiErrorCode:
           json['xai_error_code'] as String? ?? json['xai_error'] as String?,
+      evalMetrics: _parseEvalMetrics(
+        json,
+        abnormalProbability: (json['abnormal_probability'] as num?)?.toDouble(),
+      ),
     );
   }
 
   /// `GET /history`·`GET /history/{id}` 에서 저장된 메타(JSON) 규격.
   factory AnalyzeResponse.fromHistoryRecord(Map<String, dynamic> json) {
-    final metrics = json['metrics'];
-    Map<String, dynamic>? details;
-    if (metrics is Map<String, dynamic>) {
-      details = {'eval_metrics': metrics};
-    }
+    final abnormalProbability =
+        (json['abnormal_probability'] as num?)?.toDouble();
     return AnalyzeResponse(
       status: 'success',
       recordId: json['id'] as String?,
       message: null,
-      details: details,
+      details: null,
       label: json['label'] as String?,
       abnormalProbability:
           (json['abnormal_probability'] as num?)?.toDouble(),
@@ -154,7 +161,30 @@ class AnalyzeResponse {
           json['explanation_image_url'] ??
           json['heatmap_url']) as String?,
       xaiErrorCode: null,
+      evalMetrics: ReportMetrics.tryParse(
+        json['metrics'],
+        abnormalProbability: abnormalProbability,
+      ),
     );
+  }
+
+  static ReportMetrics? _parseEvalMetrics(
+    Map<String, dynamic> json, {
+    double? abnormalProbability,
+  }) {
+    final fromTop = ReportMetrics.tryParse(
+      json['metrics'],
+      abnormalProbability: abnormalProbability,
+    );
+    if (fromTop != null) return fromTop;
+    final details = json['details'];
+    if (details is Map<String, dynamic>) {
+      return ReportMetrics.tryParse(
+        details['eval_metrics'],
+        abnormalProbability: abnormalProbability,
+      );
+    }
+    return null;
   }
 
   static int? _parsePreprocessed(dynamic v) {
