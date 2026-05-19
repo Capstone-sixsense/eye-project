@@ -1,0 +1,14 @@
+{
+  "split": "external_test",
+  "metrics": {
+    "auroc": 0.916036
+  },
+  "optimal_threshold": 0.35,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.833014,
+    "sensitivity": 0.798274,
+    "specificity": 0.867699,
+    "precision": 0.857634,
+    "f1": 0.826890
+  }
+}
