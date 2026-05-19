@@ -46,6 +46,7 @@ class AnalyzeResponse {
     this.explanationImageUrl,
     this.xaiErrorCode,
     this.evalMetrics,
+    this.decisionThreshold,
   });
 
   final String status;
@@ -73,8 +74,21 @@ class AnalyzeResponse {
   /// 설명 이미지 생성 실패 시 `XAI_001` 등.
   final String? xaiErrorCode;
 
-  /// external test 등 모델 평가 지표 (`metrics` / `eval_metrics`).
+  /// external test 등 모델 평가 지표 (`metrics` / `eval_metrics`). 없으면 null.
   final ReportMetrics? evalMetrics;
+
+  /// 이번 추론 판정 임계값 (`decision_threshold`).
+  final double? decisionThreshold;
+
+  /// 결과 화면·PDF용 — 서버 `metrics` / `eval_metrics` (AI eval_metrics 그대로).
+  ReportMetrics? get modelPerformanceMetrics {
+    final m = evalMetrics;
+    if (m == null) return null;
+    if (decisionThreshold != null && m.decisionThreshold == null) {
+      return m.copyWith(decisionThreshold: decisionThreshold);
+    }
+    return m;
+  }
 
   /// 네트워크 이미지용 상대 경로. XAI 실패 시에는 null (실패 UI).
   String? get resolvedExplanationPath {
@@ -137,6 +151,7 @@ class AnalyzeResponse {
         json,
         abnormalProbability: (json['abnormal_probability'] as num?)?.toDouble(),
       ),
+      decisionThreshold: _readThreshold(json['decision_threshold']),
     );
   }
 
@@ -165,6 +180,11 @@ class AnalyzeResponse {
         json['metrics'],
         abnormalProbability: abnormalProbability,
       ),
+      decisionThreshold: _readThreshold(json['decision_threshold']) ??
+          _readThreshold(
+            (json['metrics'] is Map ? json['metrics'] as Map : null)?[
+                'decision_threshold'],
+          ),
     );
   }
 
@@ -172,11 +192,16 @@ class AnalyzeResponse {
     Map<String, dynamic> json, {
     double? abnormalProbability,
   }) {
-    final fromTop = ReportMetrics.tryParse(
+    final fromMetrics = ReportMetrics.tryParse(
       json['metrics'],
       abnormalProbability: abnormalProbability,
     );
-    if (fromTop != null) return fromTop;
+    if (fromMetrics != null) return fromMetrics;
+    final fromEval = ReportMetrics.tryParse(
+      json['eval_metrics'],
+      abnormalProbability: abnormalProbability,
+    );
+    if (fromEval != null) return fromEval;
     final details = json['details'];
     if (details is Map<String, dynamic>) {
       return ReportMetrics.tryParse(
@@ -185,6 +210,13 @@ class AnalyzeResponse {
       );
     }
     return null;
+  }
+
+  static double? _readThreshold(dynamic value) {
+    if (value is! num) return null;
+    final n = value.toDouble();
+    if (n.isNaN) return null;
+    return n.clamp(0.0, 1.0);
   }
 
   static int? _parsePreprocessed(dynamic v) {
