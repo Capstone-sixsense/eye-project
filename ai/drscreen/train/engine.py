@@ -117,6 +117,28 @@ def _amp_dtype(device: torch.device) -> torch.dtype:
     return torch.float16
 
 
+def _decoder_only_allowed_parameter_ids(model: torch.nn.Module) -> set[int]:
+    allowed: set[int] = set()
+    seg_head = getattr(model, "seg_head", None)
+    if seg_head is not None:
+        allowed.update(id(parameter) for parameter in seg_head.parameters())
+    lesion_weights = getattr(model, "lesion_weights", None)
+    if lesion_weights is not None:
+        allowed.add(id(lesion_weights))
+    return allowed
+
+
+def _assert_decoder_only_freeze(model: torch.nn.Module) -> None:
+    allowed_ids = _decoder_only_allowed_parameter_ids(model)
+    leaked = [
+        name
+        for name, parameter in model.named_parameters()
+        if id(parameter) not in allowed_ids and parameter.grad is not None
+    ]
+    if leaked:
+        raise AssertionError(f"decoder_only freeze leaked into: {leaked[:5]}")
+
+
 @dataclass(slots=True)
 class EpochMetrics:
     loss: float
@@ -154,6 +176,10 @@ def train_one_epoch(
     lambda_coral: float = 0.0,
     lambda_aux_seg: float = 0.0,
     seg_loss_type: str = "bce",
+    lambda_cam_align: float = 0.0,
+    coral_block: int | None = None,
+    lambda_patch_l1: float = 0.0,
+    lambda_concept: float = 0.0,
 ) -> EpochMetrics:
     model.train()
     if model_train_setup is not None:
@@ -161,6 +187,7 @@ def train_one_epoch(
 
     use_coral = coral_criterion is not None and lambda_coral > 0.0 and _has_timm_feature_api(model)
     use_aux_seg = lambda_aux_seg > 0.0
+    use_cam_align = lambda_cam_align > 0.0
 
     _seg_criterion: torch.nn.Module | None = None
     if use_aux_seg:
@@ -169,10 +196,16 @@ def train_one_epoch(
             _seg_criterion = DiceBCELoss().to(device)
         else:
             _seg_criterion = None  # use F.binary_cross_entropy_with_logits inline
+
+    _cam_align_criterion: torch.nn.Module | None = None
+    if use_cam_align:
+        from drscreen.train.loss import CamAlignmentLoss
+        _cam_align_criterion = CamAlignmentLoss().to(device)
     total_loss = 0.0
     total_examples = 0
     all_logits: list[torch.Tensor] = []
     all_targets: list[torch.Tensor] = []
+    decoder_only_checked = False
 
     for batch in loader:
         images, targets = _unpack_batch(batch, device)
@@ -181,11 +214,18 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
-            if use_coral and domains is not None:
+            use_intermediate_coral = (
+                use_coral
+                and coral_block is not None
+                and domains is not None
+            )
+            if use_coral and not use_intermediate_coral and not use_aux_seg:
+                # Legacy CORAL-only path: pool the final pre-classifier feature.
                 pooled, logits = _forward_with_features(model, images)
-                cls_loss = criterion(logits, targets)
+                seg_logits = None
+                loss = criterion(logits, targets)
                 coral_loss = _compute_coral_loss(coral_criterion, pooled, domains)
-                loss = cls_loss + lambda_coral * coral_loss
+                loss = loss + lambda_coral * coral_loss
             else:
                 output = model(images)
                 if isinstance(output, tuple):
@@ -193,6 +233,50 @@ def train_one_epoch(
                 else:
                     logits, seg_logits = output, None
                 loss = criterion(logits, targets)
+
+                if lambda_patch_l1 > 0.0 and hasattr(model, "latest_patch_logits"):
+                    patch_logits = model.latest_patch_logits()
+                    if patch_logits is not None:
+                        loss = loss + lambda_patch_l1 * patch_logits.abs().mean()
+
+                if lambda_concept > 0.0 and hasattr(model, "latest_concept_logits"):
+                    concept_logits = model.latest_concept_logits()
+                    concept_valid = batch.get("concept_valid")
+                    if concept_logits is not None and concept_valid is not None:
+                        concept_valid = concept_valid.to(device).bool()
+                        if concept_valid.any():
+                            import torch.nn.functional as F
+
+                            concept_targets = batch["concept_labels"].to(device).float()
+                            concept_conf = batch.get("concept_confidence")
+                            if concept_conf is None:
+                                concept_conf = torch.ones_like(concept_valid, dtype=concept_logits.dtype)
+                            else:
+                                concept_conf = concept_conf.to(device).float()
+                            raw_concept_loss = F.binary_cross_entropy_with_logits(
+                                concept_logits[concept_valid],
+                                concept_targets[concept_valid],
+                                reduction="none",
+                            ).mean(dim=1)
+                            weights = concept_conf[concept_valid].clamp_min(0.0)
+                            if weights.sum() > 0:
+                                concept_loss = (raw_concept_loss * weights).sum() / weights.sum()
+                                loss = loss + lambda_concept * concept_loss
+
+                if use_intermediate_coral:
+                    decoder_feats = getattr(model, "_decoder_feats", None)
+                    coral_feat: torch.Tensor | None = None
+                    if decoder_feats is not None and coral_block in decoder_feats:
+                        coral_act = decoder_feats[coral_block]
+                        coral_feat = torch.nn.functional.adaptive_avg_pool2d(
+                            coral_act, 1
+                        ).flatten(1)
+                    if coral_feat is not None:
+                        coral_loss = _compute_coral_loss(
+                            coral_criterion, coral_feat, domains
+                        )
+                        loss = loss + lambda_coral * coral_loss
+
                 if use_aux_seg and seg_logits is not None:
                     valid = batch.get("seg_mask_valid")
                     if valid is not None:
@@ -208,24 +292,52 @@ def train_one_epoch(
                                 )
                             loss = loss + lambda_aux_seg * seg_loss
 
-        if scaler is not None and scaler.is_enabled():
-            scaler.scale(loss).backward()
-            if gradient_clip_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            if gradient_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
-            optimizer.step()
+                            if (
+                                use_cam_align
+                                and _cam_align_criterion is not None
+                                and getattr(model, "_feat", None) is not None
+                            ):
+                                act = model._feat.get("x")
+                                if act is not None and act.requires_grad:
+                                    grad_act = torch.autograd.grad(
+                                        logits.sum(),
+                                        act,
+                                        create_graph=True,
+                                        retain_graph=True,
+                                    )[0]
+                                    cam_loss = _cam_align_criterion(
+                                        act, grad_act, seg_targets, valid
+                                    )
+                                    loss = loss + lambda_cam_align * cam_loss
+
+        if loss.requires_grad:
+            if scaler is not None and scaler.is_enabled():
+                scaler.scale(loss).backward()
+                if getattr(model, "_decoder_only", False) and not decoder_only_checked:
+                    _assert_decoder_only_freeze(model)
+                    decoder_only_checked = True
+                if gradient_clip_norm is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                if getattr(model, "_decoder_only", False) and not decoder_only_checked:
+                    _assert_decoder_only_freeze(model)
+                    decoder_only_checked = True
+                if gradient_clip_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+                optimizer.step()
 
         batch_size = int(targets.shape[0])
         total_loss += float(loss.detach().item()) * batch_size
         total_examples += batch_size
         all_logits.append(logits.detach().float().cpu().view(-1))
         all_targets.append(targets.detach().long().cpu().view(-1))
+
+    if getattr(model, "_decoder_only", False) and use_aux_seg and not decoder_only_checked:
+        raise RuntimeError("decoder_only training did not encounter a trainable segmentation batch.")
 
     binary_metrics = compute_binary_classification_metrics(
         logits=torch.cat(all_logits),

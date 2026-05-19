@@ -57,6 +57,112 @@ class FundusPreprocess:
             result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
         return result
 
+    def apply_mask_geometry(
+        self,
+        mask: np.ndarray,
+        reference_img: PILImage.Image,
+        *,
+        output_size: int | None = None,
+    ) -> np.ndarray:
+        """Apply the image preprocessing geometry to a mask.
+
+        This mirrors the geometric parts of ``__call__``: optional alignment,
+        circular crop, padding, and final resize. Ben Graham normalization is
+        photometric only and is intentionally skipped for masks.
+        """
+        ref = np.asarray(reference_img.convert("RGB")).copy()
+        mask_arr = np.asarray(mask).copy()
+        was_singleton_channel = mask_arr.ndim == 3 and mask_arr.shape[-1] == 1
+        if mask_arr.shape[:2] != ref.shape[:2]:
+            mask_arr = cv2.resize(
+                mask_arr,
+                (ref.shape[1], ref.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            if was_singleton_channel and mask_arr.ndim == 2:
+                mask_arr = mask_arr[..., None]
+
+        if self._align:
+            matrix = self._alignment_matrix(ref)
+            if matrix is not None:
+                h, w = ref.shape[:2]
+                ref = cv2.warpAffine(
+                    ref,
+                    matrix,
+                    (w, h),
+                    flags=cv2.INTER_LANCZOS4,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(0, 0, 0),
+                )
+                mask_arr = cv2.warpAffine(
+                    mask_arr,
+                    matrix,
+                    (w, h),
+                    flags=cv2.INTER_NEAREST,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=0,
+                )
+                if was_singleton_channel and mask_arr.ndim == 2:
+                    mask_arr = mask_arr[..., None]
+
+        geometry = self._circular_crop_geometry(ref)
+        if geometry is not None:
+            x1, y1, x2, y2, pad_top, pad_bottom, pad_left, pad_right = geometry
+            mask_arr = mask_arr[y1:y2, x1:x2]
+            mask_arr = cv2.copyMakeBorder(
+                mask_arr,
+                pad_top,
+                pad_bottom,
+                pad_left,
+                pad_right,
+                cv2.BORDER_CONSTANT,
+                value=0,
+            )
+            if was_singleton_channel and mask_arr.ndim == 2:
+                mask_arr = mask_arr[..., None]
+
+        target_size = output_size if output_size is not None else self._output_size
+        if target_size is not None and mask_arr.shape[:2] != (target_size, target_size):
+            mask_arr = cv2.resize(
+                mask_arr,
+                (target_size, target_size),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            if was_singleton_channel and mask_arr.ndim == 2:
+                mask_arr = mask_arr[..., None]
+        return mask_arr
+
+    def _alignment_matrix(self, image: np.ndarray) -> np.ndarray | None:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        _, mask = cv2.threshold(gray, self._crop_tol, 255, cv2.THRESH_BINARY)
+
+        ksize = max(5, min(image.shape[:2]) // 30) | 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        largest = max(contours, key=cv2.contourArea)
+        h, w = image.shape[:2]
+        img_cx, img_cy = w / 2.0, h / 2.0
+
+        moments = cv2.moments(largest)
+        if moments["m00"] == 0:
+            return None
+        disk_cx = moments["m10"] / moments["m00"]
+        disk_cy = moments["m01"] / moments["m00"]
+
+        if np.hypot(disk_cx - img_cx, disk_cy - img_cy) > min(h, w) * self._decentering_limit:
+            return None
+
+        dx, dy = img_cx - disk_cx, img_cy - disk_cy
+        if abs(dx) <= 3 and abs(dy) <= 3:
+            return None
+        return np.float32([[1, 0, dx], [0, 1, dy]])
+
     def _correct_alignment(self, image: np.ndarray) -> np.ndarray:
         """Translate the fundus disk centroid to the image center.
 
@@ -65,46 +171,18 @@ class FundusPreprocess:
         the image is too severely decentered for reliable geometric correction,
         so preprocessing falls back to circular crop + Ben Graham only.
         """
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        _, mask = cv2.threshold(gray, self._crop_tol, 255, cv2.THRESH_BINARY)
-
-        ksize = max(5, min(image.shape[:2]) // 30) | 1  # adaptive, always odd
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        matrix = self._alignment_matrix(image)
+        if matrix is None:
             return image
-
-        largest = max(contours, key=cv2.contourArea)
         h, w = image.shape[:2]
-        img_cx, img_cy = w / 2.0, h / 2.0
-
-        moments = cv2.moments(largest)
-        if moments["m00"] == 0:
-            return image
-        disk_cx = moments["m10"] / moments["m00"]
-        disk_cy = moments["m01"] / moments["m00"]
-
-        # Skip if disk is too far off-center for reliable correction
-        if np.hypot(disk_cx - img_cx, disk_cy - img_cy) > min(h, w) * self._decentering_limit:
-            return image
-
-        result = image.copy()
-
-        # Center correction via translation
-        dx, dy = img_cx - disk_cx, img_cy - disk_cy
-        if abs(dx) > 3 or abs(dy) > 3:
-            M = np.float32([[1, 0, dx], [0, 1, dy]])
-            result = cv2.warpAffine(
-                result, M, (w, h),
-                flags=cv2.INTER_LANCZOS4,
-                borderMode=cv2.BORDER_CONSTANT,
-                borderValue=(0, 0, 0),
-            )
-
-        return result
+        return cv2.warpAffine(
+            image,
+            matrix,
+            (w, h),
+            flags=cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        )
 
     def _get_circle_mask(self, h: int, w: int) -> np.ndarray:
         cy, cx = h / 2.0, w / 2.0
@@ -112,12 +190,15 @@ class FundusPreprocess:
         Y, X = np.ogrid[:h, :w]
         return ((X - cx) ** 2 + (Y - cy) ** 2) <= radius ** 2
 
-    def _circular_crop(self, image: np.ndarray) -> np.ndarray:
+    def _circular_crop_geometry(
+        self,
+        image: np.ndarray,
+    ) -> tuple[int, int, int, int, int, int, int, int] | None:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         _, mask = cv2.threshold(gray, self._crop_tol, 255, cv2.THRESH_BINARY)
         coords = cv2.findNonZero(mask)
         if coords is None:
-            return image
+            return None
 
         M = cv2.moments(mask)
         if M["m00"] > 0:
@@ -145,6 +226,14 @@ class FundusPreprocess:
         pad_bottom = side - ch - pad_top
         pad_left = (side - cw) // 2
         pad_right = side - cw - pad_left
+        return x1, y1, x2, y2, pad_top, pad_bottom, pad_left, pad_right
+
+    def _circular_crop(self, image: np.ndarray) -> np.ndarray:
+        geometry = self._circular_crop_geometry(image)
+        if geometry is None:
+            return image
+        x1, y1, x2, y2, pad_top, pad_bottom, pad_left, pad_right = geometry
+        cropped = image[y1:y2, x1:x2]
         return cv2.copyMakeBorder(
             cropped, pad_top, pad_bottom, pad_left, pad_right,
             cv2.BORDER_CONSTANT, value=(0, 0, 0),
@@ -236,6 +325,34 @@ class _TrainTransform:
         return self._aug(image=np.asarray(img))["image"]
 
 
+class _SegmentationTransform:
+    """PIL + mask transform with synchronized spatial augmentation."""
+
+    def __init__(self, pil_steps: list, aug: A.Compose) -> None:
+        self._pil_steps = pil_steps
+        self._aug = aug
+
+    def __call__(self, img: PILImage.Image, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        for step in self._pil_steps:
+            img = step(img)
+        mask_np = mask.detach().cpu().permute(1, 2, 0).numpy().astype(np.float32)
+        image_np = np.asarray(img)
+        image_h, image_w = image_np.shape[:2]
+        if mask_np.shape[:2] != (image_h, image_w):
+            mask_np = cv2.resize(mask_np, (image_w, image_h), interpolation=cv2.INTER_NEAREST)
+            if mask_np.ndim == 2:
+                mask_np = mask_np[..., None]
+        out = self._aug(image=image_np, mask=mask_np)
+        out_mask = out["mask"]
+        if not torch.is_tensor(out_mask):
+            out_mask = torch.as_tensor(out_mask)
+        if out_mask.ndim == 2:
+            out_mask = out_mask.unsqueeze(0)
+        elif out_mask.shape[0] != mask.shape[0] and out_mask.shape[-1] == mask.shape[0]:
+            out_mask = out_mask.permute(2, 0, 1)
+        return out["image"], (out_mask.float() > 0.5).float()
+
+
 def build_train_transform(
     crop_size: int,
     resize_size: int | None = None,
@@ -282,6 +399,69 @@ def build_train_transform(
     ])
 
     return _TrainTransform(pil_steps, aug)
+
+
+def build_segmentation_train_transform(
+    crop_size: int,
+    resize_size: int | None = None,
+    interpolation: str = "bilinear",
+    mean: tuple[float, float, float] = (0.485, 0.456, 0.406),
+    std: tuple[float, float, float] = (0.229, 0.224, 0.225),
+    use_preprocessing: bool = False,
+    use_random_resized_crop: bool = True,
+) -> _SegmentationTransform:
+    resize = resize_size or crop_size
+
+    pil_steps: list = []
+    if use_preprocessing:
+        pil_steps.append(FundusPreprocess())
+
+    resize_steps: list = [A.Resize(resize, resize)]
+    if use_random_resized_crop:
+        resize_steps.append(A.RandomResizedCrop(size=(crop_size, crop_size), scale=(0.8, 1.0)))
+    elif resize != crop_size:
+        resize_steps.append(A.CenterCrop(crop_size, crop_size))
+
+    aug = A.Compose([
+        *resize_steps,
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.Rotate(limit=180, border_mode=cv2.BORDER_CONSTANT, fill=0, p=0.8),
+        A.ColorJitter(brightness=0.35, contrast=0.35, saturation=0.25, hue=0.03, p=0.8),
+        A.RandomGamma(gamma_limit=(75, 130), p=0.5),
+        A.GaussianBlur(blur_limit=(3, 5), p=0.2),
+        A.GaussNoise(std_range=(0.02, 0.07), p=0.3),
+        A.Normalize(mean=mean, std=std),
+        ToTensorV2(transpose_mask=True),
+    ])
+
+    return _SegmentationTransform(pil_steps, aug)
+
+
+def build_segmentation_eval_transform(
+    crop_size: int,
+    resize_size: int | None = None,
+    interpolation: str = "bilinear",
+    mean: tuple[float, float, float] = (0.485, 0.456, 0.406),
+    std: tuple[float, float, float] = (0.229, 0.224, 0.225),
+    use_preprocessing: bool = False,
+) -> _SegmentationTransform:
+    resize = resize_size or crop_size
+
+    pil_steps: list = []
+    if use_preprocessing:
+        pil_steps.append(FundusPreprocess())
+
+    resize_steps: list = [A.Resize(resize, resize)]
+    if resize != crop_size:
+        resize_steps.append(A.CenterCrop(crop_size, crop_size))
+
+    aug = A.Compose([
+        *resize_steps,
+        A.Normalize(mean=mean, std=std),
+        ToTensorV2(transpose_mask=True),
+    ])
+    return _SegmentationTransform(pil_steps, aug)
 
 
 def build_eval_transform(

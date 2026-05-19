@@ -1,0 +1,47 @@
+project:
+  version: bagnet_v1_p33_r256
+
+data:
+  resize_size: 256
+  image_size: 256
+  batch_size: 32
+  num_workers: 4
+  persistent_workers: false
+  use_random_resized_crop: true
+  seg_mask_mode: none
+
+model:
+  architecture: sparse_bagnet
+  pretrained: false
+  num_outputs: 1
+  use_attention: false
+  attention_mode: none
+  use_aux_seg: false
+  use_gated_pooling: false
+  use_mil_attention: false
+  bagnet_patch_size: 33
+  bagnet_patch_stride: 8
+  bagnet_hidden_channels: 128
+  bagnet_depth: 4
+  bagnet_dropout: 0.15
+  bagnet_aggregation: mean
+
+train:
+  seed: 42
+  head_epochs: 0
+  finetune_epochs: 12
+  warmup_epochs: 1
+  head_learning_rate: 0.0005
+  backbone_learning_rate: 0.0001
+  weight_decay: 0.0001
+  lambda_patch_l1: 0.0002
+  min_checkpoint_sensitivity: 0.78
+  early_stopping_patience: 4
+  early_stopping_min_delta: 0.001
+  amp: true
+
+infer:
+  checkpoint_path: artifacts/runs/10_grounded_classifier/bagnet_v1_p33_r256/checkpoints/best.pt
+  gradcam_method: bagnet
+  evidence_type: grounded_classifier
+  threshold: 0.5

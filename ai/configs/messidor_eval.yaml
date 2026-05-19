@@ -1,6 +1,6 @@
 data:
   manifest_path: data/processed/messidor_manifest.csv
-  image_root: C:/Users/dg203/Desktop/messidor
+  image_root: data/raw
   resize_size: 448
   image_size: 448
   num_workers: 4

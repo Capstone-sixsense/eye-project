@@ -1,0 +1,44 @@
+project:
+  version: v38_xai_coral
+
+# v37 + intermediate-block CORAL on block3.
+# Requires the same MAPLES-inclusive preprocessed manifest as v37; see v37
+# config for the raw-manifest build and preprocessing commands. CORAL aligns
+# source-domain covariances in batch-resident domains (APTOS / IDRiD /
+# Messidor / MAPLES). DDR unlabeled-feature alignment is deferred to a
+# follow-up phase because it needs an unlabeled-loader pass.
+data:
+  manifest_path: data/processed/manifest_with_maples_preprocessed.csv
+  seg_mask_mode: composite
+
+model:
+  use_attention: false
+  attention_mode: none
+  use_aux_seg: true
+  aux_seg_block: 4
+  aux_seg_channels: 1
+  decoder_type: unet
+  decoder_blocks: [2, 3, 4]
+  use_gated_pooling: false
+
+train:
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  lambda_aux_seg: 0.2
+  lambda_cam_align: 0.1
+  seg_loss_type: dice_bce
+  use_coral: true
+  lambda_coral: 0.05
+  coral_block: 3
+  pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
+
+infer:
+  checkpoint_path: artifacts/runs/08_xai_decoder_alignment/v38_xai_coral/checkpoints/best.pt
+  threshold: 0.35
+  gradcam_method: layercam
+  gradcam_target_block: 4
+  evidence_type: cam_research

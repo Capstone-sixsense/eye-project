@@ -89,6 +89,28 @@ def prepare_model_for_head_only_training(model: nn.Module, architecture: str) ->
             module.train()
 
 
+def prepare_model_for_decoder_only_training(model: nn.Module) -> None:
+    """Freeze classifier/backbone path and train only the auxiliary decoder head."""
+    model.train()
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+
+    backbone = getattr(model, "backbone", None)
+    if backbone is not None:
+        backbone.eval()
+
+    seg_head = getattr(model, "seg_head", None)
+    if seg_head is not None:
+        seg_head.train()
+        for parameter in seg_head.parameters():
+            parameter.requires_grad = True
+    lesion_weights = getattr(model, "lesion_weights", None)
+    if lesion_weights is not None:
+        lesion_weights.requires_grad = True
+
+    setattr(model, "_decoder_only", True)
+
+
 def build_optimizer(
     config: dict[str, Any],
     model: nn.Module,
@@ -158,51 +180,97 @@ def build_criterion(config: dict[str, Any]) -> nn.Module:
     raise ValueError(f"Unsupported loss '{loss_name}'. Supported: 'bce', 'focal'.")
 
 
+def _resolve_decoder_options(config: dict[str, Any]) -> tuple[str, list[int] | None]:
+    model_cfg = config["model"]
+    decoder_type = str(model_cfg.get("decoder_type", "single_block"))
+    raw_blocks = model_cfg.get("decoder_blocks")
+    decoder_blocks: list[int] | None = (
+        [int(b) for b in raw_blocks] if raw_blocks is not None else None
+    )
+    return decoder_type, decoder_blocks
+
+
 def build_model_for_training(config: dict[str, Any], device: torch.device) -> nn.Module:
     architecture = str(config["model"]["architecture"])
+    decoder_type, decoder_blocks = _resolve_decoder_options(config)
+    model_cfg = config["model"]
     return build_model(
         architecture,
-        pretrained=bool(config["model"]["pretrained"]),
-        num_outputs=int(config["model"]["num_outputs"]),
-        use_attention=bool(config["model"].get("use_attention", False)),
-        attention_mode=config["model"].get("attention_mode"),
-        use_ibn=bool(config["model"].get("use_ibn", False)),
-        grad_checkpointing=bool(config["model"].get("grad_checkpointing", False)),
-        use_aux_seg=bool(config["model"].get("use_aux_seg", False)),
-        aux_seg_block=int(config["model"].get("aux_seg_block", 2)),
+        pretrained=bool(model_cfg["pretrained"]),
+        num_outputs=int(model_cfg["num_outputs"]),
+        use_attention=bool(model_cfg.get("use_attention", False)),
+        attention_mode=model_cfg.get("attention_mode"),
+        use_ibn=bool(model_cfg.get("use_ibn", False)),
+        grad_checkpointing=bool(model_cfg.get("grad_checkpointing", False)),
+        use_aux_seg=bool(model_cfg.get("use_aux_seg", False)),
+        aux_seg_block=int(model_cfg.get("aux_seg_block", 2)),
         aux_seg_output_size=int(config["data"].get("image_size", 512)),
         aux_seg_channels=int(
-            config["model"].get(
+            model_cfg.get(
                 "aux_seg_channels",
                 config.get("data", {}).get("seg_mask_channels", 1),
             )
         ),
-        use_gated_pooling=bool(config["model"].get("use_gated_pooling", False)),
-        use_mil_attention=bool(config["model"].get("use_mil_attention", False)),
-        in_channels=int(config["model"].get("in_channels", 3)),
+        use_gated_pooling=bool(model_cfg.get("use_gated_pooling", False)),
+        use_mil_attention=bool(model_cfg.get("use_mil_attention", False)),
+        in_channels=int(model_cfg.get("in_channels", 3)),
+        decoder_type=decoder_type,
+        decoder_blocks=decoder_blocks,
+        bagnet_patch_size=int(model_cfg.get("bagnet_patch_size", 33)),
+        bagnet_patch_stride=int(model_cfg.get("bagnet_patch_stride", 8)),
+        bagnet_hidden_channels=int(model_cfg.get("bagnet_hidden_channels", 128)),
+        bagnet_depth=int(model_cfg.get("bagnet_depth", 4)),
+        bagnet_dropout=float(model_cfg.get("bagnet_dropout", 0.15)),
+        bagnet_aggregation=str(model_cfg.get("bagnet_aggregation", "mean")),
+        concept_block=int(model_cfg.get("concept_block", 4)),
+        concept_channels=int(model_cfg.get("concept_channels", 4)),
+        concept_head_hidden_channels=(
+            int(model_cfg["concept_head_hidden_channels"])
+            if model_cfg.get("concept_head_hidden_channels") is not None
+            else None
+        ),
+        concept_dropout=float(model_cfg.get("concept_dropout", 0.3)),
     ).to(device)
 
 
 def build_model_for_eval(config: dict[str, Any], device: torch.device) -> nn.Module:
+    decoder_type, decoder_blocks = _resolve_decoder_options(config)
+    model_cfg = config["model"]
     return build_model(
-        str(config["model"]["architecture"]),
+        str(model_cfg["architecture"]),
         pretrained=False,
-        num_outputs=int(config["model"]["num_outputs"]),
-        use_attention=bool(config["model"].get("use_attention", False)),
-        attention_mode=config["model"].get("attention_mode"),
-        use_ibn=bool(config["model"].get("use_ibn", False)),
-        use_aux_seg=bool(config["model"].get("use_aux_seg", False)),
-        aux_seg_block=int(config["model"].get("aux_seg_block", 2)),
-        aux_seg_output_size=int(config["model"].get("aux_seg_output_size", 512)),
+        num_outputs=int(model_cfg["num_outputs"]),
+        use_attention=bool(model_cfg.get("use_attention", False)),
+        attention_mode=model_cfg.get("attention_mode"),
+        use_ibn=bool(model_cfg.get("use_ibn", False)),
+        use_aux_seg=bool(model_cfg.get("use_aux_seg", False)),
+        aux_seg_block=int(model_cfg.get("aux_seg_block", 2)),
+        aux_seg_output_size=int(model_cfg.get("aux_seg_output_size", 512)),
         aux_seg_channels=int(
-            config["model"].get(
+            model_cfg.get(
                 "aux_seg_channels",
                 config.get("data", {}).get("seg_mask_channels", 1),
             )
         ),
-        use_gated_pooling=bool(config["model"].get("use_gated_pooling", False)),
-        use_mil_attention=bool(config["model"].get("use_mil_attention", False)),
-        in_channels=int(config["model"].get("in_channels", 3)),
+        use_gated_pooling=bool(model_cfg.get("use_gated_pooling", False)),
+        use_mil_attention=bool(model_cfg.get("use_mil_attention", False)),
+        in_channels=int(model_cfg.get("in_channels", 3)),
+        decoder_type=decoder_type,
+        decoder_blocks=decoder_blocks,
+        bagnet_patch_size=int(model_cfg.get("bagnet_patch_size", 33)),
+        bagnet_patch_stride=int(model_cfg.get("bagnet_patch_stride", 8)),
+        bagnet_hidden_channels=int(model_cfg.get("bagnet_hidden_channels", 128)),
+        bagnet_depth=int(model_cfg.get("bagnet_depth", 4)),
+        bagnet_dropout=float(model_cfg.get("bagnet_dropout", 0.15)),
+        bagnet_aggregation=str(model_cfg.get("bagnet_aggregation", "mean")),
+        concept_block=int(model_cfg.get("concept_block", 4)),
+        concept_channels=int(model_cfg.get("concept_channels", 4)),
+        concept_head_hidden_channels=(
+            int(model_cfg["concept_head_hidden_channels"])
+            if model_cfg.get("concept_head_hidden_channels") is not None
+            else None
+        ),
+        concept_dropout=float(model_cfg.get("concept_dropout", 0.3)),
     ).to(device)
 
 

@@ -26,6 +26,12 @@ ai/artifacts/checkpoints/**
 !ai/artifacts/checkpoints/
 !ai/artifacts/checkpoints/best.pt
 
+# Phase 4-E/F evaluations: ignore generated files while keeping selected decision artifacts trackable
+ai/artifacts/evaluations/*
+!ai/artifacts/evaluations/phase4e_layercam_block4_faith100_test.json
+!ai/artifacts/evaluations/phase4e_smoke_occlusion_grid8_test.json
+!ai/artifacts/evaluations/phase4e_smoke_rise256_test.json
+
 # Archived AI files
 ai/archive/
 
