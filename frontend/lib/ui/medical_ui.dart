@@ -62,6 +62,73 @@ class MedicalSectionTitle extends StatelessWidget {
   }
 }
 
+/// 제목 + 본문, 왼쪽 강조선·아이콘. 업로드·결과 등 안내 문구에 공통 사용.
+class MedicalNoticeBanner extends StatelessWidget {
+  const MedicalNoticeBanner({
+    super.key,
+    this.title,
+    required this.body,
+    this.icon = Icons.info_outline_rounded,
+  });
+
+  final String? title;
+  final String body;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: MedicalTokens.textMain,
+    );
+    final bodyStyle = theme.textTheme.bodySmall?.copyWith(
+      color: MedicalTokens.textSubtle,
+      height: 1.45,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: MedicalTokens.primarySoft.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+        border: Border.all(color: MedicalTokens.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(
+              left: BorderSide(color: MedicalTokens.primary, width: 4),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 20, color: MedicalTokens.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (title != null && title!.isNotEmpty) ...[
+                        Text(title!, style: titleStyle),
+                        const SizedBox(height: 4),
+                      ],
+                      Text(body, style: bodyStyle),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class MedicalCard extends StatelessWidget {
   const MedicalCard({
     super.key,
