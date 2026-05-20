@@ -64,6 +64,11 @@ def _gradcam_core(
     if method == "layercam":
         weights = torch.relu(grad)
         cam = torch.relu((weights * act).sum(dim=1, keepdim=True))
+    elif method == "hirescam":
+        # HiResCAM (Draelos & Carin, 2021): element-wise grad*act without
+        # global channel weight averaging. Preserves spatial fidelity better
+        # than Grad-CAM in CNNs and is provably faithful for the classifier.
+        cam = torch.relu((grad * act).sum(dim=1, keepdim=True))
     elif method == "gradcam++":
         grad_sq = grad ** 2
         grad_cu = grad ** 3
@@ -146,6 +151,44 @@ def _score_cam(
     return GradCamResult(heatmap=_normalize_cam(cam).squeeze(1))
 
 
+def _eigen_cam(
+    model: torch.nn.Module,
+    inputs: torch.Tensor,
+    layer: torch.nn.Module,
+) -> GradCamResult:
+    """Eigen-CAM (Muhammad & Yeasin, IJCNN 2020).
+
+    Forward-only attribution. Reshapes activations [C, H*W] and projects them
+    onto the first left singular vector (principal direction in channel space)
+    to obtain a single spatial map. No gradients required; classifier-faithful
+    in the sense that the dominant feature direction is highlighted.
+    """
+    activations: dict = {}
+    fwd = layer.register_forward_hook(lambda m, i, o: activations.update({"v": o.detach()}))
+    with torch.no_grad():
+        model(inputs)
+    fwd.remove()
+
+    act = activations["v"]  # [B, C, H, W]
+    B, C, H, W = act.shape
+    cam_batch = []
+    for b in range(B):
+        m = act[b].reshape(C, H * W).float()
+        m = m - m.mean(dim=1, keepdim=True)
+        u, _s, _vh = torch.linalg.svd(m, full_matrices=False)
+        # Project onto first principal component to get [1, H*W]
+        spatial = u[:, 0:1].T @ m
+        cam_b = spatial.reshape(H, W)
+        # Sign-flip so that the peak energy is positive
+        if cam_b.mean() < 0:
+            cam_b = -cam_b
+        cam_batch.append(cam_b)
+    cam = torch.stack(cam_batch).unsqueeze(1)  # [B, 1, H, W]
+    cam = F.relu(cam)
+    cam = F.interpolate(cam, size=inputs.shape[-2:], mode="bilinear", align_corners=False)
+    return GradCamResult(heatmap=_normalize_cam(cam).squeeze(1))
+
+
 def _integrated_gradients(
     model: torch.nn.Module,
     inputs: torch.Tensor,
@@ -184,6 +227,102 @@ def _integrated_gradients(
     return GradCamResult(heatmap=_normalize_cam(cam).squeeze(1))
 
 
+def generate_multiblock_cam(
+    model: torch.nn.Module,
+    inputs: torch.Tensor,
+    layers: list[torch.nn.Module],
+    weights: list[float] | None = None,
+    method: str = "layercam",
+    class_index: int | None = None,
+) -> GradCamResult:
+    """Fuse per-block CAMs into a single heatmap.
+
+    For each provided layer, computes a CAM using ``method`` from a single
+    forward+backward pass (hooks are registered on every layer simultaneously),
+    upsamples to input size, normalizes per-layer, then takes a weighted sum
+    and renormalizes. Gradient-free methods like ``eigencam`` are not supported
+    here -- use ``generate_gradcam`` per layer instead.
+
+    Args:
+        layers: ordered list of nn.Module instances (e.g. backbone.blocks[2:5]).
+        weights: per-layer weights; defaults to uniform. Length must match.
+        method: ``layercam`` (default), ``hirescam``, ``gradcam``, or ``gradcam++``.
+    """
+    if not layers:
+        raise ValueError("layers must be non-empty")
+    if weights is None:
+        weights = [1.0] * len(layers)
+    if len(weights) != len(layers):
+        raise ValueError(
+            f"weights length {len(weights)} != layers length {len(layers)}"
+        )
+    if method in ("eigencam", "scorecam", "ig"):
+        raise ValueError(f"multi-block fusion does not support method={method!r}")
+
+    activations: dict[int, torch.Tensor] = {}
+    gradients: dict[int, torch.Tensor] = {}
+
+    fwd_handles = []
+    bwd_handles = []
+    for idx, layer in enumerate(layers):
+        fwd_handles.append(
+            layer.register_forward_hook(
+                lambda m, i, o, _idx=idx: activations.__setitem__(_idx, o.detach())
+            )
+        )
+        bwd_handles.append(
+            layer.register_full_backward_hook(
+                lambda m, gi, go, _idx=idx: gradients.__setitem__(_idx, go[0].detach())
+            )
+        )
+
+    try:
+        model.zero_grad(set_to_none=True)
+        outputs = model(inputs)
+        if outputs.ndim != 2:
+            raise ValueError("Expected logits shape [batch, classes or 1].")
+        if outputs.shape[1] == 1:
+            score = outputs[:, 0].sum()
+        else:
+            target = (
+                class_index if class_index is not None else int(outputs.argmax(dim=1).item())
+            )
+            score = outputs[:, target].sum()
+        score.backward()
+    finally:
+        for h in fwd_handles + bwd_handles:
+            h.remove()
+
+    cams: list[torch.Tensor] = []
+    for idx in range(len(layers)):
+        act = activations[idx]
+        grad = gradients[idx]
+        if method == "layercam":
+            w = torch.relu(grad)
+            cam = torch.relu((w * act).sum(dim=1, keepdim=True))
+        elif method == "hirescam":
+            cam = torch.relu((grad * act).sum(dim=1, keepdim=True))
+        elif method == "gradcam++":
+            grad_sq = grad ** 2
+            grad_cu = grad ** 3
+            alpha = grad_sq / (
+                2 * grad_sq + (act * grad_cu).sum(dim=(2, 3), keepdim=True) + 1e-8
+            )
+            w = (alpha * F.relu(grad)).sum(dim=(2, 3), keepdim=True)
+            cam = F.relu((w * act).sum(dim=1, keepdim=True))
+        else:  # gradcam
+            w = grad.mean(dim=(2, 3), keepdim=True)
+            cam = torch.relu((w * act).sum(dim=1, keepdim=True))
+        cam = F.interpolate(cam, size=inputs.shape[-2:], mode="bilinear", align_corners=False)
+        cams.append(_normalize_cam(cam))
+
+    weight_sum = float(sum(weights))
+    if weight_sum <= 0:
+        raise ValueError("sum of weights must be positive")
+    fused = sum(w * c for w, c in zip(weights, cams)) / weight_sum
+    return GradCamResult(heatmap=_normalize_cam(fused).squeeze(1))
+
+
 def generate_gradcam(
     model: torch.nn.Module,
     inputs: torch.Tensor,
@@ -200,8 +339,10 @@ def generate_gradcam(
     -----------------
     gradcam        : Grad-CAM (Selvaraju et al., ICCV 2017)
     layercam       : Layer-CAM (Jiang et al., IEEE TIP 2021)
+    hirescam       : HiResCAM (Draelos & Carin, 2021)
     gradcam++      : Grad-CAM++ (Chattopadhay et al., WACV 2018)
     scorecam       : Score-CAM (Wang et al., CVPR Workshop 2020)
+    eigencam       : Eigen-CAM (Muhammad & Yeasin, IJCNN 2020)
     ig             : Integrated Gradients (Sundararajan et al., ICML 2017)
     """
     if method == "ig":
@@ -216,5 +357,7 @@ def generate_gradcam(
 
     if method == "scorecam":
         return _score_cam(model, inputs, layer, class_index, top_k=score_cam_top_k)
+    if method == "eigencam":
+        return _eigen_cam(model, inputs, layer)
 
     return _gradcam_core(model, inputs, layer, class_index, method)

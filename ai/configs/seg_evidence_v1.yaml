@@ -1,0 +1,40 @@
+project:
+  version: seg_evidence_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_r1plus_preprocessed.csv
+  image_root: data/raw
+  resize_size: 512
+  image_size: 512
+  num_workers: 4
+  persistent_workers: false
+  batch_size: 4
+  use_preprocessing: false
+  use_random_resized_crop: true
+  train_split: train
+  seg_val_fraction: 0.15
+  seg_mask_mode: composite
+  seg_mask_channels: 4
+
+model:
+  architecture: lesion_seg_evidence
+  encoder: resnet50
+  pretrained: true
+  out_channels: 4
+  decoder_channels: [256, 128, 64, 32]
+
+train:
+  seed: 42
+  device: cuda
+  epochs: 40
+  early_stopping_patience: 8
+  early_stopping_min_delta: 0.001
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  dice_weight: 0.5
+  amp: true
+  checkpoint_dir: artifacts/runs
+
+infer:
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5

@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from pprint import pprint
 
-from drscreen.settings import ensure_runtime_directories, load_app_config
-from drscreen.train.runner import describe_training_setup, run_training
+
+_REQUIRED_TRAINING_PYTHON = (3, 14)
+
+
+def _enforce_training_python() -> None:
+    if sys.version_info[:2] == _REQUIRED_TRAINING_PYTHON:
+        return
+    required = ".".join(str(part) for part in _REQUIRED_TRAINING_PYTHON)
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    executable = sys.executable
+    raise RuntimeError(
+        "Training must run on Python "
+        f"{required}; current interpreter is Python {current}: {executable}. "
+        f"Use `py -{required} -m drscreen.cli.train --config <config>`."
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,6 +31,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    _enforce_training_python()
+
+    from drscreen.settings import ensure_runtime_directories, load_app_config
+    from drscreen.train.runner import describe_training_setup, run_training
+
     config_path = Path(args.config).resolve()
     project_root = config_path.parents[1]
     base_path = None

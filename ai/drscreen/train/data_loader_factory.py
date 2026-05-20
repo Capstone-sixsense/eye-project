@@ -7,10 +7,13 @@ import torch
 from torch.utils.data import DataLoader
 
 from drscreen.data.mask_providers import (
+    CompositeMaskProvider,
     IDRiDMaskProvider,
     IDRiDPerLesionMaskProvider,
     LesionMaskProvider,
+    MAPLESTrainMaskProvider,
     NullMaskProvider,
+    TJDRMaskProvider,
 )
 from drscreen.data.datasets import FDAManifestDataset, ManifestDataset
 from drscreen.data.transforms import build_eval_transform, build_train_transform
@@ -41,6 +44,9 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
 def _build_mask_provider(
     config: dict[str, Any],
     seg_mask_dir,
+    maples_ann_dir=None,
+    tjdr_root=None,
+    raw_root=None,
 ) -> LesionMaskProvider:
     data_cfg = config["data"]
     model_cfg = config.get("model", {})
@@ -52,9 +58,23 @@ def _build_mask_provider(
     if mask_mode in {"none", "null", "off"}:
         return NullMaskProvider(channels=seg_channels)
     if mask_mode in {"per_lesion", "per-lesion", "multi", "multichannel"}:
-        return IDRiDPerLesionMaskProvider(seg_mask_dir)
+        return IDRiDPerLesionMaskProvider(seg_mask_dir, raw_root=raw_root)
     if mask_mode in {"union", "binary"}:
-        return IDRiDMaskProvider(seg_mask_dir)
+        return IDRiDMaskProvider(seg_mask_dir, raw_root=raw_root)
+    if mask_mode in {"composite", "idrid_maples", "idrid+maples", "idrid_maples_tjdr", "idrid+maples+tjdr"}:
+        if maples_ann_dir is None:
+            raise ValueError(
+                "seg_mask_mode='composite' requires a resolved MAPLES annotations directory"
+            )
+        if seg_channels == 4:
+            idrid: LesionMaskProvider = IDRiDPerLesionMaskProvider(seg_mask_dir, raw_root=raw_root)
+        else:
+            idrid = IDRiDMaskProvider(seg_mask_dir, raw_root=raw_root)
+        maples = MAPLESTrainMaskProvider(maples_ann_dir, channels=seg_channels, raw_root=raw_root)
+        providers: list[LesionMaskProvider] = [idrid, maples]
+        if tjdr_root is not None:
+            providers.append(TJDRMaskProvider(tjdr_root, channels=seg_channels, raw_root=raw_root))
+        return CompositeMaskProvider(providers)
     raise ValueError(f"Unsupported data.seg_mask_mode: {mask_mode!r}")
 
 
@@ -78,8 +98,32 @@ def _build_datasets(
         if seg_mask_dir_cfg
         else project_root / "data" / "raw" / "IDRiD" / "A. Segmentation" / "2. All Segmentation Groundtruths"
     )
+    maples_ann_dir_cfg = data_cfg.get("maples_annotations_dir")
+    maples_ann_dir = (
+        resolve_project_path(project_root, maples_ann_dir_cfg)
+        if maples_ann_dir_cfg
+        else project_root / "data" / "raw" / "MAPLES-DR" / "AdditionalData" / "annotations"
+    )
+    tjdr_root_cfg = data_cfg.get("tjdr_root")
+    tjdr_root = (
+        resolve_project_path(project_root, tjdr_root_cfg)
+        if tjdr_root_cfg
+        else project_root / "data" / "raw" / "TJDR"
+    )
+    concept_label_path_cfg = data_cfg.get("concept_label_path")
+    concept_label_path = (
+        resolve_project_path(project_root, concept_label_path_cfg)
+        if concept_label_path_cfg
+        else None
+    )
     seg_mask_size = int(data_cfg.get("image_size", 512))
-    mask_provider = _build_mask_provider(config, seg_mask_dir)
+    mask_provider = _build_mask_provider(
+        config,
+        seg_mask_dir,
+        maples_ann_dir=maples_ann_dir,
+        tjdr_root=tjdr_root,
+        raw_root=image_root,
+    )
 
     use_fda = bool(data_cfg.get("use_fda", False))
     if use_fda:
@@ -88,17 +132,34 @@ def _build_datasets(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform, fda_alpha=fda_alpha,
             seg_mask_size=seg_mask_size, mask_provider=mask_provider,
+            concept_label_path=concept_label_path,
         )
     else:
         train_dataset = ManifestDataset(
             manifest_path=manifest_path, image_root=image_root,
             split=data_cfg["train_split"], transform=train_transform,
             seg_mask_size=seg_mask_size, mask_provider=mask_provider,
+            concept_label_path=concept_label_path,
         )
     val_dataset = ManifestDataset(
         manifest_path=manifest_path, image_root=image_root,
         split=data_cfg["val_split"], transform=eval_transform,
+        concept_label_path=concept_label_path,
     )
+
+    if bool(data_cfg.get("train_mask_valid_only", False)):
+        valid_positions: list[int] = []
+        for iloc_pos, row in train_dataset.frame.iterrows():
+            _mask, is_valid = train_dataset._mask_provider.load(  # noqa: SLF001 - internal factory filter
+                str(row["image_path"]),
+                str(row["domain"]) if "domain" in train_dataset.frame.columns else "",
+                seg_mask_size,
+            )
+            if is_valid:
+                valid_positions.append(iloc_pos)
+        train_dataset.frame = train_dataset.frame.iloc[valid_positions].reset_index(drop=True)
+        if isinstance(train_dataset, FDAManifestDataset):
+            train_dataset.rebuild_domain_indices()
 
     if excluded_domains:
         for split_name, dataset in (("train", train_dataset), ("val", val_dataset)):

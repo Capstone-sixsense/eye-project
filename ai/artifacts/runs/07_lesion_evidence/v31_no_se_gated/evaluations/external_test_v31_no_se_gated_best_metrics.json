@@ -1,0 +1,66 @@
+{
+  "project_root": ".",
+  "config_path": "configs/base.yaml",
+  "manifest_path": "data/processed/manifest_preprocessed.csv",
+  "split": "external_test",
+  "rows": 12522,
+  "device": "cuda",
+  "checkpoint_path": "artifacts/checkpoints/best.pt",
+  "label_names": [
+    "normal",
+    "abnormal"
+  ],
+  "metrics": {
+    "loss": 0.09702855840602839,
+    "accuracy": 0.8330138955438429,
+    "auroc": 0.9160364173597942,
+    "f1": 0.8268896431823827,
+    "sensitivity": 0.7982736572890026,
+    "specificity": 0.8676986913501437,
+    "precision": 0.8576335222393955,
+    "threshold": 0.35,
+    "true_positive": 4994,
+    "true_negative": 5437,
+    "false_positive": 829,
+    "false_negative": 1262,
+    "num_examples": 12522,
+    "positive_examples": 6256,
+    "negative_examples": 6266
+  },
+  "optimal_threshold": 0.35,
+  "metrics_at_optimal_threshold": {
+    "loss": 0.09702855840602839,
+    "accuracy": 0.8330138955438429,
+    "auroc": 0.9160364173597942,
+    "f1": 0.8268896431823827,
+    "sensitivity": 0.7982736572890026,
+    "specificity": 0.8676986913501437,
+    "precision": 0.8576335222393955,
+    "threshold": 0.35,
+    "true_positive": 4994,
+    "true_negative": 5437,
+    "false_positive": 829,
+    "false_negative": 1262,
+    "num_examples": 12522,
+    "positive_examples": 6256,
+    "negative_examples": 6266
+  },
+  "domain_breakdown": {
+    "DDR": {
+      "accuracy": 0.8330138955438429,
+      "auroc": 0.9160364173597942,
+      "f1": 0.8268896431823827,
+      "sensitivity": 0.7982736572890026,
+      "specificity": 0.8676986913501437,
+      "precision": 0.8576335222393955,
+      "threshold": 0.35,
+      "true_positive": 4994,
+      "true_negative": 5437,
+      "false_positive": 829,
+      "false_negative": 1262,
+      "num_examples": 12522,
+      "positive_examples": 6256,
+      "negative_examples": 6266
+    }
+  }
+}

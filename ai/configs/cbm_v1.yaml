@@ -1,0 +1,50 @@
+project:
+  version: cbm_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_preprocessed.csv
+  concept_label_path: data/processed/lesion_concept_labels.csv
+  seg_mask_mode: composite
+  seg_mask_channels: 4
+  train_mask_valid_only: false
+  batch_size: 4
+  num_workers: 4
+  persistent_workers: false
+
+model:
+  architecture: concept_bottleneck
+  pretrained: false
+  num_outputs: 1
+  use_attention: false
+  attention_mode: none
+  aux_seg_channels: 4
+  use_aux_seg: false
+  use_gated_pooling: false
+  use_mil_attention: false
+  concept_block: 4
+  concept_channels: 4
+  concept_dropout: 0.3
+
+train:
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 8
+  head_learning_rate: 0.0001
+  backbone_learning_rate: 0.00002
+  weight_decay: 0.0001
+  lambda_aux_seg: 0.3
+  lambda_concept: 0.5
+  seg_loss_type: dice_bce
+  min_checkpoint_sensitivity: 0.78
+  early_stopping_patience: 3
+  early_stopping_min_delta: 0.001
+  amp: true
+  pretrained_backbone_path: artifacts/runs/10_grounded_classifier/cbm_v1_stage1/checkpoints/best.pt
+
+infer:
+  checkpoint_path: artifacts/runs/10_grounded_classifier/cbm_v1/checkpoints/best.pt
+  threshold: 0.5
+  gradcam_method: layercam
+  evidence_type: grounded_classifier

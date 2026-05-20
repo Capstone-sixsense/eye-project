@@ -65,4 +65,7 @@ infer:
   threshold: 0.35
   gradcam_method: layercam
   gradcam_target_block: 4
+  heatmap_activation_threshold: 0.25
+  heatmap_gamma: 0.65
+  heatmap_alpha: 0.86
   evidence_type: cam_research

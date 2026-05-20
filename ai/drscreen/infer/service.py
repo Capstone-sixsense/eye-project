@@ -132,11 +132,14 @@ def _load_xai_eval_metrics(
 ) -> dict[str, Any] | None:
     block_label = _xai_block_label(infer_cfg)
     split = str(infer_cfg.get("xai_eval_split", "test"))
-    path = (
-        get_run_evaluation_dir(project_root, version)
-        / f"xai_iou_{version}_{block_label}_{split}.json"
-    )
-    if not path.exists():
+    method = str(infer_cfg.get("gradcam_method", "gradcam")).strip().lower() or "gradcam"
+    eval_dir = get_run_evaluation_dir(project_root, version)
+    candidates = [
+        eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
+        eval_dir / f"xai_iou_{version}_{block_label}_{split}.json",
+    ]
+    path = next((candidate for candidate in candidates if candidate.exists()), None)
+    if path is None:
         return None
 
     try:
@@ -184,8 +187,29 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest_label).astype(np.float32)
 
 
+def _config_float(
+    config: dict[str, Any] | None,
+    key: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if config is None:
+        return default
+    try:
+        value = float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(value):
+        return default
+    return float(np.clip(value, minimum, maximum))
+
+
 def _render_gradcam_overlay(
-    image: Image.Image, heatmap: torch.Tensor
+    image: Image.Image,
+    heatmap: torch.Tensor,
+    infer_cfg: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, bool]:
     normalized = heatmap.detach().cpu().clamp(0.0, 1.0).numpy().astype(np.float32)
     retina_mask = _build_retina_mask(image)
@@ -196,14 +220,27 @@ def _render_gradcam_overlay(
     )
     resized *= retina_mask
 
-    # Suppress weak activations so the overlay highlights only strong evidence regions.
-    activation_threshold = 0.45
+    # Suppress weak activations while keeping enough mid-strength evidence visible.
+    activation_threshold = _config_float(
+        infer_cfg,
+        "heatmap_activation_threshold",
+        0.25,
+        minimum=0.0,
+        maximum=0.95,
+    )
     emphasized = np.clip(
         (resized - activation_threshold) / (1.0 - activation_threshold),
         0.0,
         1.0,
     )
-    emphasized = np.power(emphasized, 0.8, dtype=np.float32)
+    heatmap_gamma = _config_float(
+        infer_cfg,
+        "heatmap_gamma",
+        0.65,
+        minimum=0.1,
+        maximum=3.0,
+    )
+    emphasized = np.power(emphasized, heatmap_gamma, dtype=np.float32)
 
     retina_pixel_count = float(retina_mask.sum())
     if retina_pixel_count > 0:
@@ -217,7 +254,14 @@ def _render_gradcam_overlay(
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
 
     original = np.asarray(image.convert("RGB"), dtype=np.float32)
-    alpha_mask = emphasized[..., None] * 0.82
+    heatmap_alpha = _config_float(
+        infer_cfg,
+        "heatmap_alpha",
+        0.86,
+        minimum=0.0,
+        maximum=1.0,
+    )
+    alpha_mask = emphasized[..., None] * heatmap_alpha
     overlay = (original * (1.0 - alpha_mask)) + (heat_rgb * alpha_mask)
     return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
@@ -399,6 +443,26 @@ class InferenceSession:
             aux_seg_channels=int(effective_config["model"].get("aux_seg_channels", 1)),
             use_gated_pooling=bool(effective_config["model"].get("use_gated_pooling", False)),
             use_mil_attention=bool(effective_config["model"].get("use_mil_attention", False)),
+            decoder_type=str(effective_config["model"].get("decoder_type", "single_block")),
+            decoder_blocks=(
+                [int(block) for block in effective_config["model"]["decoder_blocks"]]
+                if effective_config["model"].get("decoder_blocks") is not None
+                else None
+            ),
+            bagnet_patch_size=int(effective_config["model"].get("bagnet_patch_size", 33)),
+            bagnet_patch_stride=int(effective_config["model"].get("bagnet_patch_stride", 8)),
+            bagnet_hidden_channels=int(effective_config["model"].get("bagnet_hidden_channels", 128)),
+            bagnet_depth=int(effective_config["model"].get("bagnet_depth", 4)),
+            bagnet_dropout=float(effective_config["model"].get("bagnet_dropout", 0.15)),
+            bagnet_aggregation=str(effective_config["model"].get("bagnet_aggregation", "mean")),
+            concept_block=int(effective_config["model"].get("concept_block", 4)),
+            concept_channels=int(effective_config["model"].get("concept_channels", 4)),
+            concept_head_hidden_channels=(
+                int(effective_config["model"]["concept_head_hidden_channels"])
+                if effective_config["model"].get("concept_head_hidden_channels") is not None
+                else None
+            ),
+            concept_dropout=float(effective_config["model"].get("concept_dropout", 0.3)),
         ).to(device)
         load_state_from_checkpoint(model, checkpoint)
         model.eval()
@@ -561,6 +625,21 @@ class InferenceSession:
             except Exception:
                 xai_error_code = "XAI_002"
                 evidence_warning = "LESION_EVIDENCE_UNAVAILABLE"
+        elif evidence_type in {"grounded_classifier", "bagnet", "patch_logits"}:
+            evidence_type = "grounded_classifier"
+            try:
+                if not hasattr(self.model, "get_evidence_map"):
+                    raise ValueError("Model does not expose get_evidence_map().")
+                evidence = self.model.get_evidence_map(image_tensor.unsqueeze(0))[0, 0]
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    evidence,
+                    infer_cfg,
+                )
+                evidence_warning = "GROUNDED_EVIDENCE_LOW_CONFIDENCE" if xai_no_region else None
+            except Exception:
+                xai_error_code = "XAI_003"
+                evidence_warning = "GROUNDED_EVIDENCE_UNAVAILABLE"
         else:
             evidence_type = "cam_research"
             try:
@@ -575,7 +654,11 @@ class InferenceSession:
                     target_layer=target_layer,
                     method=gradcam_method,
                 )
-                heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    gradcam.heatmap[0],
+                    infer_cfg,
+                )
             except Exception:
                 xai_error_code = "XAI_001"
 
@@ -587,7 +670,7 @@ class InferenceSession:
             prediction_path = _build_timestamped_path(self.prediction_dir, stem, ".json")
             if heatmap_overlay is not None:
                 heatmap_path = _build_timestamped_path(self.heatmap_dir, stem, ".png")
-                if evidence_type == "lesion_segmentation":
+                if evidence_type in {"lesion_segmentation", "grounded_classifier"}:
                     lesion_map_path = heatmap_path
 
         payload = InferencePayload(

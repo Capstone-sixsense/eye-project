@@ -49,6 +49,93 @@ def resolve_interpolation_mode(name: str) -> InterpolationMode:
 
 
 def get_model_profile(architecture: str) -> ModelProfile:
+    if architecture == "concept_bottleneck":
+        return ModelProfile(
+            architecture=architecture,
+            resize_size=512,
+            crop_size=512,
+            interpolation="bicubic",
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+            num_params=24_000_000,
+            gflops=10.0,
+            optimizer="adamw",
+            scheduler="cosine",
+            batch_size=4,
+            head_learning_rate=2e-4,
+            backbone_learning_rate=4e-5,
+            weight_decay=1e-4,
+            head_epochs=3,
+            finetune_epochs=8,
+            warmup_epochs=1,
+            gradient_clip_norm=1.0,
+            use_attention=False,
+            gradcam_target_layer="concept_map",
+            rationale=(
+                "EfficientNet-B5 backbone with a spatial MA/HE/EX/SE concept head. "
+                "The abnormal logit is a linear function of pooled concept logits, "
+                "so the evidence map is in the classifier forward path."
+            ),
+        )
+
+    if architecture == "sparse_bagnet":
+        return ModelProfile(
+            architecture=architecture,
+            resize_size=512,
+            crop_size=512,
+            interpolation="bilinear",
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+            num_params=2_000_000,
+            gflops=2.0,
+            optimizer="adamw",
+            scheduler="cosine",
+            batch_size=16,
+            head_learning_rate=5e-4,
+            backbone_learning_rate=1e-4,
+            weight_decay=1e-4,
+            head_epochs=0,
+            finetune_epochs=12,
+            warmup_epochs=1,
+            gradient_clip_norm=1.0,
+            use_attention=False,
+            gradcam_target_layer="patch_logits",
+            rationale=(
+                "Sparse BagNet-style local-evidence classifier. The image logit is "
+                "computed from local patch logits, so the evidence map is part of "
+                "the forward path instead of a post-hoc attribution."
+            ),
+        )
+
+    if architecture == "deeplabv3_resnet50":
+        return ModelProfile(
+            architecture=architecture,
+            resize_size=512,
+            crop_size=512,
+            interpolation="bilinear",
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+            num_params=39_000_000,
+            gflops=178.7,
+            optimizer="adamw",
+            scheduler="cosine",
+            batch_size=2,
+            head_learning_rate=1e-4,
+            backbone_learning_rate=1e-5,
+            weight_decay=1e-4,
+            head_epochs=0,
+            finetune_epochs=40,
+            warmup_epochs=0,
+            gradient_clip_norm=1.0,
+            use_attention=False,
+            gradcam_target_layer="",
+            rationale=(
+                "Phase 4-G stronger segmentation baseline. DeepLabV3 adds atrous "
+                "context aggregation on an ImageNet-pretrained ResNet50 backbone while "
+                "keeping the evidence path classifier-independent."
+            ),
+        )
+
     if architecture == "efficientnet_b5":
         # timm EfficientNet-B5 with ECA replacing SE blocks.
         # Input config derived from timm data_config: 448x448, bicubic, ImageNet stats.
