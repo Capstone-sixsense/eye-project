@@ -187,8 +187,29 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest_label).astype(np.float32)
 
 
+def _config_float(
+    config: dict[str, Any] | None,
+    key: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if config is None:
+        return default
+    try:
+        value = float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(value):
+        return default
+    return float(np.clip(value, minimum, maximum))
+
+
 def _render_gradcam_overlay(
-    image: Image.Image, heatmap: torch.Tensor
+    image: Image.Image,
+    heatmap: torch.Tensor,
+    infer_cfg: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, bool]:
     normalized = heatmap.detach().cpu().clamp(0.0, 1.0).numpy().astype(np.float32)
     retina_mask = _build_retina_mask(image)
@@ -199,14 +220,27 @@ def _render_gradcam_overlay(
     )
     resized *= retina_mask
 
-    # Suppress weak activations so the overlay highlights only strong evidence regions.
-    activation_threshold = 0.45
+    # Suppress weak activations while keeping enough mid-strength evidence visible.
+    activation_threshold = _config_float(
+        infer_cfg,
+        "heatmap_activation_threshold",
+        0.25,
+        minimum=0.0,
+        maximum=0.95,
+    )
     emphasized = np.clip(
         (resized - activation_threshold) / (1.0 - activation_threshold),
         0.0,
         1.0,
     )
-    emphasized = np.power(emphasized, 0.8, dtype=np.float32)
+    heatmap_gamma = _config_float(
+        infer_cfg,
+        "heatmap_gamma",
+        0.65,
+        minimum=0.1,
+        maximum=3.0,
+    )
+    emphasized = np.power(emphasized, heatmap_gamma, dtype=np.float32)
 
     retina_pixel_count = float(retina_mask.sum())
     if retina_pixel_count > 0:
@@ -220,7 +254,14 @@ def _render_gradcam_overlay(
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
 
     original = np.asarray(image.convert("RGB"), dtype=np.float32)
-    alpha_mask = emphasized[..., None] * 0.82
+    heatmap_alpha = _config_float(
+        infer_cfg,
+        "heatmap_alpha",
+        0.86,
+        minimum=0.0,
+        maximum=1.0,
+    )
+    alpha_mask = emphasized[..., None] * heatmap_alpha
     overlay = (original * (1.0 - alpha_mask)) + (heat_rgb * alpha_mask)
     return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
@@ -590,7 +631,11 @@ class InferenceSession:
                 if not hasattr(self.model, "get_evidence_map"):
                     raise ValueError("Model does not expose get_evidence_map().")
                 evidence = self.model.get_evidence_map(image_tensor.unsqueeze(0))[0, 0]
-                heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, evidence)
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    evidence,
+                    infer_cfg,
+                )
                 evidence_warning = "GROUNDED_EVIDENCE_LOW_CONFIDENCE" if xai_no_region else None
             except Exception:
                 xai_error_code = "XAI_003"
@@ -609,7 +654,11 @@ class InferenceSession:
                     target_layer=target_layer,
                     method=gradcam_method,
                 )
-                heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    gradcam.heatmap[0],
+                    infer_cfg,
+                )
             except Exception:
                 xai_error_code = "XAI_001"
 
