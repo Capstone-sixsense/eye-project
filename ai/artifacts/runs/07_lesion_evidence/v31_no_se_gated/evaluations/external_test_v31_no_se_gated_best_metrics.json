@@ -1,11 +1,11 @@
 {
-  "project_root": "C:\\Users\\dg203\\Desktop\\eye-project\\ai",
-  "config_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\configs\\base.yaml",
-  "manifest_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\processed\\manifest_preprocessed.csv",
+  "project_root": ".",
+  "config_path": "configs/base.yaml",
+  "manifest_path": "data/processed/manifest_preprocessed.csv",
   "split": "external_test",
   "rows": 12522,
   "device": "cuda",
-  "checkpoint_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\artifacts\\checkpoints\\best.pt",
+  "checkpoint_path": "artifacts/checkpoints/best.pt",
   "label_names": [
     "normal",
     "abnormal"

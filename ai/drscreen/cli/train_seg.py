@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    args = parse_args()
     _enforce_training_python()
 
     from drscreen.settings import ensure_runtime_directories, load_app_config
@@ -37,7 +38,6 @@ def main() -> None:
         run_segmentation_training,
     )
 
-    args = parse_args()
     config_path = Path(args.config).resolve()
     project_root = config_path.parents[1]
     base_path = None
