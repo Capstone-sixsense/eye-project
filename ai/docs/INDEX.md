@@ -28,6 +28,10 @@ The primary documentation has been consolidated into `AI_HANDOFF.md`.
 6. **[SPRINT3_Devlog.md](./SPRINT3_Devlog.md)**
    - Sprint 3 retrospective / submission summary for the AI part.
 
+7. **[SPRINT4_Devlog.md](./SPRINT4_Devlog.md)**
+   - Sprint 4 retrospective / submission summary for the AI part.
+   - Summarizes the v31 active decision, XAI/shortcut diagnostics, TJDR integration, and Sprint 5 carry-over items.
+
 ---
 
 **Notes:**
