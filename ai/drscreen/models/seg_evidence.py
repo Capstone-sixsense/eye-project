@@ -53,14 +53,27 @@ class LesionSegEvidence(nn.Module):
         decoder_channels: tuple[int, int, int, int] = (256, 128, 64, 32),
     ) -> None:
         super().__init__()
+        self.encoder_name = encoder
+        self.out_channels = int(out_channels)
+        self._is_deeplab = encoder == "deeplabv3_resnet50"
+
+        if self._is_deeplab:
+            backbone_weights = models.ResNet50_Weights.DEFAULT if pretrained else None
+            self.deeplab = models.segmentation.deeplabv3_resnet50(
+                weights=None,
+                weights_backbone=backbone_weights,
+                num_classes=self.out_channels,
+                aux_loss=False,
+            )
+            return
+
         if encoder != "resnet50":
-            raise ValueError("LesionSegEvidence currently supports encoder='resnet50'")
+            raise ValueError(
+                "LesionSegEvidence supports encoder='resnet50' or 'deeplabv3_resnet50'"
+            )
 
         weights = models.ResNet50_Weights.DEFAULT if pretrained else None
         backbone = models.resnet50(weights=weights)
-        self.encoder_name = encoder
-        self.out_channels = int(out_channels)
-
         self.stem = nn.Sequential(
             backbone.conv1,
             backbone.bn1,
@@ -81,6 +94,18 @@ class LesionSegEvidence(nn.Module):
         self.head = nn.Conv2d(d1, self.out_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._is_deeplab:
+            out = self.deeplab(x)
+            logits = out["out"] if isinstance(out, dict) else out
+            if logits.shape[-2:] != x.shape[-2:]:
+                logits = F.interpolate(
+                    logits,
+                    size=x.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            return logits
+
         input_size = x.shape[-2:]
         x0 = self.stem(x)       # 1/2
         x1 = self.layer1(self.pool(x0))  # 1/4

@@ -61,6 +61,7 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "seg_evidence_v1": "09_evidence_segmentation",
     "seg_evidence_v2_focal_tversky": "09_evidence_segmentation",
     "seg_evidence_v3_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v4_deeplab_tjdr": "09_evidence_segmentation",
     "v31_dfr_v1": "10_grounded_classifier",
     "bagnet_v1_p33_r256": "10_grounded_classifier",
     "bagnet_v1_p65_r512": "10_grounded_classifier",

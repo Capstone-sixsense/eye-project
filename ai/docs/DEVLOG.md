@@ -8,6 +8,59 @@
 
 ---
 
+## 2026-05-20 Phase 4-G G-2 — DeepLabV3 stronger segmenter baseline
+
+### 목적
+
+`seg_evidence_v3_tjdr`는 IDRiD/TJDR에서는 개선됐지만 MAPLES에서 실패했다.
+따라서 Phase 4-G의 G-2 항목대로 stronger encoder baseline을 확인했다.
+
+### 구현
+
+- `drscreen/models/seg_evidence.py`: `encoder: deeplabv3_resnet50` 분기 추가.
+- `drscreen/models/profiles.py`: DeepLabV3-ResNet50 profile 추가.
+- `configs/seg_evidence_v4_deeplab_tjdr.yaml`: v3와 같은 preprocessed manifest와 composite mask provider를 쓰되, 모델만 DeepLabV3-ResNet50으로 변경.
+- `drscreen/train/seg_runner.py`: segmentation evidence 학습에 `early_stopping_patience` / `early_stopping_min_delta` 추가. 일반 분류 학습에는 이미 같은 조기종료 설정이 있었다.
+
+### 결과
+
+`seg_evidence_v4_deeplab_tjdr`는 epoch 11에서 best val mDice 0.1506을 기록했고, epoch 36까지 best가 갱신되지 않아 수동 중단했다.
+이후 같은 상황을 자동으로 처리하도록 `train_seg`에 조기종료를 넣었다.
+
+Aligned eval at threshold 0.5:
+
+| Eval set | N | mDice | mIoU | union Dice | union IoU |
+|---|---:|---:|---:|---:|---:|
+| IDRiD test | 27 | 0.2445 | 0.1603 | 0.4217 | 0.2727 |
+| MAPLES test | 60 | 0.0096 | 0.0054 | 0.0227 | 0.0126 |
+| TJDR test | 113 | 0.2543 | 0.1860 | 0.3335 | 0.2358 |
+
+Threshold sweep:
+
+| Eval set | Best threshold | 기준 | mDice | union IoU |
+|---|---:|---|---:|---:|
+| IDRiD test | 0.25 | mDice | 0.2460 | 0.2736 |
+| IDRiD test | 0.35 | union IoU | 0.2456 | 0.2739 |
+| MAPLES test | 0.05 | mDice / union IoU | 0.0121 | 0.0159 |
+| TJDR test | 0.45 | mDice | 0.2547 | 0.2357 |
+| TJDR test | 0.65 | union IoU | 0.2535 | 0.2364 |
+
+### 결론
+
+DeepLabV3는 IDRiD를 v3보다 개선했지만, TJDR은 v3보다 낮고 MAPLES는 여전히 mDice 0.05 gate에 크게 못 미친다.
+따라서 v4는 promotion 대상이 아니며, MAPLES failure는 threshold 문제가 아니라 domain/representation 문제라는 기존 결론을 유지한다.
+배포는 v31로 유지한다.
+
+근거:
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_eval_idrid_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_eval_maples_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_eval_tjdr_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_threshold_sweep_idrid_maples_tjdr_aligned_eval.json`
+- `.omc/research/phase4g_deeplab_tjdr_result.json`
+
+---
+
 ## 2026-05-19 Mask preprocessing geometry fix — TJDR v3 aligned retrain
 
 ### 목적
@@ -72,6 +125,18 @@ aligned-eval 결과:
 | MAPLES test | 60 | 0.0051 | 0.0028 | 0.0130 | 0.0071 |
 | TJDR test | 113 | 0.3524 | 0.2713 | 0.4634 | 0.3490 |
 
+Threshold sweep 결과:
+
+| Eval set | 기준 | Best threshold | mDice | union IoU |
+|---|---|---:|---:|---:|
+| IDRiD test | mDice / union IoU | 0.05 | 0.2419 | 0.2674 |
+| MAPLES test | mDice / union IoU | 0.05 | 0.0070 | 0.0091 |
+| TJDR test | mDice | 0.40 | 0.3533 | 0.3479 |
+| TJDR test | union IoU | 0.50 | 0.3524 | 0.3490 |
+
+해석: TJDR은 0.4~0.5 threshold에서 안정적이고, 현재 `infer.lesion_threshold: 0.5`는 union IoU 기준으로 타당하다.
+IDRiD는 낮은 threshold에서 좋아지지만, MAPLES는 threshold를 0.05까지 낮춰도 mDice 0.007 수준이라 threshold calibration 문제가 아니라 domain/representation 문제로 본다.
+
 `seg_evidence_v2_focal_tversky`는 geometry fix 이후 재학습하지 않고 aligned eval만 다시 돌렸다.
 
 | Eval set | N | mDice | mIoU | union Dice | union IoU |
@@ -95,6 +160,8 @@ aligned-eval 결과:
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v3_tjdr/evaluations/seg_eval_idrid_test_aligned_eval.json`
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v3_tjdr/evaluations/seg_eval_maples_test_aligned_eval.json`
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v3_tjdr/evaluations/seg_eval_tjdr_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v3_tjdr/evaluations/seg_threshold_sweep_idrid_maples_tjdr_aligned_eval.json`
+- `.omc/research/phase4g_tjdr_threshold_sweep.json`
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v2_focal_tversky/evaluations/seg_eval_idrid_test_aligned_eval.json`
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v2_focal_tversky/evaluations/seg_eval_maples_test_aligned_eval.json`
 

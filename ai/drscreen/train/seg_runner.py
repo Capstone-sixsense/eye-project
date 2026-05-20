@@ -196,6 +196,7 @@ def _build_loaders(
     num_workers = int(data_cfg.get("num_workers", 0))
     persistent_workers = bool(data_cfg.get("persistent_workers", False)) and num_workers > 0
     generator = torch.Generator().manual_seed(int(config["train"].get("seed", 42)))
+    drop_last = bool(data_cfg.get("drop_last", False))
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -204,6 +205,7 @@ def _build_loaders(
         pin_memory=device.type == "cuda",
         persistent_workers=persistent_workers,
         generator=generator,
+        drop_last=drop_last,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -362,6 +364,12 @@ def run_segmentation_training(
     best_epoch = 0
     history: list[dict[str, Any]] = []
     epochs = int(config["train"].get("epochs", 40))
+    es_patience = int(config["train"].get("early_stopping_patience", 0))
+    es_min_delta = float(config["train"].get("early_stopping_min_delta", 0.0))
+    es_best_score = -1.0
+    es_no_improve = 0
+    stopped_early = False
+    early_stop_epoch: int | None = None
     for epoch in range(1, epochs + 1):
         train_metrics = _run_epoch(
             model,
@@ -390,6 +398,14 @@ def run_segmentation_training(
             **{f"val_{k}": v for k, v in val_metrics.items()},
         }
         history.append(record)
+        print(
+            "epoch "
+            f"{epoch}/{epochs} "
+            f"train_loss={train_metrics.get('loss'):.4f} "
+            f"val_loss={val_metrics.get('loss'):.4f} "
+            f"val_mdice={val_metrics.get('mdice')}",
+            flush=True,
+        )
 
         payload = {
             "epoch": epoch,
@@ -409,6 +425,23 @@ def run_segmentation_training(
             best_epoch = epoch
             torch.save(payload, best_path)
 
+        if es_patience > 0:
+            if score > es_best_score + es_min_delta:
+                es_best_score = score
+                es_no_improve = 0
+            else:
+                es_no_improve += 1
+                if es_no_improve >= es_patience:
+                    stopped_early = True
+                    early_stop_epoch = epoch
+                    print(
+                        "early stopping "
+                        f"at epoch {epoch}: val_mdice did not improve by "
+                        f"{es_min_delta:.4f} for {es_patience} epochs",
+                        flush=True,
+                    )
+                    break
+
     summary = {
         "project_root": str(project_root),
         "config_path": str(config_path),
@@ -421,6 +454,10 @@ def run_segmentation_training(
         "seg_loss_type": str(config["train"].get("seg_loss_type", "dice_bce")),
         "best_epoch": best_epoch,
         "best_val_mdice": best_val_mdice if best_val_mdice >= 0 else None,
+        "stopped_early": stopped_early,
+        "early_stop_epoch": early_stop_epoch,
+        "early_stopping_patience": es_patience,
+        "early_stopping_min_delta": es_min_delta,
         "best_checkpoint_path": str(best_path),
         "last_checkpoint_path": str(last_path),
         "history": history,
