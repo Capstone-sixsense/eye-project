@@ -1,6 +1,6 @@
 {
   "version": "v31_no_se_gated",
-  "checkpoint_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\artifacts\\checkpoints\\best.pt",
+  "checkpoint_path": "artifacts/checkpoints/best.pt",
   "gradcam_method": "layercam",
   "target_block": "block4",
   "target_blocks": null,
