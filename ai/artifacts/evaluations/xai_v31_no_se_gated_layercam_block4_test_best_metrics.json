@@ -1,0 +1,17 @@
+{
+  "project_version": "v31_no_se_gated",
+  "checkpoint_stem": "best",
+  "gradcam_method": "layercam",
+  "target_block": "block4",
+  "split": "test",
+  "n_images": 27,
+  "source_artifact": "ai/artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/xai_iou_v31_no_se_gated_layercam_block4_test.json",
+  "metrics": {
+    "xai_pointing_game": 0.37037037037037035,
+    "xai_auprc": 0.140883963517863,
+    "xai_auc_iou": 0.049625316047074194,
+    "xai_iou_top10": 0.09650086052701816,
+    "xai_iou_top20": 0.07844898309280657,
+    "xai_iou_top30": 0.06715125236385565
+  }
+}

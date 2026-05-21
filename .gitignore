@@ -29,6 +29,7 @@ ai/artifacts/evaluations/*
 !ai/artifacts/evaluations/phase4e_layercam_block4_faith100_test.json
 !ai/artifacts/evaluations/phase4e_smoke_occlusion_grid8_test.json
 !ai/artifacts/evaluations/phase4e_smoke_rise256_test.json
+!ai/artifacts/evaluations/xai_*_best_metrics.json
 
 # Archived AI files
 ai/archive/

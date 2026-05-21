@@ -82,6 +82,18 @@ def _mean_metric(section: Any) -> float | None:
     return _as_valid_threshold(section.get("mean"))
 
 
+def _as_non_negative_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
 def _xai_block_label(infer_cfg: dict[str, Any]) -> str:
     raw = infer_cfg.get("gradcam_target_block")
     if raw is None:
@@ -134,18 +146,44 @@ def _load_xai_eval_metrics(
     split = str(infer_cfg.get("xai_eval_split", "test"))
     method = str(infer_cfg.get("gradcam_method", "gradcam")).strip().lower() or "gradcam"
     eval_dir = get_run_evaluation_dir(project_root, version)
-    candidates = [
+    raw_candidates = [
         eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
         eval_dir / f"xai_iou_{version}_{block_label}_{split}.json",
     ]
-    path = next((candidate for candidate in candidates if candidate.exists()), None)
-    if path is None:
-        return None
+    for path in raw_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_raw_xai_eval_metrics(path, split=split, block_label=block_label)
+        if metrics:
+            return metrics
 
+    compact_dir = Path(project_root) / "artifacts" / "evaluations"
+    compact_candidates = [
+        compact_dir / f"xai_{version}_{method}_{block_label}_{split}_best_metrics.json",
+        compact_dir / f"xai_{version}_{block_label}_{split}_best_metrics.json",
+    ]
+    for path in compact_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_compact_xai_eval_metrics(path, split=split, block_label=block_label)
+        if metrics:
+            return metrics
+
+    return None
+
+
+def _load_raw_xai_eval_metrics(
+    path: Path,
+    *,
+    split: str,
+    block_label: str,
+) -> dict[str, Any] | None:
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except Exception:
+        return None
+    if not isinstance(data, dict):
         return None
 
     aggregate = data.get("aggregate", {})
@@ -154,7 +192,7 @@ def _load_xai_eval_metrics(
     metrics: dict[str, Any] = {
         "xai_eval_split": data.get("split", split),
         "xai_eval_target_block": data.get("target_block", block_label),
-        "xai_eval_n": data.get("n_images"),
+        "xai_eval_n": _as_non_negative_int(data.get("n_images")),
         "xai_pointing_game": _mean_metric(aggregate.get("pointing_game")),
         "xai_auprc": _mean_metric(aggregate.get("auprc")),
         "xai_auc_iou": _mean_metric(aggregate.get("auc_iou")),
@@ -165,6 +203,46 @@ def _load_xai_eval_metrics(
             value = _as_valid_threshold(top_metrics.get("mean_iou_union"))
             metrics[f"xai_iou_{top_key}"] = value
 
+    return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _load_compact_xai_eval_metrics(
+    path: Path,
+    *,
+    split: str,
+    block_label: str,
+) -> dict[str, Any] | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    metric_source = data.get("metrics", {})
+    if not isinstance(metric_source, dict):
+        metric_source = {}
+
+    def pick(*keys: str) -> Any:
+        for key in keys:
+            if key in metric_source and metric_source[key] is not None:
+                return metric_source[key]
+            if key in data and data[key] is not None:
+                return data[key]
+        return None
+
+    metrics: dict[str, Any] = {
+        "xai_eval_split": pick("xai_eval_split", "split") or split,
+        "xai_eval_target_block": pick("xai_eval_target_block", "target_block") or block_label,
+        "xai_eval_n": _as_non_negative_int(pick("xai_eval_n", "n_images")),
+        "xai_pointing_game": _as_valid_threshold(pick("xai_pointing_game")),
+        "xai_auprc": _as_valid_threshold(pick("xai_auprc")),
+        "xai_auc_iou": _as_valid_threshold(pick("xai_auc_iou")),
+        "xai_iou_top10": _as_valid_threshold(pick("xai_iou_top10")),
+        "xai_iou_top20": _as_valid_threshold(pick("xai_iou_top20")),
+        "xai_iou_top30": _as_valid_threshold(pick("xai_iou_top30")),
+    }
     return {key: value for key, value in metrics.items() if value is not None}
 
 
