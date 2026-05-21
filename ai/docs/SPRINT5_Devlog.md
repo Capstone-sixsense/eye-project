@@ -62,8 +62,9 @@
 - **현재 active classifier**: `v31_v8b_fusion_v2`.
 - **현재 active evidence module**: `seg_evidence_v8b_ddrseg_tjdr_maplesfix`.
 - **v31 상태**: 단독 배포가 아니라 fusion 내부 base classifier로 보존.
+- **완료된 검증**:
+  - Docker runtime에서 fusion checkpoint 로딩과 `/analyze` payload shape 최종 확인을 완료했다.
 - **다음 작업**:
-  - Docker runtime에서 fusion checkpoint 로딩과 payload shape를 최종 확인.
   - 추가 MA/HE/EX/SE 4채널 병변 마스크 데이터 확장은 Sprint 5 후속 개선으로 유지하되, FGADR는 기본 경로에서 제외한다.
 
 ## 5. 근거 파일
