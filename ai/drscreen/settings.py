@@ -82,6 +82,7 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v8b_evidence_classifier_clsdomains_v1": "10_grounded_classifier",
     "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
     "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_v2": "10_grounded_classifier",
 }
 
 

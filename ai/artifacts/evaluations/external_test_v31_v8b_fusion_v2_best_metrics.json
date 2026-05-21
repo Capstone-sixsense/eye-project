@@ -1,0 +1,23 @@
+{
+  "split": "external_test",
+  "source_split": "external_test",
+  "evaluation_split": "external_holdout",
+  "threshold_policy": "DDR external_test stratified 20% calibration / 80% holdout, sensitivity guard >= v31",
+  "rows": 10018,
+  "metrics": {
+    "auroc": 0.940254957490146
+  },
+  "optimal_threshold": 0.38,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.8678378917947694,
+    "sensitivity": 0.8117882117882118,
+    "specificity": 0.9237981248753242,
+    "precision": 0.9140607424071991,
+    "f1": 0.8598941798941799,
+    "threshold": 0.38,
+    "true_negative": 4631,
+    "false_positive": 382,
+    "false_negative": 942,
+    "true_positive": 4063
+  }
+}

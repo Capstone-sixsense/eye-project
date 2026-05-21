@@ -230,6 +230,13 @@ def build_model_for_training(config: dict[str, Any], device: torch.device) -> nn
             else None
         ),
         concept_dropout=float(model_cfg.get("concept_dropout", 0.3)),
+        segmenter_encoder=str(model_cfg.get("segmenter_encoder", "resnet50")),
+        segmenter_out_channels=int(model_cfg.get("segmenter_out_channels", 4)),
+        segmenter_decoder_channels=(
+            [int(channel) for channel in model_cfg["segmenter_decoder_channels"]]
+            if model_cfg.get("segmenter_decoder_channels") is not None
+            else None
+        ),
     ).to(device)
 
 
@@ -271,6 +278,13 @@ def build_model_for_eval(config: dict[str, Any], device: torch.device) -> nn.Mod
             else None
         ),
         concept_dropout=float(model_cfg.get("concept_dropout", 0.3)),
+        segmenter_encoder=str(model_cfg.get("segmenter_encoder", "resnet50")),
+        segmenter_out_channels=int(model_cfg.get("segmenter_out_channels", 4)),
+        segmenter_decoder_channels=(
+            [int(channel) for channel in model_cfg["segmenter_decoder_channels"]]
+            if model_cfg.get("segmenter_decoder_channels") is not None
+            else None
+        ),
     ).to(device)
 
 

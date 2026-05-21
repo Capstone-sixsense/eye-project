@@ -13,6 +13,32 @@ def load_state_from_checkpoint(
     *,
     strict: bool = True,
 ) -> tuple[list[str], list[str]]:
+    if isinstance(checkpoint, dict) and "fusion_version" in checkpoint:
+        if not hasattr(model, "classifier") or not hasattr(model, "segmenter"):
+            raise ValueError(
+                "Fusion checkpoint requires a model with classifier and segmenter modules."
+            )
+        missing_classifier, unexpected_classifier = model.classifier.load_state_dict(
+            checkpoint["classifier_state_dict"],
+            strict=strict,
+        )
+        missing_segmenter, unexpected_segmenter = model.segmenter.load_state_dict(
+            checkpoint["segmenter_state_dict"],
+            strict=strict,
+        )
+        if hasattr(model, "meta_params"):
+            model.meta_params = model._normalize_meta_params(checkpoint.get("meta_classifier"))
+        if hasattr(model, "feature_schema"):
+            model.feature_schema = list(checkpoint.get("feature_schema") or [])
+        if hasattr(model, "feature_extraction"):
+            model.feature_extraction = dict(checkpoint.get("feature_extraction") or {})
+        return (
+            [f"classifier.{key}" for key in missing_classifier]
+            + [f"segmenter.{key}" for key in missing_segmenter],
+            [f"classifier.{key}" for key in unexpected_classifier]
+            + [f"segmenter.{key}" for key in unexpected_segmenter],
+        )
+
     state = checkpoint.get("model_state_dict", checkpoint)
     if not strict:
         model_state = model.state_dict()

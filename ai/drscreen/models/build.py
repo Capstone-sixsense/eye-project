@@ -246,7 +246,46 @@ def build_model(
     concept_channels: int = 4,
     concept_head_hidden_channels: int | None = None,
     concept_dropout: float = 0.3,
+    segmenter_encoder: str = "resnet50",
+    segmenter_out_channels: int = 4,
+    segmenter_decoder_channels: list[int] | tuple[int, ...] | None = None,
 ) -> nn.Module:
+    if model_name == "lesion_seg_evidence":
+        from drscreen.models.seg_evidence import LesionSegEvidence
+
+        return LesionSegEvidence(
+            encoder=segmenter_encoder,
+            out_channels=segmenter_out_channels,
+            pretrained=pretrained,
+            decoder_channels=tuple(segmenter_decoder_channels or (256, 128, 64, 32)),
+        )
+
+    if model_name == "v31_v8b_fusion":
+        from drscreen.models.fusion import V31V8bFusion
+        from drscreen.models.seg_evidence import LesionSegEvidence
+
+        classifier = _build_multitask_aux_seg(
+            pretrained=pretrained,
+            num_outputs=num_outputs,
+            use_attention=use_attention,
+            attention_mode=attention_mode,
+            use_ibn=use_ibn,
+            grad_checkpointing=grad_checkpointing,
+            aux_seg_block=aux_seg_block,
+            aux_seg_output_size=aux_seg_output_size,
+            aux_seg_channels=aux_seg_channels,
+            use_gated_pooling=use_gated_pooling,
+            decoder_type=decoder_type,
+            decoder_blocks=decoder_blocks,
+        )
+        segmenter = LesionSegEvidence(
+            encoder=segmenter_encoder,
+            out_channels=segmenter_out_channels,
+            pretrained=pretrained,
+            decoder_channels=tuple(segmenter_decoder_channels or (256, 128, 64, 32)),
+        )
+        return V31V8bFusion(classifier, segmenter)
+
     if model_name == "sparse_bagnet":
         from drscreen.models.sparse_bagnet import SparseBagNet
         return SparseBagNet(
@@ -339,6 +378,9 @@ def get_classifier_module(model_name: str, model: nn.Module) -> nn.Module:
 
     if model_name in {"efficientnet_b5", "convnext_tiny", "sparse_bagnet", "concept_bottleneck"}:
         return backbone.classifier
+
+    if model_name == "v31_v8b_fusion":
+        return get_classifier_module("efficientnet_b5", model.classifier)
 
     if model_name == "resnet50":
         return backbone.fc

@@ -7,12 +7,19 @@ data:
   batch_size: 16
   num_workers: 0
   train_split: train
-  threshold_split: val
-  eval_splits: [train, val, test, external_test]
+  threshold_split: external_calibration
+  primary_eval_split: external_holdout
+  eval_splits: [train, val, test, external_calibration, external_holdout]
+  calibration_split:
+    source_split: external_test
+    calibration_split: external_calibration
+    holdout_split: external_holdout
+    fraction: 0.2
+    seed: 43
 
 classifier:
-  config_path: configs/base.yaml
-  checkpoint_path: artifacts/checkpoints/best.pt
+  config_path: configs/v31_no_se_gated.yaml
+  checkpoint_path: artifacts/runs/07_lesion_evidence/v31_no_se_gated/checkpoints/best.pt
 
 segmentation:
   config_path: configs/seg_evidence_v8b_ddrseg_tjdr_maplesfix.yaml
@@ -20,6 +27,8 @@ segmentation:
 
 fusion:
   seed: 43
+  sensitivity_guard: 0.7982736572890026
+  threshold_policy: sensitivity_guard
   c_values: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
   class_weight: balanced
   train_variants:

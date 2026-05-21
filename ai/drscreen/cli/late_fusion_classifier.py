@@ -15,7 +15,6 @@ from torch.utils.data import DataLoader, Dataset
 
 from drscreen.cli.lesion_evidence_classifier import (
     EvidenceItem,
-    _choose_threshold,
     _classification_report,
     _extract_features,
     _feature_names,
@@ -124,6 +123,127 @@ def _build_feature_matrix(
     raise ValueError(f"Unsupported feature_set: {feature_set}")
 
 
+def _apply_calibration_split(
+    items: list[EvidenceItem],
+    split_cfg: dict,
+    *,
+    seed: int,
+) -> tuple[list[EvidenceItem], dict | None]:
+    if not split_cfg:
+        return items, None
+
+    source_split = str(split_cfg.get("source_split", "external_test"))
+    calibration_split = str(split_cfg.get("calibration_split", "external_calibration"))
+    holdout_split = str(split_cfg.get("holdout_split", "external_holdout"))
+    fraction = float(split_cfg.get("fraction", 0.2))
+    if not 0.0 < fraction < 1.0:
+        raise ValueError("calibration_split.fraction must be between 0 and 1.")
+
+    source_indices = [idx for idx, item in enumerate(items) if item.split == source_split]
+    if not source_indices:
+        raise ValueError(f"No rows found for calibration source split: {source_split}")
+
+    rng = np.random.default_rng(int(split_cfg.get("seed", seed)))
+    selected: set[int] = set()
+    by_label: dict[int, list[int]] = {}
+    for idx in source_indices:
+        by_label.setdefault(items[idx].label, []).append(idx)
+    for label_indices in by_label.values():
+        ordered = sorted(label_indices, key=lambda idx: items[idx].image_id)
+        n_select = max(1, int(round(len(ordered) * fraction)))
+        n_select = min(n_select, len(ordered) - 1) if len(ordered) > 1 else len(ordered)
+        chosen = rng.choice(np.asarray(ordered, dtype=np.int64), size=n_select, replace=False)
+        selected.update(int(idx) for idx in chosen.tolist())
+
+    updated: list[EvidenceItem] = []
+    counts = {
+        calibration_split: {"total": 0, "normal": 0, "abnormal": 0},
+        holdout_split: {"total": 0, "normal": 0, "abnormal": 0},
+    }
+    for idx, item in enumerate(items):
+        if item.split != source_split:
+            updated.append(item)
+            continue
+        new_split = calibration_split if idx in selected else holdout_split
+        counts[new_split]["total"] += 1
+        counts[new_split]["abnormal" if item.label == 1 else "normal"] += 1
+        updated.append(
+            EvidenceItem(
+                image_id=item.image_id,
+                image_path=item.image_path,
+                label=item.label,
+                split=new_split,
+                domain=item.domain,
+            )
+        )
+
+    return updated, {
+        "source_split": source_split,
+        "calibration_split": calibration_split,
+        "holdout_split": holdout_split,
+        "fraction": fraction,
+        "seed": int(split_cfg.get("seed", seed)),
+        "counts": counts,
+    }
+
+
+def _choose_threshold_by_policy(
+    labels: np.ndarray,
+    scores: np.ndarray,
+    thresholds: np.ndarray,
+    *,
+    policy: str,
+    sensitivity_guard: float | None,
+) -> dict:
+    reports = [
+        _classification_report(labels, scores, float(threshold))
+        for threshold in thresholds
+    ]
+    best_balanced = max(
+        reports,
+        key=lambda report: (report["balanced_accuracy"], report["f1"]),
+    )
+    best_f1 = max(
+        reports,
+        key=lambda report: (report["f1"], report["balanced_accuracy"]),
+    )
+    guarded = []
+    if sensitivity_guard is not None:
+        guarded = [
+            report for report in reports
+            if report.get("sensitivity") is not None
+            and float(report["sensitivity"]) >= sensitivity_guard
+        ]
+    best_guarded = (
+        max(guarded, key=lambda report: (report["specificity"], report["f1"]))
+        if guarded
+        else None
+    )
+
+    if policy == "balanced_accuracy":
+        selected = best_balanced
+    elif policy == "f1":
+        selected = best_f1
+    elif policy == "sensitivity_guard":
+        selected = best_guarded if best_guarded is not None else best_balanced
+    else:
+        raise ValueError(f"Unsupported threshold_policy: {policy}")
+
+    return {
+        "policy": policy,
+        "policy_status": (
+            "guard_satisfied"
+            if policy != "sensitivity_guard" or best_guarded is not None
+            else "guard_unmet_fallback_to_balanced_accuracy"
+        ),
+        "best": selected,
+        "candidates": reports,
+        "best_by_balanced_accuracy": best_balanced,
+        "best_by_f1": best_f1,
+        "best_with_sensitivity_guard": best_guarded,
+    }
+
+
 def _fit_select_evaluate(
     features: np.ndarray,
     labels: np.ndarray,
@@ -137,6 +257,8 @@ def _fit_select_evaluate(
     thresholds: np.ndarray,
     seed: int,
     class_weight: str,
+    sensitivity_guard: float | None,
+    threshold_policy: str,
 ) -> dict:
     row_splits = np.asarray([str(row["split"]) for row in rows])
     row_domains = np.asarray([str(row["domain"]) for row in rows])
@@ -152,7 +274,7 @@ def _fit_select_evaluate(
     best_model = None
     best_scores = None
     best_selection = None
-    best_rank: tuple[float, float] | None = None
+    best_rank: tuple[float, ...] | None = None
     candidates: list[dict] = []
     for c_value in c_values:
         model = make_pipeline(
@@ -167,16 +289,32 @@ def _fit_select_evaluate(
         )
         model.fit(features[train_mask], labels[train_mask])
         scores = model.predict_proba(features)[:, 1]
-        selection = _choose_threshold(labels[threshold_mask], scores[threshold_mask], thresholds)
+        selection = _choose_threshold_by_policy(
+            labels[threshold_mask],
+            scores[threshold_mask],
+            thresholds,
+            policy=threshold_policy,
+            sensitivity_guard=sensitivity_guard,
+        )
         val_report = _classification_report(
             labels[threshold_mask],
             scores[threshold_mask],
             float(selection["best"]["threshold"]),
         )
-        rank = (
-            selection["best"]["balanced_accuracy"],
-            val_report.get("auroc") or 0.0,
-        )
+        if threshold_policy == "sensitivity_guard":
+            guard_satisfied = selection["policy_status"] == "guard_satisfied"
+            rank = (
+                1.0 if guard_satisfied else 0.0,
+                selection["best"]["specificity"] or 0.0,
+                selection["best"]["f1"],
+                val_report.get("auroc") or 0.0,
+            )
+        else:
+            rank = (
+                selection["best"]["balanced_accuracy"],
+                selection["best"]["f1"],
+                val_report.get("auroc") or 0.0,
+            )
         candidates.append(
             {
                 "c_value": float(c_value),
@@ -197,6 +335,7 @@ def _fit_select_evaluate(
 
     by_split: dict[str, dict] = {}
     by_domain: dict[str, dict] = {}
+    threshold_policy_by_split: dict[str, dict] = {}
     for split in eval_splits:
         split_mask = row_splits == split
         if split_mask.any():
@@ -212,6 +351,34 @@ def _fit_select_evaluate(
                     0.5,
                 ),
             }
+            threshold_reports = [
+                _classification_report(labels[split_mask], best_scores[split_mask], float(threshold))
+                for threshold in thresholds
+            ]
+            best_balanced = max(
+                threshold_reports,
+                key=lambda report: (report["balanced_accuracy"], report["f1"]),
+            )
+            best_f1 = max(
+                threshold_reports,
+                key=lambda report: (report["f1"], report["balanced_accuracy"]),
+            )
+            guarded = []
+            if sensitivity_guard is not None:
+                guarded = [
+                    report for report in threshold_reports
+                    if report.get("sensitivity") is not None
+                    and float(report["sensitivity"]) >= sensitivity_guard
+                ]
+            threshold_policy_by_split[split] = {
+                "best_by_balanced_accuracy": best_balanced,
+                "best_by_f1": best_f1,
+                "best_with_sensitivity_guard": (
+                    max(guarded, key=lambda report: (report["specificity"], report["f1"]))
+                    if guarded
+                    else None
+                ),
+            }
             for domain in sorted(set(row_domains[split_mask].tolist())):
                 mask = split_mask & (row_domains == domain)
                 if mask.any():
@@ -221,18 +388,24 @@ def _fit_select_evaluate(
                         selected_threshold,
                     )
 
+    scaler = best_model.named_steps["standardscaler"]
     logreg = best_model.named_steps["logisticregression"]
     return {
         "train_split": train_split,
         "train_domains": sorted(set(row_domains[train_mask].tolist())),
         "n_train_fit": int(train_mask.sum()),
         "threshold_split": threshold_split,
+        "threshold_policy": threshold_policy,
         "threshold_selection": best_selection,
+        "threshold_policy_by_split": threshold_policy_by_split,
         "classifier_candidates": candidates,
         "metrics_by_split": by_split,
         "metrics_by_domain": by_domain,
+        "scaler_mean": scaler.mean_.astype(float).tolist(),
+        "scaler_scale": scaler.scale_.astype(float).tolist(),
         "coef": logreg.coef_.astype(float).tolist(),
         "intercept": logreg.intercept_.astype(float).tolist(),
+        "classes": logreg.classes_.astype(int).tolist(),
     }
 
 
@@ -242,8 +415,14 @@ def run(config_path: str) -> dict:
     config = load_app_config(config_path_obj)
     version = str(config["project"]["version"])
     data_cfg = config["data"]
+    fusion_cfg = config.get("fusion", {})
 
     items = _read_items(config, project_root)
+    items, calibration_split_info = _apply_calibration_split(
+        items,
+        data_cfg.get("calibration_split", {}),
+        seed=int(fusion_cfg.get("seed", 43)),
+    )
     classifier_session = InferenceSession.from_config_path(
         resolve_project_path(project_root, config["classifier"]["config_path"]),
         checkpoint_path=str(resolve_project_path(project_root, config["classifier"]["checkpoint_path"])),
@@ -277,7 +456,6 @@ def run(config_path: str) -> dict:
     if [row["image_id"] for row in rows] != [row["image_id"] for row in v8b_rows]:
         raise RuntimeError("v31 and v8b extraction rows are not aligned.")
 
-    fusion_cfg = config.get("fusion", {})
     threshold_cfg = fusion_cfg.get("thresholds", {})
     thresholds = np.linspace(
         float(threshold_cfg.get("min", 0.01)),
@@ -288,6 +466,8 @@ def run(config_path: str) -> dict:
     feature_sets = [str(v) for v in fusion_cfg.get("feature_sets", ["late_fusion"])]
     train_variants = fusion_cfg.get("train_variants") or {"all_train": {"train_domains": None}}
     eval_splits = [str(v) for v in data_cfg.get("eval_splits", ["external_test"])]
+    primary_eval_split = str(data_cfg.get("primary_eval_split", "external_test"))
+    threshold_policy = str(fusion_cfg.get("threshold_policy", "balanced_accuracy"))
 
     results: dict[str, dict] = {}
     for variant_name, variant_cfg in train_variants.items():
@@ -313,16 +493,22 @@ def run(config_path: str) -> dict:
                 thresholds=thresholds,
                 seed=int(fusion_cfg.get("seed", 43)),
                 class_weight=str(fusion_cfg.get("class_weight", "balanced")),
+                sensitivity_guard=(
+                    float(fusion_cfg["sensitivity_guard"])
+                    if fusion_cfg.get("sensitivity_guard") is not None
+                    else None
+                ),
+                threshold_policy=threshold_policy,
             )
             result["feature_set"] = feature_set
             result["feature_names"] = feature_names
             results[key] = result
 
-    def _external_auroc(item: tuple[str, dict]) -> float:
-        section = item[1]["metrics_by_split"].get("external_test", {})
+    def _primary_eval_auroc(item: tuple[str, dict]) -> float:
+        section = item[1]["metrics_by_split"].get(primary_eval_split, {})
         return float(section.get("selected_threshold", {}).get("auroc") or -1.0)
 
-    best_key, best_result = max(results.items(), key=_external_auroc)
+    best_key, best_result = max(results.items(), key=_primary_eval_auroc)
     output = {
         "version": version,
         "classifier_config": str(resolve_project_path(project_root, config["classifier"]["config_path"])),
@@ -331,10 +517,17 @@ def run(config_path: str) -> dict:
         "segmentation_checkpoint": str(seg_checkpoint),
         "manifest_path": str(resolve_project_path(project_root, data_cfg["manifest_path"])),
         "n_images": int(len(items)),
+        "calibration_split_info": calibration_split_info,
+        "primary_eval_split": primary_eval_split,
         "results": results,
+        "best_by_primary_eval_auroc": {
+            "key": best_key,
+            "metrics": best_result["metrics_by_split"].get(primary_eval_split),
+        },
         "best_by_external_auroc": {
             "key": best_key,
-            "metrics": best_result["metrics_by_split"].get("external_test"),
+            "metrics": best_result["metrics_by_split"].get(primary_eval_split),
+            "note": "Compatibility alias. See best_by_primary_eval_auroc.",
         },
         "decision_note": (
             "Diagnostic only. Late fusion does not change configs/base.yaml, "
@@ -346,7 +539,7 @@ def run(config_path: str) -> dict:
     output_path = output_dir / f"{version}_metrics.json"
     output_path.write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"Saved: {output_path}")
-    print(json.dumps(output["best_by_external_auroc"], indent=2))
+    print(json.dumps(output["best_by_primary_eval_auroc"], indent=2))
     return output
 
 

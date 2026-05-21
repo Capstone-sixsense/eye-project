@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from torchvision import models
 from torchvision.transforms import InterpolationMode
@@ -49,6 +49,17 @@ def resolve_interpolation_mode(name: str) -> InterpolationMode:
 
 
 def get_model_profile(architecture: str) -> ModelProfile:
+    if architecture == "v31_v8b_fusion":
+        return replace(
+            get_model_profile("efficientnet_b5"),
+            architecture=architecture,
+            rationale=(
+                "Deployment wrapper: v31 EfficientNet-B5 classifier plus v8b "
+                "ResNet50 lesion evidence segmenter. Input normalization follows "
+                "the v31 EfficientNet/ImageNet profile."
+            ),
+        )
+
     if architecture == "concept_bottleneck":
         return ModelProfile(
             architecture=architecture,
