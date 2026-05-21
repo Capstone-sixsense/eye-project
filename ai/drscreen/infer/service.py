@@ -161,18 +161,6 @@ def _load_xai_eval_metrics(
         if metrics:
             return metrics
 
-    eval_dir = get_run_evaluation_dir(project_root, version)
-    raw_candidates = [
-        eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
-        eval_dir / f"xai_iou_{version}_{block_label}_{split}.json",
-    ]
-    for path in raw_candidates:
-        if not path.exists():
-            continue
-        metrics = _load_raw_xai_eval_metrics(path, split=split, block_label=block_label)
-        if metrics:
-            return metrics
-
     compact_dir = Path(project_root) / "artifacts" / "evaluations"
     compact_candidates = [
         compact_dir / f"xai_{version}_{method}_{block_label}_{split}_best_metrics.json",
@@ -182,6 +170,18 @@ def _load_xai_eval_metrics(
         if not path.exists():
             continue
         metrics = _load_compact_xai_eval_metrics(path, split=split, block_label=block_label)
+        if metrics:
+            return metrics
+
+    eval_dir = get_run_evaluation_dir(project_root, version)
+    raw_candidates = [
+        eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
+        eval_dir / f"xai_iou_{version}_{block_label}_{split}.json",
+    ]
+    for path in raw_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_raw_xai_eval_metrics(path, split=split, block_label=block_label)
         if metrics:
             return metrics
 
@@ -633,6 +633,7 @@ class InferenceSession:
             version,
             split_name="external_test",
             checkpoint_stem="best",
+            prefer_compact=True,
         )
         eval_metrics = None
         if eval_metrics_path.exists():
