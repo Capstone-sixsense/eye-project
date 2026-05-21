@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -77,7 +78,7 @@ class V31V8bFusion(nn.Module):
             x_arr = np.asarray(features, dtype=np.float64)
             scaled = (x_arr - self.meta_params["scaler_mean"]) / self.meta_params["scaler_scale"]
             meta_logit = float(np.dot(scaled, self.meta_params["coef"]) + self.meta_params["intercept"])
-            meta_probability = float(1.0 / (1.0 + np.exp(-meta_logit)))
+            meta_probability = _stable_sigmoid(meta_logit)
         return {
             "v31_probability": v31_probability,
             "v31_logit": v31_logit,
@@ -107,3 +108,11 @@ class V31V8bFusion(nn.Module):
             "coef": coef,
             "intercept": float(intercept.reshape(-1)[0]),
         }
+
+
+def _stable_sigmoid(value: float) -> float:
+    if value >= 0.0:
+        z = math.exp(-value)
+        return 1.0 / (1.0 + z)
+    z = math.exp(value)
+    return z / (1.0 + z)

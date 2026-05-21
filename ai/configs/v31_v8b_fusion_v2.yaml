@@ -48,7 +48,7 @@ train:
 
 infer:
   device: cuda
-  checkpoint_path: artifacts/checkpoints/best_v31_v8b_fusion_v2.pt
+  checkpoint_path: artifacts/checkpoints/best.pt
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true

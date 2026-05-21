@@ -7,6 +7,28 @@ import torch
 from torch import nn
 
 
+def _load_state_dict_with_shape_filter(
+    model: nn.Module,
+    state: dict[str, Any],
+    *,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    if strict:
+        missing, unexpected = model.load_state_dict(state, strict=True)
+        return list(missing), list(unexpected)
+
+    model_state = model.state_dict()
+    shape_mismatched = [
+        key
+        for key, value in state.items()
+        if key in model_state and model_state[key].shape != value.shape
+    ]
+    if shape_mismatched:
+        state = {key: value for key, value in state.items() if key not in shape_mismatched}
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    return list(dict.fromkeys([*missing, *shape_mismatched])), list(unexpected)
+
+
 def load_state_from_checkpoint(
     model: nn.Module,
     checkpoint: dict[str, Any],
@@ -18,11 +40,13 @@ def load_state_from_checkpoint(
             raise ValueError(
                 "Fusion checkpoint requires a model with classifier and segmenter modules."
             )
-        missing_classifier, unexpected_classifier = model.classifier.load_state_dict(
+        missing_classifier, unexpected_classifier = _load_state_dict_with_shape_filter(
+            model.classifier,
             checkpoint["classifier_state_dict"],
             strict=strict,
         )
-        missing_segmenter, unexpected_segmenter = model.segmenter.load_state_dict(
+        missing_segmenter, unexpected_segmenter = _load_state_dict_with_shape_filter(
+            model.segmenter,
             checkpoint["segmenter_state_dict"],
             strict=strict,
         )
@@ -40,18 +64,7 @@ def load_state_from_checkpoint(
         )
 
     state = checkpoint.get("model_state_dict", checkpoint)
-    if not strict:
-        model_state = model.state_dict()
-        shape_mismatched = [
-            k for k, v in state.items()
-            if k in model_state and model_state[k].shape != v.shape
-        ]
-        if shape_mismatched:
-            state = {k: v for k, v in state.items() if k not in shape_mismatched}
-        missing, unexpected = model.load_state_dict(state, strict=False)
-        return list(missing) + shape_mismatched, unexpected
-    missing, unexpected = model.load_state_dict(state, strict=strict)
-    return missing, unexpected
+    return _load_state_dict_with_shape_filter(model, state, strict=strict)
 
 
 def read_checkpoint_auroc(path: Path) -> float:
