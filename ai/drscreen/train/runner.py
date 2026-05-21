@@ -56,8 +56,10 @@ def describe_training_setup(
         "manifest_exists": manifest_path.exists(),
         "train_rows": len(train_dataset),
         "val_rows": len(val_dataset),
+        "train_dataset_type": train_dataset.__class__.__name__,
         "architecture": profile.architecture,
         "training_mode": training_mode,
+        "synchronized_mask_transform": bool(float(config["train"].get("lambda_aux_seg", 0.0) or 0.0) > 0.0),
         "recommended_profile": profile.to_dict(),
         "phases": [
             {"name": phase.name, "epochs": phase.epochs, "head_only": phase.head_only}

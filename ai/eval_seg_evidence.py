@@ -223,6 +223,37 @@ def _tjdr_items(project_root: Path, split: str) -> list[tuple[Path, dict[str, np
     return items
 
 
+def _load_ddr_seg_masks(root: Path, split: str, stem: str) -> dict[str, np.ndarray]:
+    ann_split = "test" if split != "test" else "tet"
+    if (root / "annotations" / split).is_dir():
+        ann_split = split
+    masks: dict[str, np.ndarray] = {}
+    for code in LESION_CODES:
+        directory = root / "annotations" / ann_split / code
+        mask_path = next((p for p in _image_candidates(directory, stem) if p.exists()), None)
+        if mask_path is None:
+            continue
+        arr = np.array(Image.open(mask_path), dtype=np.uint8)
+        if arr.ndim == 3:
+            arr = arr[..., 0]
+        masks[code] = (arr > 0).astype(np.uint8)
+    return masks
+
+
+def _ddr_seg_items(project_root: Path, split: str) -> list[tuple[Path, dict[str, np.ndarray]]]:
+    root = project_root / "data/raw/ddr/lesion_segmentation"
+    image_dir = root / "images" / split
+    items: list[tuple[Path, dict[str, np.ndarray]]] = []
+    image_paths: list[Path] = []
+    for ext in ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"):
+        image_paths.extend(sorted(image_dir.glob(ext)))
+    for image_path in sorted(image_paths):
+        masks = _load_ddr_seg_masks(root, split, image_path.stem)
+        if masks:
+            items.append((image_path, masks))
+    return items
+
+
 def evaluate(
     config_path: str,
     *,
@@ -266,8 +297,11 @@ def evaluate(
     elif mask_provider == "tjdr":
         items = _tjdr_items(project_root, split)
         dataset_name = "tjdr"
+    elif mask_provider == "ddr_seg":
+        items = _ddr_seg_items(project_root, split)
+        dataset_name = "ddr_seg"
     else:
-        raise ValueError("mask_provider must be 'idrid', 'maples', or 'tjdr'")
+        raise ValueError("mask_provider must be 'idrid', 'maples', 'tjdr', or 'ddr_seg'")
     if not items:
         raise FileNotFoundError(f"No evaluation images found for {dataset_name}:{split}")
 
@@ -320,15 +354,150 @@ def evaluate(
     return result
 
 
+def evaluate_threshold_sweep(
+    config_path: str,
+    *,
+    thresholds: list[float],
+    checkpoint: str | None = None,
+    mask_provider: str = "idrid",
+    split: str = "test",
+    output: str | None = None,
+) -> dict:
+    config_path_obj = Path(config_path).resolve()
+    project_root = config_path_obj.parents[1]
+    base_path = config_path_obj.parent / "base.yaml"
+    config = load_app_config(config_path_obj, base_path=base_path if base_path.exists() else None)
+    version = str(config["project"].get("version", "seg_evidence"))
+    checkpoint_path = (
+        resolve_project_path(project_root, checkpoint)
+        if checkpoint
+        else project_root / "artifacts/runs/09_evidence_segmentation" / version / "checkpoints/best.pt"
+    )
+    model = _load_model(config, project_root, checkpoint_path)
+    device = next(model.parameters()).device
+    transform = _eval_transform(config, project_root)
+    data_cfg = config["data"]
+    mask_preprocessor = (
+        FundusPreprocess(output_size=int(data_cfg.get("image_size", 512)))
+        if _eval_preprocessing_enabled(config, project_root)
+        else None
+    )
+
+    if mask_provider == "idrid":
+        items = _idrid_items(project_root, split)
+        dataset_name = "idrid"
+    elif mask_provider == "maples":
+        items = _maples_items(project_root, split)
+        dataset_name = "maples"
+    elif mask_provider == "tjdr":
+        items = _tjdr_items(project_root, split)
+        dataset_name = "tjdr"
+    elif mask_provider == "ddr_seg":
+        items = _ddr_seg_items(project_root, split)
+        dataset_name = "ddr_seg"
+    else:
+        raise ValueError("mask_provider must be 'idrid', 'maples', 'tjdr', or 'ddr_seg'")
+    if not items:
+        raise FileNotFoundError(f"No evaluation images found for {dataset_name}:{split}")
+
+    cached: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for image_path, masks in items:
+        image = Image.open(image_path).convert("RGB")
+        tensor = transform(image).unsqueeze(0).to(device)
+        with torch.no_grad():
+            logits = model(tensor)
+            probs = torch.sigmoid(logits)[0].detach().cpu().numpy()
+        _, h, w = probs.shape
+        gt = _mask_dict_to_eval_tensor(
+            masks,
+            image=image,
+            size=(w, h),
+            preprocessor=mask_preprocessor,
+        ).numpy()
+        cached.append((image_path.stem, probs, gt))
+
+    def _aggregate(rows: list[dict]) -> dict[str, float | int | None]:
+        def _mean(key: str) -> float | None:
+            vals = [r[key] for r in rows if r.get(key) is not None]
+            return float(np.mean(vals)) if vals else None
+
+        return {
+            "mdice": _mean("mdice"),
+            "miou": _mean("miou"),
+            "union_dice": _mean("union_dice"),
+            "union_iou": _mean("union_iou"),
+            "n_images": len(rows),
+        }
+
+    sweep_rows = []
+    for threshold in thresholds:
+        per_image = []
+        for image_id, probs, gt in cached:
+            pred = (probs >= threshold).astype(np.uint8)
+            metrics = _dice_iou_arrays(pred, gt)
+            per_image.append({"image_id": image_id, **metrics})
+        aggregate = _aggregate(per_image)
+        sweep_rows.append(
+            {
+                "threshold": float(threshold),
+                "aggregate": aggregate,
+                "per_image": per_image,
+            }
+        )
+
+    def _best(metric: str) -> dict | None:
+        candidates = [
+            row for row in sweep_rows
+            if row["aggregate"].get(metric) is not None
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda row: row["aggregate"][metric])
+
+    result = {
+        "version": version,
+        "checkpoint_path": str(checkpoint_path),
+        "dataset": dataset_name,
+        "split": split,
+        "thresholds": [float(t) for t in thresholds],
+        "rows": sweep_rows,
+        "best_by_mdice": _best("mdice"),
+        "best_by_union_iou": _best("union_iou"),
+    }
+
+    if output is None:
+        eval_dir = get_run_evaluation_dir(project_root, version)
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        output = str(eval_dir / f"seg_eval_{dataset_name}_{split}_threshold_sweep.json")
+    Path(output).write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"Saved: {output}")
+    print(json.dumps({
+        "best_by_mdice": result["best_by_mdice"]["aggregate"] if result["best_by_mdice"] else None,
+        "best_by_union_iou": result["best_by_union_iou"]["aggregate"] if result["best_by_union_iou"] else None,
+    }, indent=2))
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate lesion segmentation evidence model.")
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint")
-    parser.add_argument("--mask-provider", default="idrid", choices=["idrid", "maples", "tjdr"])
+    parser.add_argument("--mask-provider", default="idrid", choices=["idrid", "maples", "tjdr", "ddr_seg"])
     parser.add_argument("--split", default="test", choices=["train", "test"])
     parser.add_argument("--output")
     parser.add_argument("--lesion-threshold", type=float)
+    parser.add_argument("--lesion-thresholds", nargs="+", type=float)
     args = parser.parse_args()
+    if args.lesion_thresholds:
+        evaluate_threshold_sweep(
+            args.config,
+            checkpoint=args.checkpoint,
+            mask_provider=args.mask_provider,
+            split=args.split,
+            output=args.output,
+            thresholds=args.lesion_thresholds,
+        )
+        return
     evaluate(
         args.config,
         checkpoint=args.checkpoint,

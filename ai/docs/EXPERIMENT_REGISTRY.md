@@ -29,10 +29,10 @@ The resolver in `drscreen/settings.py` keeps legacy checkpoint references readab
 | `04_lesion_supervision` | Auxiliary lesion mask supervision and lesion-aware heads | `v24_multitask`, `v25_multitask_l1`, `v26_multitask_l3`, `v27_mil_attention` |
 | `05_xai_attention_ablation` | Matched XAI attention ablation and block sweeps | `v24_multitask`, `v28_no_attention`, `v29_with_attention` |
 | `06_xai_classifier_routing` | Lesion gate routing into classifier pooling path | `v30_gated_pooling` |
-| `07_lesion_evidence` | SE/ECA 제거 + gated pooling 유지 대조군(v31), per-lesion routing 시리즈(v32~v35), v31 shortcut audit | `v31_no_se_gated`, `v32_lesion_seg_evidence`, `v33_per_lesion_routing`, `v34_calibrated_routing`, `v35_warmstart_routing` |
+| `07_lesion_evidence` | SE/ECA 제거 + gated pooling 유지 대조군(v31), synchronized mask-transform rerun/seed repeat, per-lesion routing 시리즈(v32~v35), v31 shortcut audit | `v31_no_se_gated`, `v31_syncfix_rerun`, `v31_syncfix_seed43`, `v31_syncfix_seed44`, `v32_lesion_seg_evidence`, `v33_per_lesion_routing`, `v34_calibrated_routing`, `v35_warmstart_routing` |
 | `08_xai_decoder_alignment` | U-Net auxiliary decoder, CAM alignment, MAPLES-inclusive lesion supervision, aux-loss sweep, two-stage decoder fallback | `v36_xai_multi`, `v37_xai_multi_maples`, `v37b_xai_unet_only`, `v37c_xai_maples_r1plus`, `v37b_aux03`, `v37b_aux04`, `v37b_aux05`, `v38_xai_coral`, `v39_unet_2stage` |
-| `09_evidence_segmentation` | Classifier-independent lesion segmentation evidence scaffold and TJDR/FGADR/large-mask segmenter work | `seg_evidence_v1`, `seg_evidence_v2_focal_tversky`, `seg_evidence_v3_tjdr`, `seg_evidence_v4_deeplab_tjdr` |
-| `10_grounded_classifier` | Shortcut-free classifier redesign diagnostics and future grounded architectures | `v31_dfr_v1`, `bagnet_v1_p33_r256`, `bagnet_v1_p65_r512`, `cbm_v1_stage1`, `cbm_v1` |
+| `09_evidence_segmentation` | Classifier-independent lesion segmentation evidence scaffold and TJDR/DDR-segmentation/Retinal-Lesions-style large-mask segmenter work. FGADR is excluded from the active path because access is too heavy | `seg_evidence_v1`, `seg_evidence_v2_focal_tversky`, `seg_evidence_v2_geomfix_retrain`, `seg_evidence_v3_tjdr`, `seg_evidence_v4_deeplab_tjdr`, `seg_evidence_v5_maples_fda_tjdr`, `seg_evidence_v5b_maples_fda_tjdr_maplesfix`, `seg_evidence_v6_maples_finetune_tjdr`, `seg_evidence_v7_maples_only`, `seg_evidence_v8_ddrseg_tjdr`, `seg_evidence_v8b_ddrseg_tjdr_maplesfix` |
+| `10_grounded_classifier` | Shortcut-free classifier redesign diagnostics and future grounded architectures | `v31_dfr_v1`, `bagnet_v1_p33_r256`, `bagnet_v1_p65_r512`, `cbm_v1_stage1`, `cbm_v1`, `v8b_evidence_classifier_v1`, `v8b_evidence_classifier_clsdomains_v1`, `v8b_evidence_classifier_aptos_v1`, `v8b_evidence_classifier_grid_v1` |
 | `06_deployment_candidates` | Runs relevant to deployment decisions | `v17_focal_g2`, `v17_512_focal_g2`, `v21_512_layercam`, `v24_multitask`, `v28_no_attention`, `v30_gated_pooling`, `v31_no_se_gated` |
 
 ## Run Registry
@@ -75,6 +75,9 @@ The resolver in `drscreen/settings.py` keeps legacy checkpoint references readab
 | `v29_with_attention` | `05_xai_attention_ablation` | - | `v29_with_attention.yaml` | yes | external | pending | classification done; XAI pending |
 | `v30_gated_pooling` | `06_xai_classifier_routing` | `06_deployment_candidates` | `v30_gated_pooling.yaml` | yes | external | block sweep | completed classifier-routing baseline |
 | `v31_no_se_gated` | `07_lesion_evidence` | `06_deployment_candidates` | `v31_no_se_gated.yaml` | yes | external | train/test XAI block4, shortcut audit | active deployment alias; val AUROC 0.9993, DDR AUROC 0.9160; D5-D7 shortcut audit supports domain/style shortcut reliance |
+| `v31_syncfix_rerun` | `07_lesion_evidence` | - | `v31_syncfix_rerun.yaml` | yes | external | IDRiD/MAPLES block4 + seg_head XAI | rerun after classifier aux_seg image/mask sync fix; DDR AUROC 0.9082 and IDRiD/MAPLES XAI regressed vs active v31 — not promoted |
+| `v31_syncfix_seed43` | `07_lesion_evidence` | - | `v31_syncfix_seed43.yaml` | yes | external | IDRiD Grad-CAM/Layer-CAM | syncfix seed repeat; DDR AUROC 0.8999, XAI not promoted |
+| `v31_syncfix_seed44` | `07_lesion_evidence` | - | `v31_syncfix_seed44.yaml` | yes | external | IDRiD Grad-CAM/Layer-CAM | syncfix seed repeat; DDR AUROC 0.9176 but XAI regressed and threshold shifted to 0.29 — not promoted |
 | `v32_lesion_seg_evidence` | `07_lesion_evidence` | - | `v32_lesion_seg_evidence.yaml` | yes | none | train XAI seg_head | completed; val AUROC 0.9992, not promoted |
 | `v33_per_lesion_routing` | `07_lesion_evidence` | - | `v33_per_lesion_routing.yaml` | yes | external | test XAI block4 | completed; val AUROC 0.9980, DDR AUROC 0.9131; per-lesion routing AUC-IoU best (0.0557) but classification < v31 — not promoted |
 | `v34_calibrated_routing` | `07_lesion_evidence` | - | `v34_calibrated_routing.yaml` | yes | external | test XAI block4 | completed; val AUROC 0.9989, DDR AUROC 0.9129; PG best (0.5185) but classification < v31 — not promoted |
@@ -90,13 +93,24 @@ The resolver in `drscreen/settings.py` keeps legacy checkpoint references readab
 | `v39_unet_2stage` | `08_xai_decoder_alignment` | - | `v39_unet_2stage.yaml` | yes | external | IDRiD/MAPLES block4 + seg_head XAI | completed; frozen v37b classifier preserved DDR/XAI but did not improve Layer-CAM; seg_head direct evidence also regressed, not promoted |
 | `seg_evidence_v1` | `09_evidence_segmentation` | - | `seg_evidence_v1.yaml` | yes | none | IDRiD/MAPLES segmentation eval | completed scaffold; standalone ResNet50+U-Net segmenter failed low-data baseline (best val mDice 0.00335, IDRiD test mDice 0.00129, MAPLES test mDice 0.00142), not product evidence |
 | `seg_evidence_v2_focal_tversky` | `09_evidence_segmentation` | - | `seg_evidence_v2_focal_tversky.yaml` | yes | none | IDRiD/MAPLES segmentation eval + threshold sweep | completed diagnostic; synchronized image/mask transform + Focal Tversky+BCE improved over v1, but it was trained before the offline-image/raw-mask geometry fix. Aligned re-eval only: IDRiD mDice 0.0335 / union IoU 0.0886, MAPLES mDice 0.0088 / union IoU 0.0148 — not product evidence |
+| `seg_evidence_v2_geomfix_retrain` | `09_evidence_segmentation` | - | `seg_evidence_v2_geomfix_retrain.yaml` | yes | none | IDRiD/MAPLES segmentation eval + threshold sweep | geometry-fix rerun of v2 conditions; best val mDice 0.0071, IDRiD best union IoU 0.0603, MAPLES best union IoU 0.0055. Geometry fix alone does not rescue the low-data v2 segmenter |
 | `seg_evidence_v3_tjdr` | `09_evidence_segmentation` | - | `seg_evidence_v3_tjdr.yaml` | yes | none | IDRiD/MAPLES/TJDR segmentation eval | completed after mask-geometry fix; best val mDice 0.2482, IDRiD mDice 0.2055 / union IoU 0.2209, TJDR mDice 0.3524 / union IoU 0.3490, MAPLES mDice 0.0051 / union IoU 0.0071. Data leverage helps IDRiD/TJDR but not MAPLES generalization |
 | `seg_evidence_v4_deeplab_tjdr` | `09_evidence_segmentation` | - | `seg_evidence_v4_deeplab_tjdr.yaml` | yes | none | IDRiD/MAPLES/TJDR segmentation eval + threshold sweep | completed after manual early stop; DeepLabV3-ResNet50 improved IDRiD (mDice 0.2445 / union IoU 0.2727 at threshold 0.5) but regressed TJDR and still failed MAPLES gate (best MAPLES mDice 0.0121), not promoted |
+| `seg_evidence_v5_maples_fda_tjdr` | `09_evidence_segmentation` | - | `seg_evidence_v5_maples_fda_tjdr.yaml` | yes | none | IDRiD/MAPLES/TJDR segmentation eval + threshold sweep | completed with MAPLES-target FDA; IDRiD union IoU improved to 0.3068 and TJDR partly recovered, but MAPLES best mDice only 0.0141, not promoted |
+| `seg_evidence_v6_maples_finetune_tjdr` | `09_evidence_segmentation` | - | `seg_evidence_v6_maples_finetune_tjdr.yaml` | yes | none | IDRiD/MAPLES/TJDR segmentation eval + threshold sweep | completed; v5 best warm-start + MAPLES-heavy domain sampling. MAPLES best mDice improved only 0.0141 -> 0.0165 and remains below gate; not promoted |
+| `seg_evidence_v7_maples_only` | `09_evidence_segmentation` | - | `seg_evidence_v7_maples_only.yaml` | yes | none | MAPLES/IDRiD segmentation eval + threshold sweep | completed; MAPLES-only 122-row specialist failed MAPLES test (best mDice 0.0039, union IoU 0.0056), not promoted |
+| `seg_evidence_v8_ddrseg_tjdr` | `09_evidence_segmentation` | - | `seg_evidence_v8_ddrseg_tjdr.yaml` | yes | none | IDRiD/MAPLES/TJDR/DDR_SEG segmentation eval + threshold sweep | completed; DDR_SEG added to composite masks. IDRiD/TJDR/DDR_SEG improved, but MAPLES best mDice 0.0103 / union IoU 0.0102 remains far below gate, not promoted |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | `09_evidence_segmentation` | - | `seg_evidence_v8b_ddrseg_tjdr_maplesfix.yaml` | yes | none | IDRiD/MAPLES/TJDR/DDR_SEG segmentation eval + threshold sweep | completed after MAPLES ROI coordinate fix; current best lesion evidence candidate. MAPLES best mDice 0.2928 / union IoU 0.2121, IDRiD best mDice 0.4151 / union IoU 0.3903 |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix` | `09_evidence_segmentation` | - | `seg_evidence_v5b_maples_fda_tjdr_maplesfix.yaml` | yes | none | IDRiD/MAPLES/TJDR segmentation eval + threshold sweep | rerun of strongest prior MAPLES-rejected candidate after ROI fix; MAPLES recovered to best mDice 0.1595 / union IoU 0.1385 but remains below v8b |
 | `v31_dfr_v1` | `10_grounded_classifier` | - | `drscreen/cli/dfr_relearn.py` + `configs/base.yaml` | yes | external | D5/D6/D7 shortcut audit | diagnostic failed; DFR reduced D7 matched shortcut ratio but DDR AUROC fell to 0.8641 and Sens@Opt to 0.6554, so last-layer reweighting is not deployable |
 | `bagnet_v1_p33_r256` | `10_grounded_classifier` | - | `grounded_bagnet_v1_p33_r256.yaml` | yes | external | not pursued after DDR hard fail | diagnostic failed; Sparse BagNet-33 at 256px reached DDR AUROC 0.6293 and Sens@Opt 0.4731, far below v31 |
 | `bagnet_v1_p65_r512` | `10_grounded_classifier` | - | `grounded_bagnet_v1_p65_r512.yaml` | yes | external | IDRiD/MAPLES patch-logit evidence | diagnostic failed; Sparse BagNet-65 at 512px reached DDR AUROC 0.6552 and patch-logit evidence stayed at random/center-baseline level |
 | `cbm_v1_stage1` | `10_grounded_classifier` | - | `cbm_v1_stage1.yaml` | yes | none | entropy gate | diagnostic warmup completed; normalized concept entropy 0.9983, redundant-solution gate passed |
 | `cbm_v1` | `10_grounded_classifier` | - | `cbm_v1.yaml` | yes | external | IDRiD/MAPLES concept maps, seg-head XAI, D5/D6/D7 shortcut audit | diagnostic failed; DDR AUROC 0.9268 passed, but best-threshold IDRiD mDice 0.0217 and MAPLES mDice 0.0046 failed localization gates |
+| `v8b_evidence_classifier_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; v8b lesion-map features trained on all train domains reached DDR AUROC 0.8828, below active v31 0.9160 |
+| `v8b_evidence_classifier_clsdomains_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_clsdomains_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; classification-domain-only fit reached DDR AUROC 0.8479 |
+| `v8b_evidence_classifier_aptos_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_aptos_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; APTOS-only fit reached DDR AUROC 0.8725 |
+| `v8b_evidence_classifier_grid_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_grid_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | best G-4 diagnostic but not promoted; C-grid best reached DDR AUROC 0.8942, Sens 0.7639, Spec 0.8674, still below v31 |
 
 ## Config / Helper Inventory
 
@@ -113,6 +127,10 @@ This table covers active runtime configs, helper configs, inactive configs, and 
 | `inactive/v4_ssl_finetune_focal.yaml.inactive` | SSL focal fine-tune config | inactive because the referenced SSL backbone/checkpoint artifacts are not present |
 | `inactive/v26_multitask_l3.yaml.inactive` | Lesion supervision λ=3.0 planned config | inactive config only; no checkpoint/evaluation artifact present |
 | `v29_with_attention.yaml` | Attention-on control run | checkpoint and DDR external_test metric are stored under `05_xai_attention_ablation/v29_with_attention/`; XAI pending |
+| `v8b_evidence_classifier_v1.yaml` | Phase 4-G G-4 scalar classifier over v8b lesion evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_clsdomains_v1.yaml` | Phase 4-G G-4 classification-domain-only scalar classifier over v8b evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_aptos_v1.yaml` | Phase 4-G G-4 APTOS-only scalar classifier over v8b evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_grid_v1.yaml` | Phase 4-G G-4 C-grid scalar classifier over v8b evidence | best G-4 diagnostic; DDR AUROC 0.8942, below v31 |
 | `v36_xai_multi.yaml` | U-Net decoder + CAM alignment | completed; DDR gate fail |
 | `v37_xai_multi_maples.yaml` | U-Net decoder + CAM alignment + MAPLES train masks | completed; calibration shift and XAI regression |
 | `v37b_xai_unet_only.yaml` | v37 ablation without CAM alignment | completed; calibration recovered but MAPLES XAI still weak |
@@ -123,13 +141,21 @@ This table covers active runtime configs, helper configs, inactive configs, and 
 | `v39_unet_2stage.yaml` | frozen v37b classifier + decoder-only fallback | completed; v37b-equivalent Layer-CAM, seg_head direct evidence weak |
 | `seg_evidence_v1.yaml` | standalone classifier-independent lesion segmentation evidence scaffold | completed; Python 3.14 `train_seg` run, IDRiD 54 + MAPLES 122 mask-valid rows only, failed mDice targets |
 | `seg_evidence_v2_focal_tversky.yaml` | synchronized mask augmentation + Focal Tversky segmentation evidence diagnostic | completed; trained before offline-image/raw-mask geometry fix, so use aligned re-eval only as diagnostic |
+| `seg_evidence_v2_geomfix_retrain.yaml` | v2 conditions rerun after mask-geometry fix | completed; same IDRiD+MAPLES R1+ manifest and Focal Tversky+BCE settings as v2, but still failed low-data segmentation targets |
 | `seg_evidence_v3_tjdr.yaml` | TJDR data-leverage segmentation evidence config | completed after mask-geometry fix; uses `manifest_with_maples_tjdr_preprocessed.csv` and composite IDRiD/MAPLES/TJDR masks |
 | `seg_evidence_v4_deeplab_tjdr.yaml` | Phase 4-G stronger encoder segmentation evidence config | completed after manual early stop; DeepLabV3-ResNet50 baseline, not promoted |
+| `seg_evidence_v5_maples_fda_tjdr.yaml` | Phase 4-G MAPLES domain-generalization segmentation evidence config | completed; ResNet50+U-Net with MAPLES-target FDA, not promoted |
+| `seg_evidence_v6_maples_finetune_tjdr.yaml` | Phase 4-G MAPLES-heavy fine-tune config | completed; v5 warm-start with MAPLES upweighting, not promoted |
+| `seg_evidence_v7_maples_only.yaml` | MAPLES-only specialist segmentation diagnostic | completed; target-only 512px MAPLES training failed MAPLES test, not promoted |
+| `seg_evidence_v8_ddrseg_tjdr.yaml` | Phase 4-G no-FGADR DDR segmentation data-leverage config | completed; uses `manifest_with_maples_tjdr_ddrseg_preprocessed.csv`, not promoted because MAPLES remains weak |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix.yaml` | v8 rerun after MAPLES ROI coordinate fix | completed; Phase 4-G current best standalone lesion evidence baseline. Deployment remains v31; backend/frontend integration is out of this AI-side track |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix.yaml` | v5 MAPLES-target FDA rerun after MAPLES ROI coordinate fix | completed; improves MAPLES but remains weaker than v8b |
 | `grounded_bagnet_v1_p33_r256.yaml` | Phase 4-F v3 G3 Sparse BagNet-33 diagnostic | completed; DDR hard fail, not promoted |
 | `grounded_bagnet_v1_p65_r512.yaml` | Phase 4-F v3 G3 Sparse BagNet-65 diagnostic | completed; DDR and localization gates failed, not promoted |
 | `cbm_v1_stage1.yaml` | Phase 4-F v3 G2 CBM concept-head warmup | completed; mask-valid 188 rows, entropy gate pass |
 | `cbm_v1.yaml` | Phase 4-F v3 G2 Concept Bottleneck diagnostic | completed; DDR pass but concept-map localization failed |
 | `v31_no_se_gated.yaml` | True no-attention gated-pooling control | completed; removes ECA/Spatial/SE via `attention_mode: none`, Dice+BCE seg loss |
+| `v31_syncfix_rerun.yaml` | v31 architecture rerun after synchronized image/mask transform fix | completed; `SegmentationManifestDataset` dry-run confirmed, but DDR/XAI regressed and active v31 remains deployment |
 | `v32_lesion_seg_evidence.yaml` | Per-lesion segmentation evidence candidate | completed; 4-channel IDRiD MA/HE/EX/SE provider, Dice+BCE seg loss |
 | `drscreen/cli/dfr_relearn.py` | Phase 4-F v3 G1 DFR diagnostic runner | completed; freezes v31 backbone/gated pooling and installs group-balanced logistic-regression weights into final classifier |
 | `drscreen/models/sparse_bagnet.py` | Phase 4-F v3 G3 Sparse BagNet diagnostic model | completed; patch-logit local evidence path wired through existing training/inference/eval code |
@@ -184,6 +210,9 @@ External test means the `external_test_*_best_metrics.json` artifact stored unde
 | `05_xai_attention_ablation` | `v29_with_attention` | 12522 | 0.862836 | 0.44 | 0.6985 | 0.8993 |
 | `06_xai_classifier_routing` | `v30_gated_pooling` | 12522 | 0.913700 | 0.31 | 0.7840 | 0.9009 |
 | `07_lesion_evidence` | `v31_no_se_gated` | 12522 | 0.916036 | 0.35 | 0.7983 | 0.8677 |
+| `07_lesion_evidence` | `v31_syncfix_rerun` | 12522 | 0.908240 | 0.24 | 0.7639 | 0.8905 |
+| `07_lesion_evidence` | `v31_syncfix_seed43` | 12522 | 0.899886 | 0.33 | 0.7550 | 0.8950 |
+| `07_lesion_evidence` | `v31_syncfix_seed44` | 12522 | 0.917566 | 0.29 | 0.7896 | 0.9055 |
 | `07_lesion_evidence` | `v33_per_lesion_routing` | 12522 | 0.913102 | 0.32 | 0.765 | 0.912 |
 | `07_lesion_evidence` | `v34_calibrated_routing` | 12522 | 0.912859 | 0.51 | 0.772 | 0.908 |
 | `07_lesion_evidence` | `v35_warmstart_routing` | 12522 | 0.908138 | 0.18 | 0.7932 | 0.8739 |
@@ -199,6 +228,7 @@ External test means the `external_test_*_best_metrics.json` artifact stored unde
 | `10_grounded_classifier` | `bagnet_v1_p33_r256` | 12522 | 0.629288 | 0.31 | 0.4731 | 0.7044 |
 | `10_grounded_classifier` | `bagnet_v1_p65_r512` | 12522 | 0.655197 | 0.47 | 0.3950 | 0.8082 |
 | `10_grounded_classifier` | `cbm_v1` | 12522 | 0.926782 | 0.21 | 0.8354 | 0.8770 |
+| `10_grounded_classifier` | `v8b_evidence_classifier_grid_v1` | 12522 | 0.894188 | 0.56 | 0.7639 | 0.8674 |
 
 ## Internal Test Summary
 
@@ -246,6 +276,14 @@ All XAI rows below use IDRiD lesion masks.
 | `v28_no_attention` | train | default Layer-CAM | 54 | 0.1111 | 0.0811 | 0.0473 | 0.0497 |
 | `v31_no_se_gated` | train | block4 Layer-CAM | 54 | 0.3333 | 0.1174 | 0.0491 | 0.0601 |
 | `v31_no_se_gated` | test | block4 Layer-CAM | 27 | 0.3704 | 0.1409 | 0.0496 | 0.0785 |
+| `v31_no_se_gated` | test | block4 Grad-CAM | 27 | 0.2222 | 0.1404 | 0.0555 | 0.0827 |
+| `v31_syncfix_rerun` | test | block4 Layer-CAM | 27 | 0.4815 | 0.1215 | 0.0394 | 0.0600 |
+| `v31_syncfix_rerun` | test | block4 Grad-CAM | 27 | 0.4074 | 0.1328 | 0.0475 | 0.0629 |
+| `v31_syncfix_rerun` | test | seg_head | 27 | 0.1481 | 0.0890 | 0.0412 | 0.0642 |
+| `v31_syncfix_seed43` | test | block4 Grad-CAM | 27 | 0.4444 | 0.1547 | 0.0618 | 0.0613 |
+| `v31_syncfix_seed43` | test | block4 Layer-CAM | 27 | 0.4444 | 0.1439 | 0.0480 | 0.0661 |
+| `v31_syncfix_seed44` | test | block4 Grad-CAM | 27 | 0.2593 | 0.1142 | 0.0418 | 0.0590 |
+| `v31_syncfix_seed44` | test | block4 Layer-CAM | 27 | 0.2593 | 0.1121 | 0.0348 | 0.0571 |
 | `v33_per_lesion_routing` | test | block4 Layer-CAM | 27 | 0.4074 | 0.1478 | 0.0557 | 0.0799 |
 | `v34_calibrated_routing` | test | block4 Layer-CAM | 27 | **0.5185** | 0.1492 | 0.0543 | 0.0769 |
 | `v35_warmstart_routing` | test | block4 Layer-CAM | 27 | 0.4074 | 0.1537 | 0.0525 | 0.0796 |
@@ -269,6 +307,8 @@ No training data overlap. Script: `eval_xai_maples.py`.
 |---|---|---|---:|---:|---:|---:|---:|
 | `v31_no_se_gated` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0172 | 0.0051 | 0.0113 |
 | `v31_no_se_gated` | test | block4 + OD mask | 60 | 0.0500 | 0.0173 | 0.0052 | 0.0113 |
+| `v31_syncfix_rerun` | test | block4 Layer-CAM | 60 | 0.0000 | 0.0125 | 0.0031 | 0.0067 |
+| `v31_syncfix_rerun` | test | seg_head | 60 | 0.0000 | 0.0102 | 0.0048 | 0.0076 |
 | `v35_warmstart_routing` | test | block4 Layer-CAM | 60 | 0.0500 | 0.0166 | 0.0053 | 0.0098 |
 | `v35_warmstart_routing` | test | block4 + OD mask | 60 | 0.0500 | 0.0167 | 0.0053 | 0.0099 |
 | `v37_xai_multi_maples` | test | block4 Layer-CAM | 60 | 0.0167 | 0.0136 | 0.0037 | 0.0086 |
@@ -293,18 +333,53 @@ Standalone segmentation evidence metrics use direct model mask output rather tha
 |---|---|---:|---:|---:|---:|---:|---|
 | `seg_evidence_v2_focal_tversky` | IDRiD test | 27 | 0.0335 | 0.0186 | 0.1583 | 0.0886 | trained before mask-geometry fix; diagnostic only |
 | `seg_evidence_v2_focal_tversky` | MAPLES test | 60 | 0.0088 | 0.0050 | 0.0262 | 0.0148 | trained before mask-geometry fix; diagnostic only |
+| `seg_evidence_v2_geomfix_retrain` | IDRiD test | 27 | 0.0183 | 0.0095 | 0.1104 | 0.0603 | v2 conditions retrained after mask-geometry fix; best union-IoU threshold 0.50 |
+| `seg_evidence_v2_geomfix_retrain` | MAPLES test | 60 | 0.0040 | 0.0020 | 0.0108 | 0.0055 | v2 conditions retrained after mask-geometry fix; best union-IoU threshold 0.45 |
 | `seg_evidence_v3_tjdr` | IDRiD test | 27 | 0.2055 | 0.1317 | 0.3535 | 0.2209 | trained after mask-geometry fix |
 | `seg_evidence_v3_tjdr` | MAPLES test | 60 | 0.0051 | 0.0028 | 0.0130 | 0.0071 | domain generalization still failed |
 | `seg_evidence_v3_tjdr` | TJDR test | 113 | 0.3524 | 0.2713 | 0.4634 | 0.3490 | trained after mask-geometry fix |
 | `seg_evidence_v4_deeplab_tjdr` | IDRiD test | 27 | 0.2445 | 0.1603 | 0.4217 | 0.2727 | DeepLabV3 stronger encoder; threshold 0.5 |
 | `seg_evidence_v4_deeplab_tjdr` | MAPLES test | 60 | 0.0096 | 0.0054 | 0.0227 | 0.0126 | still below MAPLES gate |
 | `seg_evidence_v4_deeplab_tjdr` | TJDR test | 113 | 0.2543 | 0.1860 | 0.3335 | 0.2358 | lower than v3 on TJDR |
+| `seg_evidence_v5_maples_fda_tjdr` | IDRiD test | 27 | 0.2458 | 0.1625 | 0.4585 | 0.3068 | MAPLES-target FDA; threshold 0.5 |
+| `seg_evidence_v5_maples_fda_tjdr` | MAPLES test | 60 | 0.0114 | 0.0066 | 0.0241 | 0.0133 | still below MAPLES gate |
+| `seg_evidence_v5_maples_fda_tjdr` | TJDR test | 113 | 0.3108 | 0.2265 | 0.3975 | 0.2852 | recovered vs v4 but below v3 |
+| `seg_evidence_v6_maples_finetune_tjdr` | IDRiD test | 27 | 0.2144 | 0.1345 | 0.4041 | 0.2574 | v5 warm-start + MAPLES-heavy sampler; threshold 0.5 |
+| `seg_evidence_v6_maples_finetune_tjdr` | MAPLES test | 60 | 0.0134 | 0.0079 | 0.0308 | 0.0175 | small MAPLES gain, still below gate |
+| `seg_evidence_v6_maples_finetune_tjdr` | TJDR test | 113 | 0.2816 | 0.1965 | 0.3472 | 0.2373 | regressed vs v5/v3 at threshold 0.5 |
+| `seg_evidence_v7_maples_only` | IDRiD test | 27 | 0.0222 | 0.0118 | 0.0717 | 0.0382 | MAPLES-only specialist transfer; best threshold 0.5 |
+| `seg_evidence_v7_maples_only` | MAPLES test | 60 | 0.0039 | 0.0020 | 0.0106 | 0.0054 | target-only training still failed MAPLES; best mDice threshold 0.4 |
+| `seg_evidence_v8_ddrseg_tjdr` | IDRiD test | 27 | 0.3154 | 0.2088 | 0.4925 | 0.3324 | DDR_SEG data leverage; threshold 0.5 |
+| `seg_evidence_v8_ddrseg_tjdr` | MAPLES test | 60 | 0.0086 | 0.0048 | 0.0151 | 0.0081 | still below MAPLES gate; threshold 0.5 |
+| `seg_evidence_v8_ddrseg_tjdr` | TJDR test | 113 | 0.3633 | 0.2756 | 0.4314 | 0.3200 | improved vs v3/v5/v6 at threshold 0.5 |
+| `seg_evidence_v8_ddrseg_tjdr` | DDR_SEG test | 225 | 0.3513 | 0.2380 | 0.4094 | 0.2724 | DDR lesion-segmentation held-out test; threshold 0.5 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | IDRiD test | 27 | 0.4145 | 0.2828 | 0.5535 | 0.3893 | MAPLES ROI fix rerun; threshold 0.5 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | MAPLES test | 60 | 0.2798 | 0.1871 | 0.3065 | 0.1993 | MAPLES ROI fix rerun; threshold 0.5 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | TJDR test | 113 | 0.3759 | 0.2813 | 0.4266 | 0.3129 | MAPLES ROI fix rerun; threshold 0.5 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | DDR_SEG test | 225 | 0.3932 | 0.2665 | 0.4244 | 0.2838 | MAPLES ROI fix rerun; threshold 0.5 |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix` | IDRiD test | 27 | 0.2703 | 0.1848 | 0.4940 | 0.3280 | v5 MAPLES-target FDA rerun; threshold 0.5 |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix` | MAPLES test | 60 | 0.0996 | 0.0675 | 0.1626 | 0.1049 | v5 MAPLES-target FDA rerun; threshold 0.5 |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix` | TJDR test | 113 | 0.3307 | 0.2465 | 0.4459 | 0.3308 | v5 MAPLES-target FDA rerun; threshold 0.5 |
 
 Threshold sweep for `seg_evidence_v3_tjdr`: IDRiD best threshold 0.05 (mDice 0.2419 / union IoU 0.2674), TJDR best union-IoU threshold 0.50 (mDice 0.3524 / union IoU 0.3490), MAPLES best threshold 0.05 but still weak (mDice 0.0070 / union IoU 0.0091). This keeps MAPLES failure classified as domain/representation generalization, not threshold calibration.
 
 Threshold sweep for `seg_evidence_v4_deeplab_tjdr`: IDRiD best mDice threshold 0.25 (mDice 0.2460 / union IoU 0.2736), IDRiD best union-IoU threshold 0.35 (mDice 0.2456 / union IoU 0.2739), TJDR best union-IoU threshold 0.65 (mDice 0.2535 / union IoU 0.2364), MAPLES best threshold 0.05 but still weak (mDice 0.0121 / union IoU 0.0159). DeepLabV3 improves IDRiD but does not solve MAPLES generalization and is worse than v3 on TJDR.
 
-**Mask-geometry caveat**: Earlier pixel-mask-supervised conclusions for decoder/seg_head/standalone segmentation runs are confounded unless retrained after the geometry fix. The active v31 deployment classifier is not affected because its deployment path is image-only classification + CAM.
+Threshold sweep for `seg_evidence_v5_maples_fda_tjdr`: IDRiD best union-IoU threshold 0.50 (mDice 0.2458 / union IoU 0.3068), TJDR best union-IoU threshold 0.75 (mDice 0.3126 / union IoU 0.2962), MAPLES best threshold 0.05 but still weak (mDice 0.0141 / union IoU 0.0183). FDA improves IDRiD/TJDR relative to v4 but does not solve MAPLES.
+
+Threshold sweep for `seg_evidence_v6_maples_finetune_tjdr`: IDRiD best union-IoU threshold 0.95 (mDice 0.2450 / union IoU 0.3033), TJDR best union-IoU threshold 0.95 (mDice 0.3098 / union IoU 0.2933), MAPLES best threshold 0.05 but still weak (mDice 0.0165 / union IoU 0.0201). MAPLES-heavy fine-tune produces only a small MAPLES gain and slightly regresses IDRiD/TJDR versus v5.
+
+Threshold sweep for `seg_evidence_v7_maples_only`: MAPLES best mDice threshold 0.40 (mDice 0.0039 / union IoU 0.0054), MAPLES best union-IoU threshold 0.50 (mDice 0.0035 / union IoU 0.0056), IDRiD best threshold 0.50 (mDice 0.0222 / union IoU 0.0382). Target-only MAPLES fine-tuning on the current 512px preprocessed data does not solve MAPLES lesion evidence.
+
+Threshold sweep for `seg_evidence_v2_geomfix_retrain`: IDRiD best mDice threshold 0.40 (mDice 0.0257 / union IoU 0.0352), IDRiD best union-IoU threshold 0.50 (mDice 0.0183 / union IoU 0.0603), MAPLES best mDice threshold 0.40 (mDice 0.0040 / union IoU 0.0054), MAPLES best union-IoU threshold 0.45 (mDice 0.0040 / union IoU 0.0055). This rerun confirms that the v2 low-data segmenter remains weak even after mask-geometry correction.
+
+Threshold sweep for `seg_evidence_v8_ddrseg_tjdr`: IDRiD best mDice threshold 0.20 (mDice 0.3182 / union IoU 0.3383), IDRiD best union-IoU threshold 0.15 (union IoU 0.3386); TJDR best mDice threshold 0.10 (mDice 0.3679), TJDR best union-IoU threshold 0.50 (union IoU 0.3200); DDR_SEG best mDice threshold 0.30 (mDice 0.3523), DDR_SEG best union-IoU threshold 0.55 (union IoU 0.2724); MAPLES best threshold 0.05 (mDice 0.0103 / union IoU 0.0102). DDR segmentation improves in-domain and IDRiD/TJDR evidence but does not solve MAPLES generalization.
+
+Threshold sweep for `seg_evidence_v8b_ddrseg_tjdr_maplesfix`: IDRiD best mDice/union-IoU threshold 0.40 (mDice 0.4151 / union IoU 0.3903); MAPLES best mDice threshold 0.20 (mDice 0.2928), best union-IoU threshold 0.10 (union IoU 0.2121); TJDR best mDice threshold 0.40 (mDice 0.3788), best union-IoU threshold 0.75 (union IoU 0.3149); DDR_SEG best mDice threshold 0.55 (mDice 0.3945), best union-IoU threshold 0.75 (union IoU 0.2880). This is the current strongest standalone lesion evidence run.
+
+Threshold sweep for `seg_evidence_v5b_maples_fda_tjdr_maplesfix`: IDRiD best mDice/union-IoU threshold 0.05 (mDice 0.2990 / union IoU 0.3426); MAPLES best threshold 0.05 (mDice 0.1595 / union IoU 0.1385); TJDR best mDice threshold 0.05 (mDice 0.3535), best union-IoU threshold 0.45 (union IoU 0.3315). It confirms the MAPLES ROI fix matters, but v5b remains below v8b.
+
+**Mask-geometry caveat**: Earlier pixel-mask-supervised conclusions for decoder/seg_head/standalone segmentation runs are confounded unless retrained after the geometry fix. A second, MAPLES-specific caveat was found on 2026-05-21: MAPLES annotation PNGs are ROI-space masks and must be restored through `MESSIDOR-ROIs.csv`. Therefore MAPLES metrics for pre-ROI-fix segmentation runs (`seg_evidence_v3` through original `v8`) are diagnostic only. The active v31 deployment classifier is not affected because its deployment path is image-only classification + CAM. `seg_evidence_v8b_ddrseg_tjdr_maplesfix` is the current post-fix evidence baseline.
 
 ## XAI Method Comparison on v24
 
@@ -320,7 +395,7 @@ Threshold sweep for `seg_evidence_v4_deeplab_tjdr`: IDRiD best mDice threshold 0
 
 ## Current Interpretation
 
-- **`v31_no_se_gated` is the active deployment alias** in `configs/base.yaml`, and `artifacts/checkpoints/best.pt` currently contains the `v31_no_se_gated` checkpoint. DDR AUROC 0.9160, optimal threshold 0.35, Sensitivity 0.798, Specificity 0.868. test-split XAI block4 Layer-CAM: PG **0.3704**, AUPRC **0.1409**, AUC-IoU **0.0496**, IoU top-20 **0.0785**. Later v37b/v39/aux03 experimental runs exceed v31 on DDR AUROC, but none were promoted because MAPLES XAI did not improve and/or IDRiD XAI regressed. v31은 active deployment로 유지한다.
+- **`v31_no_se_gated` is the active deployment alias** in `configs/base.yaml`, and `artifacts/checkpoints/best.pt` currently contains the `v31_no_se_gated` checkpoint. DDR AUROC 0.9160, optimal threshold 0.35, Sensitivity 0.798, Specificity 0.868. test-split XAI block4 Layer-CAM: PG **0.3704**, AUPRC **0.1409**, AUC-IoU **0.0496**, IoU top-20 **0.0785**. Method sweep shows block4 Grad-CAM is slightly better on AUC-IoU/IoU top-20 (**0.0555 / 0.0827**) but worse on PG (**0.2222**). Later v37b/v39/aux03 and syncfix seed-repeat experimental runs do not provide a deployable improvement. v31은 active deployment로 유지한다.
 - `v28_no_attention` is a previous deployment candidate and remains in the registry for attention-ablation/block-sweep comparison.
 - `v30_gated_pooling` DDR AUROC 0.9137, test XAI AUPRC 0.1311 — v31이 DDR AUROC, AUPRC, AUC-IoU에서 앞서며 PG는 동일(0.3704), IoU top-20은 v30 0.0788 vs v31 0.0785로 사실상 동률이다. classifier-routing 설계 baseline으로만 유지.
 - block4 lesion gate를 classifier pooling 경로에 곱하는 방식이 분류와 XAI 지표 모두 개선 — "분류 경로에 병변 위치 신호를 묶으면 XAI 정렬이 개선되는가" 가설에 긍정적.
@@ -345,7 +420,7 @@ Threshold sweep for `seg_evidence_v4_deeplab_tjdr`: IDRiD best mDice threshold 0
 - **Phase 4-E Track 1 완료**: `occlusion`/`rise` perturbation attribution과 deletion/insertion faithfulness metric을 추가했다. v31 Occlusion grid16은 IDRiD test에서 AUPRC 0.0832, AUC-IoU 0.0498, IoU top-20 0.0588, PG 0.1481로 Layer-CAM block4보다 병변 정렬이 낮았다. MAPLES test도 AUPRC 0.0172, IoU top-20 0.0103으로 localization PASS 미달. 단 deletion AUC는 Occlusion 0.5971 vs Layer-CAM 0.7107로 Occlusion이 classifier confidence에 더 직접적인 영역을 찾았다. 결론은 **FAITHFULNESS_ONLY**: 평가 도구로 유지하되 제품 XAI/evidence로 승격하지 않는다. 다음은 독립 lesion segmentation evidence track.
 - **Phase 4-E root-cause update**: Track 1 결과는 "attribution method만 약하다"보다 "classifier가 병변 위치가 아닌 shortcut feature에 의존한다"는 해석과 더 잘 맞는다. D5 domain probe, D6 lesion presence probe, D7 counterfactual style swap을 Phase 4-E plan에 추가했다. 제품 evidence는 classifier의 인과 설명이 아니라 별도 lesion candidate overlay로 정의한다.
 - **Phase 4-E Track 2 scaffold 결과와 정정**: `seg_evidence_v1`은 classifier-independent ResNet50+U-Net 4ch segmenter scaffold다. 당시 로컬 mask-valid 데이터는 IDRiD 54 + MAPLES 122뿐이었다. 이후 점검에서 segmentation train/eval의 image-mask sync 문제와 offline-preprocessed image/raw mask geometry mismatch가 확인됐다. 따라서 v1/v2 및 v36~v39 mask-supervised 실패 해석은 confounded로 표시한다. `seg_evidence_v2_focal_tversky`는 synchronized transform은 고쳤지만 mask-geometry fix 전 학습물이므로, aligned re-eval 결과(IDRiD mDice 0.0335 / union IoU 0.0886, MAPLES mDice 0.0088 / union IoU 0.0148)만 diagnostic으로 사용한다.
-- **Phase 4-F Step 0**: `.omc/plans/xai_improvement_phase4f.md`에서 후속 기본 경로를 encoder-first + data-access gate로 정의했다. H13 shortcut이 SUPPORTED이고, segmentation evidence는 IDRiD/TJDR에서는 개선 가능하지만 MAPLES 일반화가 약하기 때문에 FGADR/TJDR 접근 확인과 RETFound/SAM-style encoder probe를 병행한다. `.omc/research/phase4f_data_access.json` 기준 당시 FGADR/TJDR/RETFound/SAM은 로컬에 없었고, FGADR는 research-use approval 필요, RETFound는 CC-BY-NC-4.0 research-only, TJDR은 로컬 다운로드 후 우선 provider 후보로 기록했다. Phase 4-F의 target mask class는 MA/HE/EX/SE 4채널이다.
+- **Phase 4-F Step 0**: `.omc/plans/xai_improvement_phase4f.md`에서 후속 기본 경로를 encoder-first + data-access gate로 정의했다. H13 shortcut이 SUPPORTED이고, segmentation evidence는 IDRiD/TJDR에서는 개선 가능하지만 MAPLES 일반화가 약하기 때문에 lesion-mask data access와 RETFound/SAM-style encoder probe를 병행한다. `.omc/research/phase4f_data_access.json` 기준 당시 FGADR/TJDR/RETFound/SAM은 로컬에 없었고, 이후 TJDR은 로컬 다운로드 및 provider 통합까지 완료됐다. 2026-05-21 기준 FGADR는 접근 절차 부담으로 active path에서 제외하고, DDR segmentation subset/Retinal-Lesions 등 대체 후보를 우선한다. Phase 4-F의 target mask class는 MA/HE/EX/SE 4채널이다.
 - **Phase 4-F v3 S0 grounded-classifier prep**: 방향을 독립 segmenter-first에서 grounded classifier로 전환했다. `drscreen/cli/diagnose_v31_lesion_probe.py`와 `data/processed/lesion_concept_labels.csv`를 추가했고, `.omc/research/phase4f_v3_d12_v31_probe.json`에 D12 결과를 기록했다. D12-A IDRiD AUROC 0.9977, D12-B MAPLES+fallback AUROC 0.8965, D12-U pooled AUROC 0.9495. 단, D12-B full은 5 native MAPLES no-lesion + 115 Messidor fallback 정상으로 구성되므로 pure MAPLES decodability로 해석하면 안 된다. v31 DDR regression guard는 기존 active metric과 일치했다.
 - **Phase 4-F v3 G1 DFR diagnostic**: `v31_dfr_v1`은 v31 backbone/gated pooling을 동결하고 최종 classifier만 4-group balanced set으로 재학습했다. Training set AUROC는 0.9984였지만 DDR external_test는 AUROC 0.8641, optimal threshold 0.05, Sens@Opt 0.6554로 gate fail. D7 matched non-lesion/lesion ratio는 1.4752x에서 0.8720x로 개선됐으나, D5 domain AUROC 0.9681과 D6 MAPLES lesion AUROC 0.4048은 변하지 않았다. 결론: last-layer reweighting만으로 shortcut-free classifier를 만들 수 없었다.
 - **Phase 4-F v3 G3 Sparse BagNet diagnostic**: `sparse_bagnet` architecture와 `grounded_classifier` evidence path를 추가하고 `bagnet_v1_p33_r256`, `bagnet_v1_p65_r512`를 학습했다. p33은 DDR AUROC 0.6293, Sens@Opt 0.4731로 hard fail. p65는 DDR AUROC 0.6552, Sens@Opt 0.3950으로 p33보다 낫지만 v31(0.9160)과 비교 불가한 수준이다. p65 patch-logit evidence도 IDRiD IoU top-20 0.0262, MAPLES IoU top-20 0.0061로 center/random baseline 수준이다. 결론: receptive-field constraint만으로 shortcut-free DR classifier를 만들 수 없고, G3는 product/deployment 후보가 아니다. G2 CBM이 Phase 4-F의 마지막 grounded-classifier track이며, 실패 시 Phase 4-G는 더 강한 lesion-supervised/fundus-pretrained representation 중심으로 재설계해야 한다.
@@ -353,3 +428,7 @@ Threshold sweep for `seg_evidence_v4_deeplab_tjdr`: IDRiD best mDice threshold 0
 - **Phase 4-F selection**: `.omc/research/phase4f_v3_selection.json` 기준 G1/G2/G3 모두 product gates를 통과하지 못했다. v31 active deployment 유지. 다음은 Phase 4-G(data/representation leverage)로 전환한다.
 - **Phase 4-G G-1/G-2 TJDR integration and aligned retrain**: `.omc/research/phase4g_data_access_gate.json`은 초기 상태(TJDR/FGADR/RETFound/SAM/MedSAM 로컬 없음)를 기록한다. 이후 TJDR은 `data/raw/TJDR`에 확보 완료됐고, 최신 구조 감사 기준 `train/image` 448장, `train/annotation` 448장, `test/image` 113장, `test/annotation` 113장으로 총 561쌍이 1:1 매칭된다. `TJDRMaskProvider`와 `build_manifest --include-tjdr`를 구현했고, `preprocess_images.py`로 `manifest_with_maples_tjdr_preprocessed.csv`를 생성했다. 추가로 mask provider가 preprocessed image row에 대해 raw image 기준 circular-crop/pad/resize geometry를 mask에도 적용하도록 수정했다. `seg_evidence_v3_tjdr` aligned retrain 결과: best val mDice 0.2482, IDRiD test mDice 0.2055 / union IoU 0.2209, TJDR test mDice 0.3524 / union IoU 0.3490, MAPLES test mDice 0.0051 / union IoU 0.0071. Threshold sweep에서도 MAPLES best가 mDice 0.0070 / union IoU 0.0091에 그쳐 threshold 문제가 아님을 확인했다. v31 active deployment 유지.
 - **Phase 4-G G-2 stronger encoder baseline**: `seg_evidence_v4_deeplab_tjdr`는 DeepLabV3-ResNet50 baseline이다. epoch 11 best val mDice 0.1506 이후 epoch 36까지 best가 갱신되지 않아 수동 조기종료했고, 이후 `train_seg`에 `early_stopping_patience/min_delta`를 추가했다. Threshold 0.5 aligned eval: IDRiD mDice 0.2445 / union IoU 0.2727, MAPLES mDice 0.0096 / union IoU 0.0126, TJDR mDice 0.2543 / union IoU 0.2358. Threshold sweep에서도 MAPLES best는 mDice 0.0121 / union IoU 0.0159로 gate 0.05 미달. DeepLabV3는 IDRiD를 개선했지만 MAPLES 일반화와 TJDR 성능을 해결하지 못해 promotion 대상이 아니다.
+- **Phase 4-G MAPLES-target FDA diagnostic**: `SegmentationFDAManifestDataset`와 `seg_evidence_v5_maples_fda_tjdr`를 추가했다. 학습 시 non-MAPLES samples를 MAPLES reference image의 low-frequency Fourier amplitude와 섞는다(`fda_target_domain=MAPLES`, `fda_probability=0.8`, `fda_alpha=0.05`). Best epoch 21, val mDice 0.2269, early stop epoch 29. Threshold 0.5 aligned eval: IDRiD mDice 0.2458 / union IoU 0.3068, MAPLES mDice 0.0114 / union IoU 0.0133, TJDR mDice 0.3108 / union IoU 0.2852. Threshold sweep MAPLES best는 mDice 0.0141 / union IoU 0.0183으로 gate 0.05 미달. FDA 단독으로 MAPLES cross-domain evidence gap을 해결하지 못했다.
+- **Phase 4-G MAPLES-heavy fine-tune diagnostic**: `seg_evidence_v6_maples_finetune_tjdr`는 v5 best checkpoint에서 시작해 MAPLES sampling weight를 4.0으로 올린 low-LR fine-tune이다. Best epoch 2, val mDice 0.2145, early stop epoch 6. Threshold 0.5 aligned eval: IDRiD mDice 0.2144 / union IoU 0.2574, MAPLES mDice 0.0134 / union IoU 0.0175, TJDR mDice 0.2816 / union IoU 0.2373. Threshold sweep MAPLES best는 mDice 0.0165 / union IoU 0.0201로 v5보다 소폭 개선됐지만 gate 0.05에 크게 미달한다. IDRiD/TJDR best union IoU는 v5보다 소폭 낮아졌다. Fine-tune/upweighting만으로 MAPLES 일반화는 해결되지 않았고, 배포는 v31 유지.
+- **MAPLES-only specialist segmenter diagnostic**: `seg_evidence_v7_maples_only`는 MAPLES train 122장만 사용해 target-only 학습을 확인했다. Best val mDice 0.0090, MAPLES test best mDice 0.0039 / union IoU 0.0056로 실패했다. 현재 512px preprocessed data 안에서 target-only fine-tuning은 MAPLES lesion evidence의 해결책이 아니다.
+- **Phase 4-G no-FGADR DDR segmentation result**: FGADR는 access burden 때문에 active path에서 제외했다. DDR segmentation subset을 `data/raw/ddr/lesion_segmentation`에 배치하고 `DDRSegMaskProvider`, `build_manifest --include-ddr-seg`, `seg_evidence_v8_ddrseg_tjdr.yaml`로 v8을 학습했다. Best val mDice 0.3019. IDRiD/TJDR/DDR_SEG evidence는 개선됐지만 MAPLES best mDice 0.0103 / union IoU 0.0102로 gate 0.05에 미달한다. v8은 not promoted, 배포는 v31 유지.

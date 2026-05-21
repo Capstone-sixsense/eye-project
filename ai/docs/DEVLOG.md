@@ -8,6 +8,380 @@
 
 ---
 
+## 2026-05-21 Phase 4-G G-4 — v8b evidence classifier 진단
+
+v8b lesion segmentation evidence가 분류 logit을 대체할 수 있는지 확인하기 위해, v8b 4채널 lesion probability map에서 scalar feature를 추출하고 logistic calibrated classifier를 학습했다. 이 실험은 AI research-only 진단이며 `configs/base.yaml`, `artifacts/checkpoints/best.pt`, backend, frontend는 변경하지 않았다.
+
+실행:
+- `configs/v8b_evidence_classifier_v1.yaml`: 전체 train domain 사용
+- `configs/v8b_evidence_classifier_clsdomains_v1.yaml`: APTOS/IDRiD/Messidor만 사용
+- `configs/v8b_evidence_classifier_aptos_v1.yaml`: APTOS만 사용
+- `configs/v8b_evidence_classifier_grid_v1.yaml`: 전체 train domain + C-grid
+
+DDR external_test 결과:
+
+| Run | DDR AUROC | Threshold | Sens | Spec | 판단 |
+|---|---:|---:|---:|---:|---|
+| `v8b_evidence_classifier_v1` | 0.8828 | 0.59 | 0.7478 | 0.8720 | v31 미달 |
+| `v8b_evidence_classifier_clsdomains_v1` | 0.8479 | 0.43 | 0.7861 | 0.8110 | v31 미달 |
+| `v8b_evidence_classifier_aptos_v1` | 0.8725 | 0.61 | 0.7168 | 0.8846 | v31 미달 |
+| `v8b_evidence_classifier_grid_v1` | 0.8942 | 0.56 | 0.7639 | 0.8674 | best G-4 diagnostic, v31 미달 |
+
+판단:
+- v8b는 현재 best standalone lesion evidence baseline이지만, scalar evidence feature만으로는 active v31 classifier를 대체하지 못한다.
+- active v31 reference는 DDR AUROC 0.9160, threshold 0.35, Sens 0.7983, Spec 0.8677이다.
+- Phase 4-G는 현재 로컬 데이터/코드 범위에서 완료한다. Sprint 5에서는 더 큰 4채널 병변 마스크 데이터, stronger fundus/segmentation encoder, 또는 classifier-only fallback UX를 별도 의사결정으로 다룬다.
+
+근거:
+- `artifacts/runs/10_grounded_classifier/v8b_evidence_classifier_grid_v1/evaluations/v8b_evidence_classifier_grid_v1_metrics.json`
+- `artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`
+
+---
+
+## 2026-05-21 MAPLES ROI 좌표계 보정 및 v8/v5 재실험
+
+MAPLES failure가 과도하게 낮아 데이터셋/loader를 재감사했다. 파일 누락은 없었지만, MAPLES annotation은 원본 MESSIDOR 전체 좌표가 아니라 `MESSIDOR-ROIs.csv`의 ROI에 대응하는 1500x1500 좌표계였다. 기존 `load_maples_masks()`와 `MAPLESTrainMaskProvider`는 이 ROI를 원본 MESSIDOR canvas에 붙이지 않고 바로 resize했으므로, MAPLES train/eval mask가 공간적으로 misaligned였다.
+
+수정:
+- `drscreen/xai/iou.py`: `MESSIDOR-ROIs.csv`를 읽어 MAPLES 1500x1500 mask를 원본 MESSIDOR 해상도 canvas로 복원.
+- `drscreen/data/mask_providers.py`: MAPLES train/eval provider가 공통 `load_maples_masks()`를 사용하도록 통일.
+- 공식 `maples_dr` loader의 `read_biomarker(..., resize=False)`와 30개 샘플 union mask를 비교해 IoU 1.0으로 일치 확인.
+
+재실험:
+
+| Run | 조건 | best epoch | best val mDice |
+|---|---|---:|---:|
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | v8 + MAPLES ROI fix | 38 | 0.3388 |
+| `seg_evidence_v5b_maples_fda_tjdr_maplesfix` | v5 + MAPLES ROI fix | 34 | 0.2436 |
+
+평가 결과:
+
+| Run | Dataset | best mDice | best union IoU |
+|---|---|---:|---:|
+| v8b | IDRiD test | 0.4151 | 0.3903 |
+| v8b | MAPLES test | 0.2928 | 0.2121 |
+| v8b | TJDR test | 0.3788 | 0.3149 |
+| v8b | DDR_SEG test | 0.3945 | 0.2880 |
+| v5b | IDRiD test | 0.2990 | 0.3426 |
+| v5b | MAPLES test | 0.1595 | 0.1385 |
+| v5b | TJDR test | 0.3535 | 0.3315 |
+
+판단:
+- MAPLES 성능 붕괴의 주 원인은 데이터셋 자체가 아니라 MAPLES ROI 좌표계 미보정이었다.
+- v8b는 현재 lesion segmentation evidence 계열 최고 후보이며, 이전 v3~v8의 MAPLES 관련 결론은 ROI 보정 전 수치로 confounded 처리한다.
+- v5b도 MAPLES가 회복됐지만 v8b보다 낮으므로, MAPLES reject 재실험 후보 중 최종 우위는 v8b다.
+- 배포 classifier는 여전히 v31 유지. v8b는 Phase 4-G 기준 현재 best standalone lesion evidence로 고정하되, backend/frontend 연동은 이번 AI 작업 범위에서 제외한다. 이후 Phase 4-G는 v8b를 기준선으로 두고 grounded classifier 재진입 또는 별도 evidence path 설계를 이어간다.
+
+근거:
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/evaluations/`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5b_maples_fda_tjdr_maplesfix/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5b_maples_fda_tjdr_maplesfix/evaluations/`
+- `.omc/research/phase4g_maples_roi_fix_result.json`
+
+---
+
+## 2026-05-20 Sprint 4 closeout
+
+Sprint 4는 `v31_no_se_gated`를 active deployment로 유지한 상태에서 XAI/lesion evidence 개선 가능성을 검증했다.
+
+결론:
+- `v31_no_se_gated`는 DDR AUROC 0.9160, optimal threshold 0.35로 active deployment를 유지한다.
+- `v37b`, `v37b_aux03`, `cbm_v1` 등 일부 run은 DDR AUROC가 v31보다 높았지만, IDRiD/MAPLES lesion localization 또는 product evidence 기준을 만족하지 못했다.
+- Occlusion/RISE, DFR, Sparse BagNet, CBM, decoder alignment, standalone segmentation evidence 모두 제품용 causal XAI로 승격하지 않는다.
+- TJDR 통합은 IDRiD/TJDR segmentation evidence를 개선했지만, MAPLES generalization 문제는 해결하지 못했다.
+- MA/HE/EX/SE 4채널 병변 마스크 데이터 확장은 Sprint 5 개선점으로 이월한다. 단, FGADR는 접근 절차가 복잡해 active path에서 제외하고 DDR segmentation subset, Retinal-Lesions 등 대체 후보를 우선 검토한다.
+
+근거 요약은 `SPRINT4_Devlog.md`, 최신 active 상태는 `AI_HANDOFF.md`, run별 상태는 `EXPERIMENT_REGISTRY.md`를 따른다.
+
+---
+
+## 2026-05-21 Phase 4-G v8 — DDR segmentation 통합 학습/검증
+
+FGADR 없이 진행하기 위해 DDR lesion segmentation subset을 추가했다.
+다운로드 후 로컬 구조는 `data/raw/ddr/lesion_segmentation/images/{train,val,test}`와 `annotations/{train,val,tet}/{MA,HE,EX,SE}`이며, 전체 3,785 files / 약 0.86GB다.
+
+실행:
+- `build_manifest --include-messidor --messidor-as-train --include-ddr --include-maples --include-tjdr --include-ddr-seg`
+- `preprocess_images.py`로 `manifest_with_maples_tjdr_ddrseg_preprocessed.csv` 생성
+- `seg_evidence_v8_ddrseg_tjdr.yaml` 학습
+
+학습 결과:
+- mask-valid: `DDR_SEG 532 / TJDR 448 / MAPLES 122 / IDRiD 54`
+- train/val: 983 / 173
+- best epoch: 40
+- best val mDice: 0.3019
+
+평가 결과:
+
+| Dataset | n | mDice@0.5 | union IoU@0.5 | best mDice | best union IoU |
+|---|---:|---:|---:|---:|---:|
+| IDRiD test | 27 | 0.3154 | 0.3324 | 0.3182 | 0.3386 |
+| TJDR test | 113 | 0.3633 | 0.3200 | 0.3679 | 0.3200 |
+| DDR_SEG test | 225 | 0.3513 | 0.2724 | 0.3523 | 0.2724 |
+| MAPLES test | 60 | 0.0086 | 0.0081 | 0.0103 | 0.0102 |
+
+판단:
+- DDR segmentation 추가는 IDRiD/TJDR/DDR_SEG lesion evidence를 크게 개선했다.
+- 그러나 MAPLES는 best mDice 0.0103으로 여전히 gate 0.05에 크게 미달한다.
+- 따라서 v8은 product evidence로 승격하지 않고, 배포는 v31을 유지한다.
+
+근거:
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8_ddrseg_tjdr/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8_ddrseg_tjdr/evaluations/`
+- `.omc/research/phase4g_v8_ddrseg_result.json`
+
+---
+
+## 2026-05-21 Phase 4-G plan update — FGADR 제외
+
+FGADR는 4채널 병변 마스크 규모 면에서 매력적이지만, access agreement와 승인 절차가 현재 Sprint 5 진행 속도에 맞지 않는다.
+따라서 Phase 4-G/Sprint 5 기본 계획에서 FGADR 통합을 제외한다.
+
+수정된 방향:
+- `FGADRMaskProvider`, `_build_fgadr_rows`, `--include-fgadr` 구현은 진행하지 않는다.
+- 추가 데이터 후보는 DDR segmentation subset, Retinal-Lesions처럼 접근 절차가 더 단순한 데이터셋을 우선한다.
+- 데이터 추가가 지연되면 research-only fundus/segmentation encoder probe 또는 MAPLES domain-generalization 전략을 먼저 진행한다.
+- FGADR는 사용자가 로컬 원천 데이터를 별도로 제공한 경우에만 재검토한다.
+
+근거:
+- `.omc/plans/xai_improvement_phase4g.md`
+- `AI_HANDOFF.md`
+- `EXPERIMENT_REGISTRY.md`
+
+---
+
+## 2026-05-21 Phase 4-G no-FGADR data wiring — DDR segmentation 준비
+
+FGADR 제외 후 즉시 접근 가능한 대체 데이터를 확인했다.
+
+확인 결과:
+- 로컬 `data/raw/ddr`에는 `DR_grading.csv`와 `DR_grading/DR_grading` 이미지만 있고, segmentation/mask/annotation 파일은 없다.
+- 공식 DDR repo는 OIA-DDR를 classification / lesion segmentation / lesion detection 데이터셋으로 배포한다.
+- HuggingFace DDR mirror에는 `lesion_segmentation/images/{train,val,test}`와 `annotations/{train,val,tet}/{MA,HE,EX,SE}` 구조가 확인된다.
+- Retinal-Lesions는 pixel-level lesion annotation을 제공하지만 Google Form 요청 방식이므로 즉시 로컬 학습 데이터로 볼 수 없다.
+
+코드 준비:
+- `DDRSegMaskProvider` 추가: `DDR_SEG` domain의 MA/HE/EX/SE 4채널 mask를 로드한다.
+- `build_manifest --include-ddr-seg` / `--include-ddr-seg-test` 추가.
+- composite mask provider에 DDR segmentation provider를 추가했다.
+- `seg_evidence_v8_ddrseg_tjdr.yaml` 추가: IDRiD/MAPLES/TJDR/DDR_SEG composite 학습 config.
+
+아직 실행하지 않은 이유:
+- DDR segmentation subset 원천 파일이 로컬에 없어서 manifest/preprocess/train 단계는 대기 상태다.
+- 데이터 배치 후 `manifest_with_maples_tjdr_ddrseg_preprocessed.csv`를 만든 뒤 v8 학습을 진행한다.
+
+근거:
+- `.omc/research/phase4g_no_fgadr_data_access_update.json`
+- `.omc/plans/xai_improvement_phase4g.md`
+- `drscreen/data/mask_providers.py`
+- `drscreen/data/manifest_builder.py`
+- `drscreen/cli/build_manifest.py`
+- `configs/seg_evidence_v8_ddrseg_tjdr.yaml`
+
+---
+
+## 2026-05-20 v31 method sweep / syncfix seed repeat / MAPLES-only segmenter
+
+### 목적
+
+현재 데이터 안에서 바로 진행 가능한 3개 진단을 순차 실행했다.
+
+1. 배포 v31과 syncfix rerun의 XAI method sweep
+2. `v31_syncfix_rerun` seed 반복
+3. MAPLES-only specialist segmenter
+
+### 결과
+
+Method sweep에서는 active v31 기준 Grad-CAM이 Layer-CAM보다 IoU top-20과 AUC-IoU에서 약간 높았다.
+
+| Run | Method | PG | AUPRC | AUC-IoU | IoU top-20 |
+|---|---|---:|---:|---:|---:|
+| active v31 | Grad-CAM | 0.2222 | 0.1404 | 0.0555 | 0.0827 |
+| active v31 | Layer-CAM | 0.3704 | 0.1409 | 0.0496 | 0.0785 |
+| v31_syncfix_rerun | Grad-CAM | 0.4074 | 0.1328 | 0.0475 | 0.0629 |
+| v31_syncfix_rerun | Layer-CAM | 0.4815 | 0.1215 | 0.0394 | 0.0600 |
+
+syncfix seed repeat는 안정적인 개선을 보이지 않았다.
+
+| Run | DDR AUROC | Opt thr | Sens@opt | Spec@opt | Best XAI note |
+|---|---:|---:|---:|---:|---|
+| active v31 | 0.9160 | 0.35 | 0.7983 | 0.8677 | Grad-CAM IoU20 0.0827 / Layer-CAM IoU20 0.0785 |
+| v31_syncfix_rerun | 0.9082 | 0.24 | 0.7639 | 0.8905 | Grad-CAM IoU20 0.0629 |
+| v31_syncfix_seed43 | 0.8999 | 0.33 | 0.7550 | 0.8950 | Grad-CAM AUC-IoU 0.0618 but IoU20 0.0613 |
+| v31_syncfix_seed44 | 0.9176 | 0.29 | 0.7896 | 0.9055 | Grad-CAM IoU20 0.0590 |
+
+MAPLES-only segmenter는 MAPLES train 122장만 사용했다. Dry-run 기준 mask-valid domain count는 `MAPLES: 122`, train/val은 104/18이었다. 학습은 epoch 9에서 early stopping됐고 best는 epoch 1, val mDice 0.0090이다.
+
+| Eval set | Best criterion | Threshold | mDice | union IoU |
+|---|---|---:|---:|---:|
+| MAPLES test | mDice | 0.40 | 0.0039 | 0.0054 |
+| MAPLES test | union IoU | 0.50 | 0.0035 | 0.0056 |
+| IDRiD test | mDice / union IoU | 0.50 | 0.0222 | 0.0382 |
+
+### 결론
+
+Grad-CAM을 v31의 추가 비교 후보로 남길 수는 있지만, syncfix 재학습 자체는 v31을 안정적으로 넘지 못한다. `v31_syncfix_seed44`는 DDR AUROC만 근소하게 높고 XAI가 낮으며 threshold도 0.29로 이동했다.
+
+MAPLES-only 학습도 MAPLES test를 해결하지 못했으므로, 현재 512 preprocessed 데이터 안에서 단순 fine-tune/target-only 학습으로 MAPLES lesion evidence를 회복하기 어렵다. 배포는 계속 `v31_no_se_gated` 유지.
+
+근거:
+- `configs/v31_syncfix_seed43.yaml`
+- `configs/v31_syncfix_seed44.yaml`
+- `configs/seg_evidence_v7_maples_only.yaml`
+- `data/processed/manifest_maples_only_preprocessed.csv`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_seed43/evaluations/`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_seed44/evaluations/`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v7_maples_only/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v7_maples_only/evaluations/`
+
+---
+
+## 2026-05-20 v31 syncfix rerun — classifier aux_seg image/mask transform 재실험
+
+### 목적
+
+이전 classifier/multitask 계열은 `lambda_aux_seg > 0`으로 mask supervision을 쓰면서도 train image transform과 seg mask transform이 같은 spatial augmentation을 공유하지 않았다.
+따라서 현재 best/active인 `v31_no_se_gated` 구조를 image+mask synchronized transform 수정 후 다시 학습해, 기존 v31 성능이 transform 오류의 산물이었는지 확인했다.
+
+### 구현
+
+- `drscreen/train/data_loader_factory.py`: `train.lambda_aux_seg > 0`이면 `build_segmentation_train_transform()`과 `SegmentationManifestDataset`/`SegmentationFDAManifestDataset`을 사용하도록 변경.
+- `drscreen/train/runner.py`: dry-run 출력에 `train_dataset_type`과 `synchronized_mask_transform`을 추가.
+- `configs/v31_syncfix_rerun.yaml`: active v31 구조는 유지하되 run 이름과 checkpoint path만 분리.
+
+Dry-run에서 `train_dataset_type=SegmentationManifestDataset`, `synchronized_mask_transform=True`, train rows 4543 / val rows 366을 확인했다.
+
+### 결과
+
+학습은 완료됐고 best epoch은 9, best val AUROC는 0.9993이다.
+DDR external_test는 active v31보다 낮았다.
+
+| 항목 | active v31 | v31_syncfix_rerun |
+|---|---:|---:|
+| DDR AUROC | 0.9160 | 0.9082 |
+| DDR optimal threshold | 0.35 | 0.24 |
+| Sens@opt | 0.7983 | 0.7639 |
+| Spec@opt | 0.8677 | 0.8905 |
+
+IDRiD test XAI도 PG만 올랐고, AUPRC/AUC-IoU/IoU top-20은 모두 active v31보다 낮았다.
+
+| 평가 | Method | PG | AUPRC | AUC-IoU | IoU top-20 |
+|---|---|---:|---:|---:|---:|
+| active v31 IDRiD | block4 Layer-CAM | 0.3704 | 0.1409 | 0.0496 | 0.0785 |
+| v31_syncfix_rerun IDRiD | block4 Layer-CAM | 0.4815 | 0.1215 | 0.0394 | 0.0600 |
+| v31_syncfix_rerun IDRiD | seg_head | 0.1481 | 0.0890 | 0.0412 | 0.0642 |
+| active v31 MAPLES | block4 Layer-CAM | 0.0500 | 0.0172 | 0.0051 | 0.0113 |
+| v31_syncfix_rerun MAPLES | block4 Layer-CAM | 0.0000 | 0.0125 | 0.0031 | 0.0067 |
+| v31_syncfix_rerun MAPLES | seg_head | 0.0000 | 0.0102 | 0.0048 | 0.0076 |
+
+### 결론
+
+image+mask synchronized transform 수정은 코드상 필요했지만, v31을 그대로 다시 학습해도 active v31을 넘지 못했다.
+따라서 기존 active v31은 유지하고, `v31_syncfix_rerun`은 승격하지 않는다.
+이 결과는 “old v31이 sync bug 때문에 과소평가됐다”는 방향을 지지하지 않는다. 오히려 sync fix만으로는 shortcut/localization 문제가 해결되지 않으며, 이후 재실험은 v31 단순 반복이 아니라 데이터/representation 또는 구조 변경이 있는 실험에 한정한다.
+
+근거:
+- `configs/v31_syncfix_rerun.yaml`
+- `.omc/research/v31_syncfix_rerun_result.json`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_rerun/checkpoints/training_summary.json`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_rerun/evaluations/external_test_v31_syncfix_rerun_best_metrics.json`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_rerun/evaluations/xai_iou_v31_syncfix_rerun_layercam_block4_test.json`
+- `artifacts/runs/07_lesion_evidence/v31_syncfix_rerun/evaluations/xai_maples_v31_syncfix_rerun_layercam_block4_test.json`
+
+---
+
+## 2026-05-20 Mask-geometry rerun — seg_evidence_v2 재실험
+
+### 목적
+
+이전 pixel-mask supervision 실험에는 offline-preprocessed image와 raw mask의 geometry mismatch 가능성이 있었다.
+따라서 TJDR 없이 원래 `seg_evidence_v2_focal_tversky` 조건만 다시 실행해, geometry fix만으로 성능이 회복되는지 확인했다.
+
+### 구현
+
+- `configs/seg_evidence_v2_geomfix_retrain.yaml`: 기존 v2와 동일한 IDRiD+MAPLES R1+ preprocessed manifest, ResNet50+U-Net, Focal Tversky+BCE 설정을 사용하고 run 이름만 분리.
+- `drscreen/settings.py`: `seg_evidence_v2_geomfix_retrain`을 `09_evidence_segmentation` group에 등록.
+
+### 결과
+
+Dry-run 기준 train rows 150 / val rows 26 / mask-valid rows IDRiD 54 + MAPLES 122.
+학습은 epoch 10에서 early stopping됐고, best는 epoch 2, val mDice 0.0071이다.
+
+Threshold sweep:
+
+| Eval set | Best threshold | 기준 | mDice | union IoU |
+|---|---:|---|---:|---:|
+| IDRiD test | 0.40 | mDice | 0.0257 | 0.0352 |
+| IDRiD test | 0.50 | union IoU | 0.0183 | 0.0603 |
+| MAPLES test | 0.40 | mDice | 0.0040 | 0.0054 |
+| MAPLES test | 0.45 | union IoU | 0.0040 | 0.0055 |
+
+### 결론
+
+기존 v1/v2 결론은 geometry mismatch로 confounded였지만, v2 조건을 수정 후 재학습해도 성능은 회복되지 않았다.
+따라서 v2 실패 원인은 mask geometry 하나만으로 설명되지 않고, low-data segmentation과 representation/generalization 한계가 더 크다.
+이후 재실험은 원래 v2 조건이 아니라 TJDR/추가 데이터 또는 stronger encoder 계열을 기준으로 진행한다.
+
+근거:
+- `configs/seg_evidence_v2_geomfix_retrain.yaml`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v2_geomfix_retrain/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v2_geomfix_retrain/evaluations/idrid_test_threshold_sweep.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v2_geomfix_retrain/evaluations/maples_test_threshold_sweep.json`
+
+---
+
+## 2026-05-20 Phase 4-G — MAPLES-heavy fine-tune from v5
+
+### 목적
+
+고해상도 재전처리는 최후 수단으로 보류하고, 이전 문헌 검토에서 남긴 FDA/phase-style domain augmentation, Focal Tversky sparse-lesion loss, target-domain reweighting 축을 현재 512 데이터 안에서 먼저 확인했다.
+`seg_evidence_v5_maples_fda_tjdr`가 MAPLES를 소폭 개선했으므로, v5 best checkpoint에서 MAPLES-heavy low-LR fine-tune을 진행했다.
+
+### 구현
+
+- `drscreen/train/seg_runner.py`: segmentation evidence 학습에 `initial_checkpoint_path` warm-start와 domain-weighted sampler 추가.
+- `configs/seg_evidence_v6_maples_finetune_tjdr.yaml`: v5 best를 source checkpoint로 사용하고, `domain_sample_weights`를 MAPLES 4.0 / IDRiD 1.0 / TJDR 0.5로 설정.
+- `eval_seg_evidence.py`: 한 번의 forward cache로 여러 `lesion_threshold`를 평가하는 `--lesion-thresholds` sweep 옵션 추가.
+
+### 결과
+
+학습은 epoch 6에서 early stopping됐다. best는 epoch 2, val mDice 0.2145다.
+
+Aligned eval at threshold 0.5:
+
+| Eval set | N | mDice | mIoU | union Dice | union IoU |
+|---|---:|---:|---:|---:|---:|
+| IDRiD test | 27 | 0.2144 | 0.1345 | 0.4041 | 0.2574 |
+| MAPLES test | 60 | 0.0134 | 0.0079 | 0.0308 | 0.0175 |
+| TJDR test | 113 | 0.2816 | 0.1965 | 0.3472 | 0.2373 |
+
+Threshold sweep:
+
+| Eval set | Best threshold | 기준 | mDice | union IoU |
+|---|---:|---|---:|---:|
+| IDRiD test | 0.95 | mDice / union IoU | 0.2450 | 0.3033 |
+| MAPLES test | 0.05 | mDice / union IoU | 0.0165 | 0.0201 |
+| TJDR test | 0.90 | mDice | 0.3126 | 0.2885 |
+| TJDR test | 0.95 | union IoU | 0.3098 | 0.2933 |
+
+### 결론
+
+MAPLES best mDice는 v5의 0.0141에서 0.0165로 소폭 올랐지만, gate 0.05에는 여전히 크게 못 미친다.
+IDRiD와 TJDR best union IoU도 v5 대비 각각 0.3068 → 0.3033, 0.2962 → 0.2933으로 소폭 낮아졌다.
+따라서 fine-tune과 target-domain upweighting만으로는 MAPLES cross-domain lesion evidence gap을 해결하지 못했다.
+배포는 v31로 유지한다.
+
+근거:
+- `configs/seg_evidence_v6_maples_finetune_tjdr.yaml`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v6_maples_finetune_tjdr/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v6_maples_finetune_tjdr/evaluations/idrid_test_threshold_sweep.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v6_maples_finetune_tjdr/evaluations/maples_test_threshold_sweep.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v6_maples_finetune_tjdr/evaluations/tjdr_test_threshold_sweep.json`
+- `.omc/research/phase4g_maples_finetune_tjdr_result.json`
+
+---
+
 ## 2026-05-20 Phase 4-G G-2 — DeepLabV3 stronger segmenter baseline
 
 ### 목적
@@ -58,6 +432,59 @@ DeepLabV3는 IDRiD를 v3보다 개선했지만, TJDR은 v3보다 낮고 MAPLES�
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_eval_tjdr_test_aligned_eval.json`
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/evaluations/seg_threshold_sweep_idrid_maples_tjdr_aligned_eval.json`
 - `.omc/research/phase4g_deeplab_tjdr_result.json`
+
+---
+
+## 2026-05-20 Phase 4-G — MAPLES-target FDA segmentation evidence
+
+### 목적
+
+`seg_evidence_v4_deeplab_tjdr`는 IDRiD를 개선했지만 MAPLES 일반화는 해결하지 못했다.
+따라서 새 encoder가 아니라 MAPLES domain gap을 직접 겨냥하는 FDA style-transfer 학습을 실행했다.
+
+### 구현
+
+- `drscreen/data/datasets.py`: `SegmentationFDAManifestDataset` 추가. FDA는 photometric/frequency-domain 변환이므로 mask geometry는 유지하고, 이후 image/mask synchronized transform을 적용한다.
+- `drscreen/train/seg_runner.py`: segmentation training에서 `data.use_fda` 설정을 읽어 FDA dataset을 사용하도록 연결.
+- `configs/seg_evidence_v5_maples_fda_tjdr.yaml`: v3와 같은 ResNet50+U-Net, composite IDRiD/MAPLES/TJDR masks, `fda_target_domain: MAPLES`, `fda_probability: 0.8`, `fda_alpha: 0.05`.
+
+### 결과
+
+학습은 early stopping으로 epoch 29에서 종료됐다. best는 epoch 21, val mDice 0.2269다.
+
+Aligned eval at threshold 0.5:
+
+| Eval set | N | mDice | mIoU | union Dice | union IoU |
+|---|---:|---:|---:|---:|---:|
+| IDRiD test | 27 | 0.2458 | 0.1625 | 0.4585 | 0.3068 |
+| MAPLES test | 60 | 0.0114 | 0.0066 | 0.0241 | 0.0133 |
+| TJDR test | 113 | 0.3108 | 0.2265 | 0.3975 | 0.2852 |
+
+Threshold sweep:
+
+| Eval set | Best threshold | 기준 | mDice | union IoU |
+|---|---:|---|---:|---:|
+| IDRiD test | 0.60 | mDice | 0.2466 | 0.3066 |
+| IDRiD test | 0.50 | union IoU | 0.2458 | 0.3068 |
+| MAPLES test | 0.05 | mDice / union IoU | 0.0141 | 0.0183 |
+| TJDR test | 0.60 | mDice | 0.3146 | 0.2913 |
+| TJDR test | 0.75 | union IoU | 0.3126 | 0.2962 |
+
+### 결론
+
+MAPLES-target FDA는 IDRiD union IoU를 v3/v4보다 개선했고, TJDR은 v4보다 회복했다.
+그러나 MAPLES best mDice는 0.0141로 gate 0.05에 크게 못 미친다.
+따라서 FDA 단독은 MAPLES cross-domain lesion evidence gap 해결책이 아니다.
+다음 단계는 추가 lesion-mask 데이터 또는 research-only fundus/SAM/MedSAM/RETFound encoder probe가 필요하다.
+배포는 v31로 유지한다.
+
+근거:
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/evaluations/seg_eval_idrid_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/evaluations/seg_eval_maples_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/evaluations/seg_eval_tjdr_test_aligned_eval.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/evaluations/seg_threshold_sweep_idrid_maples_tjdr_aligned_eval.json`
+- `.omc/research/phase4g_maples_fda_tjdr_result.json`
 
 ---
 
