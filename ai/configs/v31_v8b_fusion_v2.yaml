@@ -25,7 +25,6 @@ labels:
     - normal
     - abnormal
 
-
 model:
   architecture: v31_v8b_fusion
   pretrained: true
@@ -41,24 +40,12 @@ model:
   segmenter_encoder: resnet50
   segmenter_out_channels: 4
   segmenter_decoder_channels: [256, 128, 64, 32]
+
 train:
   seed: 42
   device: cuda
-  optimizer: adamw
-  scheduler: cosine
-  head_epochs: 3
-  finetune_epochs: 15
-  warmup_epochs: 2
-  head_learning_rate: 0.0002
-  backbone_learning_rate: 0.00008
-  weight_decay: 0.0001
-  gradient_clip_norm: 1.0
-  min_checkpoint_sensitivity: 0.80
-  early_stopping_patience: 5
-  early_stopping_min_delta: 0.001
-  amp: true
   checkpoint_dir: artifacts/runs
-  global_best_checkpoint_path: artifacts/checkpoints/best.pt
+
 infer:
   device: cuda
   checkpoint_path: artifacts/checkpoints/best.pt
@@ -67,10 +54,10 @@ infer:
   use_preprocessing: true
   threshold: 0.38
   use_meta_classifier: true
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5
   gradcam_method: layercam
   gradcam_target_block: 4
   heatmap_activation_threshold: 0.25
   heatmap_gamma: 0.65
   heatmap_alpha: 0.86
-  evidence_type: lesion_segmentation
-  lesion_threshold: 0.5

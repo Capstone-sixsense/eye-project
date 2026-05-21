@@ -73,6 +73,12 @@ def _checkpoint_optimal_threshold(checkpoint: dict[str, Any]) -> float | None:
         threshold = _as_valid_threshold(checkpoint.get(key))
         if threshold is not None:
             return threshold
+    thresholds = checkpoint.get("thresholds")
+    if isinstance(thresholds, dict):
+        for key in ("fusion_score", "classification", "v31_legacy"):
+            threshold = _as_valid_threshold(thresholds.get(key))
+            if threshold is not None:
+                return threshold
     return None
 
 
@@ -145,6 +151,16 @@ def _load_xai_eval_metrics(
     block_label = _xai_block_label(infer_cfg)
     split = str(infer_cfg.get("xai_eval_split", "test"))
     method = str(infer_cfg.get("gradcam_method", "gradcam")).strip().lower() or "gradcam"
+    evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
+    if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
+        metrics = _load_lesion_segmentation_eval_metrics(
+            project_root,
+            version,
+            split=split,
+        )
+        if metrics:
+            return metrics
+
     eval_dir = get_run_evaluation_dir(project_root, version)
     raw_candidates = [
         eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
@@ -169,6 +185,31 @@ def _load_xai_eval_metrics(
         if metrics:
             return metrics
 
+    return None
+
+
+def _load_lesion_segmentation_eval_metrics(
+    project_root: Path,
+    version: str,
+    *,
+    split: str,
+) -> dict[str, Any] | None:
+    compact_dir = Path(project_root) / "artifacts" / "evaluations"
+    compact_candidates = [
+        compact_dir / f"xai_{version}_lesion_segmentation_{split}_best_metrics.json",
+        compact_dir / f"xai_{version}_segmentation_{split}_best_metrics.json",
+    ]
+    for path in compact_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_compact_xai_eval_metrics(
+            path,
+            split=split,
+            block_label="lesion_segmentation",
+        )
+        if metrics:
+            metrics.setdefault("xai_evidence_type", "lesion_segmentation")
+            return metrics
     return None
 
 
@@ -243,6 +284,17 @@ def _load_compact_xai_eval_metrics(
         "xai_iou_top20": _as_valid_threshold(pick("xai_iou_top20")),
         "xai_iou_top30": _as_valid_threshold(pick("xai_iou_top30")),
     }
+    for key, value in metric_source.items():
+        if not key.startswith("xai_") or key in metrics or value is None:
+            continue
+        if isinstance(value, bool):
+            metrics[key] = value
+        elif isinstance(value, int):
+            metrics[key] = value
+        elif isinstance(value, float):
+            metrics[key] = float(value)
+        elif isinstance(value, str):
+            metrics[key] = value
     return {key: value for key, value in metrics.items() if value is not None}
 
 
@@ -541,6 +593,13 @@ class InferenceSession:
                 else None
             ),
             concept_dropout=float(effective_config["model"].get("concept_dropout", 0.3)),
+            segmenter_encoder=str(effective_config["model"].get("segmenter_encoder", "resnet50")),
+            segmenter_out_channels=int(effective_config["model"].get("segmenter_out_channels", 4)),
+            segmenter_decoder_channels=(
+                [int(channel) for channel in effective_config["model"]["segmenter_decoder_channels"]]
+                if effective_config["model"].get("segmenter_decoder_channels") is not None
+                else None
+            ),
         ).to(device)
         load_state_from_checkpoint(model, checkpoint)
         model.eval()
@@ -666,26 +725,62 @@ class InferenceSession:
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
-        result = run_single_image_inference(
-            model=self.model,
-            image_tensor=image_tensor,
-            label_names=self.label_names,
-            threshold=self.decision_threshold,
-        )
+        infer_cfg = self.config.get("infer", {})
+        fusion_output: dict[str, Any] | None = None
+        cached_lesion_prob: torch.Tensor | None = None
+        fusion_summary: dict[str, Any] | None = None
+        if bool(infer_cfg.get("use_meta_classifier", False)):
+            if not hasattr(self.model, "predict_fusion_score"):
+                raise RuntimeError("use_meta_classifier=True requires predict_fusion_score().")
+            fusion_output = self.model.predict_fusion_score(image_tensor.unsqueeze(0))
+            meta_prob = fusion_output.get("meta_probability")
+            if meta_prob is None:
+                raise RuntimeError("Fusion model did not produce meta_probability.")
+            abnormal_probability = float(meta_prob)
+            predicted_index = int(abnormal_probability >= self.decision_threshold)
+            predicted_label = self.label_names[predicted_index]
+            result = InferenceResult(
+                predicted_index=predicted_index,
+                predicted_label=predicted_label,
+                abnormal_probability=abnormal_probability,
+            )
+            cached_seg = fusion_output.get("seg_prob")
+            if isinstance(cached_seg, torch.Tensor):
+                cached_lesion_prob = cached_seg[0]
+            feature_extraction = getattr(self.model, "feature_extraction", {}) or {}
+            fusion_summary = {
+                "v31_prob_pre_meta": float(fusion_output["v31_probability"]),
+                "v31_logit_pre_meta": float(fusion_output["v31_logit"]),
+                "meta_prob": abnormal_probability,
+                "fusion_threshold": float(self.decision_threshold),
+                "feature_schema_len": len(getattr(self.model, "feature_schema", []) or []),
+                "fusion_features_first10": [float(v) for v in fusion_output.get("features", [])[:10]],
+                "feature_area_thresholds": feature_extraction.get("area_thresholds"),
+                "feature_topk_fracs": feature_extraction.get("topk_fracs"),
+            }
+        else:
+            result = run_single_image_inference(
+                model=self.model,
+                image_tensor=image_tensor,
+                label_names=self.label_names,
+                threshold=self.decision_threshold,
+            )
 
         heatmap_overlay = None
         xai_error_code = None
         xai_no_region = False
         lesion_summary = None
         evidence_warning = None
-        infer_cfg = self.config.get("infer", {})
         evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
         if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
             evidence_type = "lesion_segmentation"
             try:
-                if not hasattr(self.model, "predict_seg"):
-                    raise ValueError("Model does not expose predict_seg().")
-                lesion_prob = self.model.predict_seg(image_tensor.unsqueeze(0))[0]
+                if cached_lesion_prob is not None:
+                    lesion_prob = cached_lesion_prob
+                else:
+                    if not hasattr(self.model, "predict_seg"):
+                        raise ValueError("Model does not expose predict_seg().")
+                    lesion_prob = self.model.predict_seg(image_tensor.unsqueeze(0))[0]
                 lesion_threshold = (
                     _as_valid_threshold(infer_cfg.get("lesion_threshold"))
                     or 0.5
@@ -700,6 +795,8 @@ class InferenceSession:
                     lesion_prob,
                     lesion_threshold=lesion_threshold,
                 )
+                if fusion_summary is not None:
+                    lesion_summary = {**lesion_summary, **fusion_summary}
             except Exception:
                 xai_error_code = "XAI_002"
                 evidence_warning = "LESION_EVIDENCE_UNAVAILABLE"
