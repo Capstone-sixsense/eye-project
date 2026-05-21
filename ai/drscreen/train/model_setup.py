@@ -11,7 +11,10 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, S
 
 from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
 from drscreen.settings import resolve_checkpoint_path
-from drscreen.utils.checkpoint import load_state_from_checkpoint
+from drscreen.utils.checkpoint import (
+    load_state_dict_with_shape_filter,
+    load_state_from_checkpoint,
+)
 from drscreen.utils.logging import get_logger
 
 LOGGER = get_logger(__name__)
@@ -305,7 +308,11 @@ def load_pretrained_backbone(
     if hasattr(model, "backbone") and not any(
         str(key).startswith("backbone.") for key in state
     ):
-        missing, unexpected = model.backbone.load_state_dict(state, strict=False)
+        missing, unexpected = load_state_dict_with_shape_filter(
+            model.backbone,
+            state,
+            strict=False,
+        )
     else:
         missing, unexpected = load_state_from_checkpoint(model, backbone_ckpt, strict=False)
     LOGGER.info(

@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 
-def _load_state_dict_with_shape_filter(
+def load_state_dict_with_shape_filter(
     model: nn.Module,
     state: dict[str, Any],
     *,
@@ -40,12 +40,12 @@ def load_state_from_checkpoint(
             raise ValueError(
                 "Fusion checkpoint requires a model with classifier and segmenter modules."
             )
-        missing_classifier, unexpected_classifier = _load_state_dict_with_shape_filter(
+        missing_classifier, unexpected_classifier = load_state_dict_with_shape_filter(
             model.classifier,
             checkpoint["classifier_state_dict"],
             strict=strict,
         )
-        missing_segmenter, unexpected_segmenter = _load_state_dict_with_shape_filter(
+        missing_segmenter, unexpected_segmenter = load_state_dict_with_shape_filter(
             model.segmenter,
             checkpoint["segmenter_state_dict"],
             strict=strict,
@@ -64,7 +64,7 @@ def load_state_from_checkpoint(
         )
 
     state = checkpoint.get("model_state_dict", checkpoint)
-    return _load_state_dict_with_shape_filter(model, state, strict=strict)
+    return load_state_dict_with_shape_filter(model, state, strict=strict)
 
 
 def read_checkpoint_auroc(path: Path) -> float:
