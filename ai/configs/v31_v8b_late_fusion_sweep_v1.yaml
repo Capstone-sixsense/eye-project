@@ -1,0 +1,39 @@
+project:
+  version: v31_v8b_late_fusion_sweep_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_tjdr_ddrseg_preprocessed.csv
+  image_root: data/raw
+  batch_size: 16
+  num_workers: 0
+  train_split: train
+  threshold_split: val
+  eval_splits: [train, val, test, external_test]
+
+classifier:
+  config_path: configs/base.yaml
+  checkpoint_path: artifacts/checkpoints/best.pt
+
+segmentation:
+  config_path: configs/seg_evidence_v8b_ddrseg_tjdr_maplesfix.yaml
+  checkpoint_path: artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/checkpoints/best.pt
+
+fusion:
+  seed: 43
+  c_values: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+  class_weight: balanced
+  train_variants:
+    all_train:
+      train_domains: null
+    classification_domains:
+      train_domains: [APTOS, IDRiD, Messidor]
+    aptos_only:
+      train_domains: [APTOS]
+  feature_sets:
+    - v31_score_only
+    - v8b_evidence_only
+    - late_fusion
+  thresholds:
+    min: 0.01
+    max: 0.99
+    steps: 99

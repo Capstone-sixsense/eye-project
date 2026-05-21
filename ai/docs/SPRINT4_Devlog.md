@@ -3,7 +3,7 @@
 ## 1. 개요
 - **프로젝트 명**: eye-project (AI 파트: drscreen)
 - **목표**: Sprint 3에서 남은 XAI 신뢰성 문제를 제품 기능 기준으로 재검토하고, 병변 위치 설명을 분류기 CAM이 아닌 병변 evidence 구조로 전환할 수 있는지 검증
-- **기간**: SPRINT 4 주요 실험 이력 (2026.05.07 ~ 2026.05.20, v31 active 유지 기준 마감)
+- **기간**: SPRINT 4 주요 실험 이력 (2026.05.07 ~ 2026.05.21, v31 active 유지 기준 마감)
 - **대상 범위**: v30~v39 classifier-routing/decoder-alignment 실험, Phase 4-E/F/G shortcut-free classifier 및 lesion segmentation evidence 실험, TJDR 통합, mask-geometry 보정
 
 > 주의: Sprint 4 종료 기준 active deployment는 `v31_no_se_gated`다. 이후 실험 중 `v37b`, `v37b_aux03`, `cbm_v1` 등 일부 run은 DDR AUROC가 v31보다 높았지만, 병변 위치 정렬 또는 MAPLES 일반화 기준을 만족하지 못해 배포하지 않는다. `artifacts/checkpoints/best.pt`는 계속 v31 checkpoint alias로 유지한다.
@@ -54,7 +54,9 @@
 - `seg_evidence_v3_tjdr`는 TJDR 추가 후 IDRiD mDice **0.2055**, union IoU **0.2209**, TJDR mDice **0.3524**, union IoU **0.3490**을 기록했다.
 - 그러나 MAPLES mDice는 **0.0051**, union IoU **0.0071**로 여전히 실패했다.
 - `seg_evidence_v4_deeplab_tjdr`, `seg_evidence_v5_maples_fda_tjdr`, `seg_evidence_v6_maples_finetune_tjdr`, `seg_evidence_v7_maples_only`도 MAPLES gate를 넘지 못했다.
-- 결론: TJDR은 IDRiD/TJDR evidence 품질을 높였지만, MAPLES cross-domain lesion evidence 문제는 해결하지 못했다.
+- 이후 MAPLES ROI 좌표계 보정 후 `seg_evidence_v8b_ddrseg_tjdr_maplesfix`가 IDRiD mDice **0.4151**, MAPLES mDice **0.2928**, TJDR mDice **0.3788**, DDR_SEG mDice **0.3945**로 Phase 4-G best standalone evidence baseline이 됐다.
+- G-4에서 v8b lesion-map scalar feature로 calibrated classifier를 학습했지만, best `v8b_evidence_classifier_grid_v1`도 DDR AUROC **0.8942**로 v31 **0.9160**보다 낮았다.
+- 결론: v8b는 병변 후보 영역 baseline으로는 가장 좋지만, 그 evidence만으로 active classifier를 대체하지는 못한다. 배포는 v31 유지.
 
 ## 3. 주요 성능 지표
 
@@ -69,6 +71,7 @@
 | `v31_dfr_v1` | DFR last-layer reweighting | 0.8641 | 0.05 | 0.6554 | DDR 실패 |
 | `bagnet_v1_p65_r512` | Sparse BagNet local evidence | 0.6552 | 0.47 | 0.3950 | DDR/XAI 실패 |
 | `cbm_v1` | concept bottleneck classifier | 0.9268 | 0.21 | 0.8354 | localization 실패 |
+| `v8b_evidence_classifier_grid_v1` | v8b lesion evidence scalar classifier | 0.8942 | 0.56 | 0.7639 | v31 미달 |
 
 ### 3.2 segmentation evidence run
 
@@ -82,6 +85,10 @@
 | `seg_evidence_v5_maples_fda_tjdr` | MAPLES test | 0.0114 | 0.0133 | 소폭 개선, gate 미달 |
 | `seg_evidence_v6_maples_finetune_tjdr` | MAPLES test | 0.0134 | 0.0175 | 소폭 개선, gate 미달 |
 | `seg_evidence_v7_maples_only` | MAPLES test | 0.0039 | 0.0056 | target-only 실패 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | IDRiD test | 0.4151 | 0.3903 | current evidence best |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | MAPLES test | 0.2928 | 0.2121 | ROI fix 후 회복 |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | TJDR test | 0.3788 | 0.3149 | current evidence best |
+| `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | DDR_SEG test | 0.3945 | 0.2880 | current evidence best |
 
 ## 4. 결론 및 Sprint 5 이월
 
@@ -90,11 +97,12 @@
   - Layer-CAM 방식 자체를 바꾸는 것만으로는 병변 위치 문제를 해결하지 못한다.
   - v31 계열은 DDR 분류 성능은 유지하지만, 병변만으로 판단하는 shortcut-free classifier라고 보기 어렵다.
   - decoder alignment, aux loss 강화, two-stage decoder, DFR, Sparse BagNet, CBM 모두 제품 기준 XAI를 만족하지 못했다.
-  - TJDR 추가는 IDRiD/TJDR segmentation evidence에는 효과가 있었지만 MAPLES 일반화에는 부족했다.
+  - MAPLES ROI 좌표계 보정 후 v8b standalone lesion evidence는 크게 개선됐지만, v8b evidence feature만으로는 v31 분류 성능을 대체하지 못했다.
   - mask-geometry 보정은 필요한 수정이었지만, 성능 실패의 유일한 원인은 아니었다.
 - **Sprint 5 이월 항목**:
   - MA/HE/EX/SE 4채널 병변 마스크 데이터 확장: FGADR는 접근 절차가 복잡해 제외하고, DDR segmentation subset, Retinal-Lesions 접근성 및 라이선스 검토.
   - classifier logit이 병변 concept/evidence를 반드시 거치는 구조 재설계.
+  - v8b를 독립 병변 후보 영역 baseline으로 유지하되, classifier causal explanation으로 표현하지 않기.
   - 저품질 입력 차단 정책을 backend/frontend와 합의.
   - MAPLES generalization 개선을 위한 stronger fundus/segmentation encoder 검토.
 
@@ -111,6 +119,8 @@
 - `ai/artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`
 - `ai/artifacts/runs/09_evidence_segmentation/seg_evidence_v3_tjdr/evaluations/`
 - `ai/artifacts/runs/09_evidence_segmentation/seg_evidence_v7_maples_only/evaluations/`
+- `ai/artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/evaluations/`
+- `ai/artifacts/runs/10_grounded_classifier/v8b_evidence_classifier_grid_v1/evaluations/v8b_evidence_classifier_grid_v1_metrics.json`
 
 ---
 **[SPRINT 4 종료 기준 정리]**

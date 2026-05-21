@@ -77,6 +77,11 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "bagnet_v1_p65_r512": "10_grounded_classifier",
     "cbm_v1_stage1": "10_grounded_classifier",
     "cbm_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_grid_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_clsdomains_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
 }
 
 

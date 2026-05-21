@@ -8,6 +8,36 @@
 
 ---
 
+## 2026-05-21 Phase 4-G G-4 — v8b evidence classifier 진단
+
+v8b lesion segmentation evidence가 분류 logit을 대체할 수 있는지 확인하기 위해, v8b 4채널 lesion probability map에서 scalar feature를 추출하고 logistic calibrated classifier를 학습했다. 이 실험은 AI research-only 진단이며 `configs/base.yaml`, `artifacts/checkpoints/best.pt`, backend, frontend는 변경하지 않았다.
+
+실행:
+- `configs/v8b_evidence_classifier_v1.yaml`: 전체 train domain 사용
+- `configs/v8b_evidence_classifier_clsdomains_v1.yaml`: APTOS/IDRiD/Messidor만 사용
+- `configs/v8b_evidence_classifier_aptos_v1.yaml`: APTOS만 사용
+- `configs/v8b_evidence_classifier_grid_v1.yaml`: 전체 train domain + C-grid
+
+DDR external_test 결과:
+
+| Run | DDR AUROC | Threshold | Sens | Spec | 판단 |
+|---|---:|---:|---:|---:|---|
+| `v8b_evidence_classifier_v1` | 0.8828 | 0.59 | 0.7478 | 0.8720 | v31 미달 |
+| `v8b_evidence_classifier_clsdomains_v1` | 0.8479 | 0.43 | 0.7861 | 0.8110 | v31 미달 |
+| `v8b_evidence_classifier_aptos_v1` | 0.8725 | 0.61 | 0.7168 | 0.8846 | v31 미달 |
+| `v8b_evidence_classifier_grid_v1` | 0.8942 | 0.56 | 0.7639 | 0.8674 | best G-4 diagnostic, v31 미달 |
+
+판단:
+- v8b는 현재 best standalone lesion evidence baseline이지만, scalar evidence feature만으로는 active v31 classifier를 대체하지 못한다.
+- active v31 reference는 DDR AUROC 0.9160, threshold 0.35, Sens 0.7983, Spec 0.8677이다.
+- Phase 4-G는 현재 로컬 데이터/코드 범위에서 완료한다. Sprint 5에서는 더 큰 4채널 병변 마스크 데이터, stronger fundus/segmentation encoder, 또는 classifier-only fallback UX를 별도 의사결정으로 다룬다.
+
+근거:
+- `artifacts/runs/10_grounded_classifier/v8b_evidence_classifier_grid_v1/evaluations/v8b_evidence_classifier_grid_v1_metrics.json`
+- `artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`
+
+---
+
 ## 2026-05-21 MAPLES ROI 좌표계 보정 및 v8/v5 재실험
 
 MAPLES failure가 과도하게 낮아 데이터셋/loader를 재감사했다. 파일 누락은 없었지만, MAPLES annotation은 원본 MESSIDOR 전체 좌표가 아니라 `MESSIDOR-ROIs.csv`의 ROI에 대응하는 1500x1500 좌표계였다. 기존 `load_maples_masks()`와 `MAPLESTrainMaskProvider`는 이 ROI를 원본 MESSIDOR canvas에 붙이지 않고 바로 resize했으므로, MAPLES train/eval mask가 공간적으로 misaligned였다.

@@ -32,7 +32,7 @@ The resolver in `drscreen/settings.py` keeps legacy checkpoint references readab
 | `07_lesion_evidence` | SE/ECA 제거 + gated pooling 유지 대조군(v31), synchronized mask-transform rerun/seed repeat, per-lesion routing 시리즈(v32~v35), v31 shortcut audit | `v31_no_se_gated`, `v31_syncfix_rerun`, `v31_syncfix_seed43`, `v31_syncfix_seed44`, `v32_lesion_seg_evidence`, `v33_per_lesion_routing`, `v34_calibrated_routing`, `v35_warmstart_routing` |
 | `08_xai_decoder_alignment` | U-Net auxiliary decoder, CAM alignment, MAPLES-inclusive lesion supervision, aux-loss sweep, two-stage decoder fallback | `v36_xai_multi`, `v37_xai_multi_maples`, `v37b_xai_unet_only`, `v37c_xai_maples_r1plus`, `v37b_aux03`, `v37b_aux04`, `v37b_aux05`, `v38_xai_coral`, `v39_unet_2stage` |
 | `09_evidence_segmentation` | Classifier-independent lesion segmentation evidence scaffold and TJDR/DDR-segmentation/Retinal-Lesions-style large-mask segmenter work. FGADR is excluded from the active path because access is too heavy | `seg_evidence_v1`, `seg_evidence_v2_focal_tversky`, `seg_evidence_v2_geomfix_retrain`, `seg_evidence_v3_tjdr`, `seg_evidence_v4_deeplab_tjdr`, `seg_evidence_v5_maples_fda_tjdr`, `seg_evidence_v5b_maples_fda_tjdr_maplesfix`, `seg_evidence_v6_maples_finetune_tjdr`, `seg_evidence_v7_maples_only`, `seg_evidence_v8_ddrseg_tjdr`, `seg_evidence_v8b_ddrseg_tjdr_maplesfix` |
-| `10_grounded_classifier` | Shortcut-free classifier redesign diagnostics and future grounded architectures | `v31_dfr_v1`, `bagnet_v1_p33_r256`, `bagnet_v1_p65_r512`, `cbm_v1_stage1`, `cbm_v1` |
+| `10_grounded_classifier` | Shortcut-free classifier redesign diagnostics and future grounded architectures | `v31_dfr_v1`, `bagnet_v1_p33_r256`, `bagnet_v1_p65_r512`, `cbm_v1_stage1`, `cbm_v1`, `v8b_evidence_classifier_v1`, `v8b_evidence_classifier_clsdomains_v1`, `v8b_evidence_classifier_aptos_v1`, `v8b_evidence_classifier_grid_v1` |
 | `06_deployment_candidates` | Runs relevant to deployment decisions | `v17_focal_g2`, `v17_512_focal_g2`, `v21_512_layercam`, `v24_multitask`, `v28_no_attention`, `v30_gated_pooling`, `v31_no_se_gated` |
 
 ## Run Registry
@@ -107,6 +107,10 @@ The resolver in `drscreen/settings.py` keeps legacy checkpoint references readab
 | `bagnet_v1_p65_r512` | `10_grounded_classifier` | - | `grounded_bagnet_v1_p65_r512.yaml` | yes | external | IDRiD/MAPLES patch-logit evidence | diagnostic failed; Sparse BagNet-65 at 512px reached DDR AUROC 0.6552 and patch-logit evidence stayed at random/center-baseline level |
 | `cbm_v1_stage1` | `10_grounded_classifier` | - | `cbm_v1_stage1.yaml` | yes | none | entropy gate | diagnostic warmup completed; normalized concept entropy 0.9983, redundant-solution gate passed |
 | `cbm_v1` | `10_grounded_classifier` | - | `cbm_v1.yaml` | yes | external | IDRiD/MAPLES concept maps, seg-head XAI, D5/D6/D7 shortcut audit | diagnostic failed; DDR AUROC 0.9268 passed, but best-threshold IDRiD mDice 0.0217 and MAPLES mDice 0.0046 failed localization gates |
+| `v8b_evidence_classifier_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; v8b lesion-map features trained on all train domains reached DDR AUROC 0.8828, below active v31 0.9160 |
+| `v8b_evidence_classifier_clsdomains_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_clsdomains_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; classification-domain-only fit reached DDR AUROC 0.8479 |
+| `v8b_evidence_classifier_aptos_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_aptos_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | diagnostic failed; APTOS-only fit reached DDR AUROC 0.8725 |
+| `v8b_evidence_classifier_grid_v1` | `10_grounded_classifier` | - | `v8b_evidence_classifier_grid_v1.yaml` | no checkpoint | external | v8b lesion evidence scalar classifier | best G-4 diagnostic but not promoted; C-grid best reached DDR AUROC 0.8942, Sens 0.7639, Spec 0.8674, still below v31 |
 
 ## Config / Helper Inventory
 
@@ -123,6 +127,10 @@ This table covers active runtime configs, helper configs, inactive configs, and 
 | `inactive/v4_ssl_finetune_focal.yaml.inactive` | SSL focal fine-tune config | inactive because the referenced SSL backbone/checkpoint artifacts are not present |
 | `inactive/v26_multitask_l3.yaml.inactive` | Lesion supervision λ=3.0 planned config | inactive config only; no checkpoint/evaluation artifact present |
 | `v29_with_attention.yaml` | Attention-on control run | checkpoint and DDR external_test metric are stored under `05_xai_attention_ablation/v29_with_attention/`; XAI pending |
+| `v8b_evidence_classifier_v1.yaml` | Phase 4-G G-4 scalar classifier over v8b lesion evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_clsdomains_v1.yaml` | Phase 4-G G-4 classification-domain-only scalar classifier over v8b evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_aptos_v1.yaml` | Phase 4-G G-4 APTOS-only scalar classifier over v8b evidence | diagnostic completed; not promoted |
+| `v8b_evidence_classifier_grid_v1.yaml` | Phase 4-G G-4 C-grid scalar classifier over v8b evidence | best G-4 diagnostic; DDR AUROC 0.8942, below v31 |
 | `v36_xai_multi.yaml` | U-Net decoder + CAM alignment | completed; DDR gate fail |
 | `v37_xai_multi_maples.yaml` | U-Net decoder + CAM alignment + MAPLES train masks | completed; calibration shift and XAI regression |
 | `v37b_xai_unet_only.yaml` | v37 ablation without CAM alignment | completed; calibration recovered but MAPLES XAI still weak |
@@ -220,6 +228,7 @@ External test means the `external_test_*_best_metrics.json` artifact stored unde
 | `10_grounded_classifier` | `bagnet_v1_p33_r256` | 12522 | 0.629288 | 0.31 | 0.4731 | 0.7044 |
 | `10_grounded_classifier` | `bagnet_v1_p65_r512` | 12522 | 0.655197 | 0.47 | 0.3950 | 0.8082 |
 | `10_grounded_classifier` | `cbm_v1` | 12522 | 0.926782 | 0.21 | 0.8354 | 0.8770 |
+| `10_grounded_classifier` | `v8b_evidence_classifier_grid_v1` | 12522 | 0.894188 | 0.56 | 0.7639 | 0.8674 |
 
 ## Internal Test Summary
 
