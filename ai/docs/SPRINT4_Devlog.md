@@ -93,7 +93,7 @@
   - TJDR 추가는 IDRiD/TJDR segmentation evidence에는 효과가 있었지만 MAPLES 일반화에는 부족했다.
   - mask-geometry 보정은 필요한 수정이었지만, 성능 실패의 유일한 원인은 아니었다.
 - **Sprint 5 이월 항목**:
-  - MA/HE/EX/SE 4채널 병변 마스크 데이터 확장: FGADR, DDR segmentation subset, Retinal-Lesions 접근성 및 라이선스 검토.
+  - MA/HE/EX/SE 4채널 병변 마스크 데이터 확장: FGADR는 접근 절차가 복잡해 제외하고, DDR segmentation subset, Retinal-Lesions 접근성 및 라이선스 검토.
   - classifier logit이 병변 concept/evidence를 반드시 거치는 구조 재설계.
   - 저품질 입력 차단 정책을 backend/frontend와 합의.
   - MAPLES generalization 개선을 위한 stronger fundus/segmentation encoder 검토.

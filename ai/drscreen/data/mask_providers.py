@@ -279,28 +279,16 @@ class MAPLESTrainMaskProvider:
             return zeros, False
 
         stem = Path(image_path).stem
-        from PIL import Image as PILImage
+        from drscreen.xai.iou import LESION_CODES, load_maples_masks
 
-        raw_channels: list[np.ndarray | None] = []
-        base_shape: tuple[int, int] | None = None
-        for lesion_dir in self._CHANNEL_DIRS:
-            mask_path = self._ann_dir / lesion_dir / f"{stem}.png"
-            if mask_path.exists():
-                arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
-                if arr.ndim == 3:
-                    arr = arr[..., 0]
-                base_shape = arr.shape[:2]
-                raw_channels.append((arr > 0).astype(np.uint8))
-            else:
-                raw_channels.append(None)
-
-        if base_shape is None:
+        masks = load_maples_masks(self._ann_dir, stem)
+        if not masks:
             return zeros, False
 
         stacked = np.stack(
             [
-                arr if arr is not None else np.zeros(base_shape, dtype=np.uint8)
-                for arr in raw_channels
+                masks.get(code, np.zeros(next(iter(masks.values())).shape, dtype=np.uint8))
+                for code in LESION_CODES
             ],
             axis=-1,
         )
@@ -386,6 +374,101 @@ class TJDRMaskProvider:
         return torch.from_numpy(aligned.astype(np.float32)).permute(2, 0, 1), True
 
 
+class DDRSegMaskProvider:
+    """Loads DDR lesion-segmentation masks as union or MA/HE/EX/SE channels.
+
+    Expected layout under ``data/raw/ddr/lesion_segmentation``:
+    ``images/{train,val,test}`` and ``annotations/{train,val,tet|test}/{MA,HE,EX,SE}``.
+    The DDR mirror currently spells the test annotation split as ``tet``; both
+    spellings are accepted.
+    """
+
+    _CHANNEL_CODES = ("MA", "HE", "EX", "SE")
+
+    def __init__(
+        self,
+        root_dir: str | Path,
+        channels: int = 1,
+        raw_root: str | Path | None = None,
+    ) -> None:
+        self._root_dir = Path(root_dir)
+        self._channels = int(channels)
+        self._raw_root = Path(raw_root) if raw_root is not None else _infer_raw_root(self._root_dir)
+        if self._channels not in (1, 4):
+            raise ValueError("DDRSegMaskProvider channels must be 1 or 4")
+
+    def _image_split(self, image_path: str) -> str | None:
+        parts = Path(image_path).parts
+        for split in ("train", "val", "test"):
+            if split in parts:
+                return split
+        return None
+
+    def _annotation_split(self, image_split: str) -> str:
+        if image_split != "test":
+            return image_split
+        if (self._root_dir / "annotations" / "test").is_dir():
+            return "test"
+        return "tet"
+
+    def _mask_path(self, split: str, code: str, stem: str) -> Path | None:
+        directory = self._root_dir / "annotations" / self._annotation_split(split) / code
+        for ext in (".tif", ".tiff", ".png", ".jpg", ".jpeg"):
+            candidate = directory / f"{stem}{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
+        zeros = torch.zeros(self._channels, size, size)
+        if domain != "DDR_SEG":
+            return zeros, False
+
+        image_split = self._image_split(image_path)
+        if image_split is None:
+            return zeros, False
+
+        from PIL import Image as PILImage
+
+        stem = Path(image_path).stem
+        raw_channels: list[np.ndarray | None] = []
+        base_shape: tuple[int, int] | None = None
+        found_any = False
+        for code in self._CHANNEL_CODES:
+            mask_path = self._mask_path(image_split, code, stem)
+            if mask_path is None:
+                raw_channels.append(None)
+                continue
+            arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
+            if arr.ndim == 3:
+                arr = arr[..., 0]
+            arr = (arr > 0).astype(np.uint8)
+            base_shape = arr.shape[:2] if base_shape is None else base_shape
+            raw_channels.append(arr)
+            found_any = True
+
+        if not found_any or base_shape is None:
+            return zeros, False
+
+        stacked = np.stack(
+            [
+                arr if arr is not None else np.zeros(base_shape, dtype=np.uint8)
+                for arr in raw_channels
+            ],
+            axis=-1,
+        )
+        aligned = _align_mask_to_image_preprocessing(
+            stacked,
+            image_path=image_path,
+            raw_root=self._raw_root,
+            size=size,
+        )
+        if self._channels == 1:
+            union = aligned.max(axis=-1, keepdims=True)
+            return torch.from_numpy(union.astype(np.float32)).permute(2, 0, 1), True
+        return torch.from_numpy(aligned.astype(np.float32)).permute(2, 0, 1), True
+
+
 class CompositeMaskProvider:
     """Dispatches mask loading across multiple per-domain providers.
 
@@ -433,28 +516,16 @@ class MAPLESMaskProvider:
             return zeros, False
 
         stem = Path(image_path).stem
-        raw_channels: list[np.ndarray | None] = []
-        base_shape: tuple[int, int] | None = None
+        from drscreen.xai.iou import LESION_CODES, load_maples_masks
 
-        for lesion_dir in self._CHANNEL_DIRS:
-            mask_path = self._ann_dir / lesion_dir / f"{stem}.png"
-            if mask_path.exists():
-                from PIL import Image as PILImage
-                arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
-                if arr.ndim == 3:
-                    arr = arr[..., 0]
-                base_shape = arr.shape[:2]
-                raw_channels.append((arr > 0).astype(np.uint8))
-            else:
-                raw_channels.append(None)
-
-        if base_shape is None:
+        masks = load_maples_masks(self._ann_dir, stem)
+        if not masks:
             return zeros, False
 
         stacked = np.stack(
             [
-                arr if arr is not None else np.zeros(base_shape, dtype=np.uint8)
-                for arr in raw_channels
+                masks.get(code, np.zeros(next(iter(masks.values())).shape, dtype=np.uint8))
+                for code in LESION_CODES
             ],
             axis=-1,
         )

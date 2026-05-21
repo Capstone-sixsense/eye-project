@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import csv
+from functools import lru_cache
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -18,6 +22,54 @@ _MAPLES_LESION_DIR = {
     "EX": "Exudates",
     "SE": "CottonWoolSpots",
 }
+
+
+@lru_cache(maxsize=8)
+def _load_maples_rois(maples_root: str) -> dict[str, dict[str, int]]:
+    roi_path = Path(maples_root) / "MESSIDOR-ROIs.csv"
+    if not roi_path.exists():
+        return {}
+    rois: dict[str, dict[str, int]] = {}
+    with roi_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            name = str(row.get("name", "")).strip()
+            if not name:
+                continue
+            rois[name] = {
+                key: int(float(row[key]))
+                for key in ("x0", "y0", "x1", "y1", "H", "W")
+                if row.get(key) not in (None, "")
+            }
+    return rois
+
+
+def _maples_roi_to_messidor_canvas(
+    mask: np.ndarray,
+    *,
+    image_stem: str,
+    annotations_dir,
+) -> np.ndarray:
+    """Map MAPLES' 1500x1500 ROI mask into original MESSIDOR coordinates."""
+    annotations_path = Path(annotations_dir)
+    rois = _load_maples_rois(str(annotations_path.parent))
+    roi = rois.get(image_stem)
+    if roi is None:
+        return mask
+
+    canvas = np.zeros((roi["H"], roi["W"]), dtype=np.uint8)
+    x0, y0, x1, y1 = roi["x0"], roi["y0"], roi["x1"], roi["y1"]
+    roi_w, roi_h = x1 - x0, y1 - y0
+    if roi_w <= 0 or roi_h <= 0:
+        return mask
+
+    from PIL import Image as PILImage
+
+    resized = np.asarray(
+        PILImage.fromarray(mask.astype(np.uint8)).resize((roi_w, roi_h), PILImage.Resampling.NEAREST),
+        dtype=np.uint8,
+    )
+    canvas[y0:y1, x0:x1] = resized[:roi_h, :roi_w]
+    return canvas
 
 
 def load_lesion_masks(
@@ -71,8 +123,6 @@ def load_maples_masks(
         dict of lesion_code -> uint8 binary mask (0/1).
         Only present codes are included.
     """
-    from pathlib import Path
-
     masks: dict[str, np.ndarray] = {}
     for code, subdir in _MAPLES_LESION_DIR.items():
         path = Path(annotations_dir) / subdir / f"{image_stem}.png"
@@ -82,6 +132,11 @@ def load_maples_masks(
         if arr is None:
             continue
         binary = (arr > 0).astype(np.uint8)
+        binary = _maples_roi_to_messidor_canvas(
+            binary,
+            image_stem=image_stem,
+            annotations_dir=annotations_dir,
+        )
         if target_size is not None:
             binary = cv2.resize(binary, target_size, interpolation=cv2.INTER_NEAREST)
         masks[code] = binary

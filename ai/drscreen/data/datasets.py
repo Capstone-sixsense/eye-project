@@ -194,6 +194,116 @@ class SegmentationManifestDataset(ManifestDataset):
         )
 
 
+class SegmentationFDAManifestDataset(SegmentationManifestDataset):
+    """Segmentation dataset with on-the-fly FDA and synchronized mask transforms.
+
+    FDA is photometric/frequency-domain only, so the mask geometry remains valid
+    and can still go through the synchronized segmentation transform.
+    """
+
+    def __init__(
+        self,
+        manifest_path: str | Path,
+        image_root: str | Path | None = None,
+        split: str | None = None,
+        transform: Callable[[Image.Image, torch.Tensor], tuple[Any, torch.Tensor]] | None = None,
+        fda_alpha: float = 0.05,
+        fda_probability: float = 1.0,
+        fda_target_domain: str | None = None,
+        fda_apply_to_target_domain: bool = False,
+        domain_column: str = "domain",
+        seg_mask_dir: str | Path | None = None,
+        seg_mask_size: int = 512,
+        mask_provider: LesionMaskProvider | None = None,
+        concept_label_path: str | Path | None = None,
+    ) -> None:
+        super().__init__(
+            manifest_path,
+            image_root,
+            split,
+            transform,
+            seg_mask_dir=seg_mask_dir,
+            seg_mask_size=seg_mask_size,
+            mask_provider=mask_provider,
+            concept_label_path=concept_label_path,
+        )
+        self._alpha = fda_alpha
+        self._probability = fda_probability
+        self._target_domain = fda_target_domain
+        self._apply_to_target_domain = fda_apply_to_target_domain
+        self._domain_column = domain_column
+        self._rng = np.random.default_rng()
+        self._domain_indices: dict[str, list[int]] = {}
+        self.rebuild_domain_indices()
+
+    def rebuild_domain_indices(self) -> None:
+        self._domain_indices = {}
+        if self._domain_column not in self.frame.columns:
+            return
+        for iloc_pos in range(len(self.frame)):
+            domain = str(self.frame.iloc[iloc_pos][self._domain_column])
+            self._domain_indices.setdefault(domain, []).append(iloc_pos)
+
+    def _should_mix(self, source_domain: str) -> bool:
+        if self._probability <= 0:
+            return False
+        if (
+            self._target_domain
+            and source_domain == self._target_domain
+            and not self._apply_to_target_domain
+        ):
+            return False
+        return bool(self._rng.random() <= self._probability)
+
+    def _sample_ref_index(self, source_index: int, source_domain: str) -> int:
+        if self._target_domain and self._target_domain in self._domain_indices:
+            candidates = [
+                i for i in self._domain_indices[self._target_domain] if i != source_index
+            ]
+            if candidates:
+                return int(self._rng.choice(candidates))
+
+        if len(self._domain_indices) > 1:
+            other_domains = [d for d in self._domain_indices if d != source_domain]
+            if other_domains:
+                chosen = self._rng.choice(other_domains)
+                return int(self._rng.choice(self._domain_indices[chosen]))
+
+        candidates = [i for i in range(len(self.frame)) if i != source_index]
+        return int(self._rng.choice(candidates)) if candidates else source_index
+
+    def _load_raw_array(self, iloc_pos: int) -> np.ndarray:
+        row = self.frame.iloc[iloc_pos]
+        image_path = self.image_root / str(row["image_path"])
+        with Image.open(image_path) as img:
+            return np.asarray(img.convert("RGB"))
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        row = self.frame.iloc[index]
+        image_path = self.image_root / str(row["image_path"])
+        domain = str(row["domain"]) if "domain" in self.frame.columns else ""
+
+        with Image.open(image_path) as img:
+            image = img.convert("RGB")
+            if self._should_mix(domain):
+                ref_arr = self._load_raw_array(self._sample_ref_index(index, domain))
+                image = Image.fromarray(fda_mix(np.asarray(image), ref_arr, self._alpha))
+
+        seg_mask, seg_mask_valid = self._mask_provider.load(
+            str(row["image_path"]), domain, self._seg_mask_size
+        )
+        if self.transform is not None:
+            image, seg_mask = self.transform(image, seg_mask)
+        return self._base_record(
+            row,
+            image=image,
+            image_path=image_path,
+            domain=domain,
+            seg_mask=seg_mask,
+            seg_mask_valid=seg_mask_valid,
+        )
+
+
 class FDAManifestDataset(ManifestDataset):
     """ManifestDataset with on-the-fly Fourier Domain Adaptation.
 

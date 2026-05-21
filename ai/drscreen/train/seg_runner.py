@@ -6,11 +6,16 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from drscreen.data.datasets import ManifestDataset, SegmentationManifestDataset
+from drscreen.data.datasets import (
+    ManifestDataset,
+    SegmentationFDAManifestDataset,
+    SegmentationManifestDataset,
+)
 from drscreen.data.mask_providers import (
     CompositeMaskProvider,
+    DDRSegMaskProvider,
     IDRiDPerLesionMaskProvider,
     MAPLESTrainMaskProvider,
     TJDRMaskProvider,
@@ -23,6 +28,7 @@ from drscreen.models.profiles import get_model_profile
 from drscreen.models.seg_evidence import LesionSegEvidence
 from drscreen.settings import get_run_checkpoint_dir, resolve_project_path
 from drscreen.train.loss import DiceBCELoss, FocalTverskyBCELoss
+from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.utils.seed import set_seed
 from drscreen.xai.seg_metrics import dice_iou_from_logits
 
@@ -64,11 +70,16 @@ def _build_seg_mask_provider(
         project_root,
         data_cfg.get("tjdr_root", "data/raw/TJDR"),
     )
+    ddr_seg_root = resolve_project_path(
+        project_root,
+        data_cfg.get("ddr_seg_root", "data/raw/ddr/lesion_segmentation"),
+    )
     raw_root = resolve_project_path(project_root, data_cfg.get("image_root", "data/raw"))
     providers = [
         IDRiDPerLesionMaskProvider(seg_mask_dir, raw_root=raw_root),
         MAPLESTrainMaskProvider(maples_ann_dir, channels=4, raw_root=raw_root),
         TJDRMaskProvider(tjdr_root, channels=4, raw_root=raw_root),
+        DDRSegMaskProvider(ddr_seg_root, channels=4, raw_root=raw_root),
     ]
     return CompositeMaskProvider(providers)
 
@@ -105,15 +116,30 @@ def _make_dataset(
     *,
     transform,
     mask_provider,
+    use_fda: bool = False,
 ) -> ManifestDataset:
     data_cfg = config["data"]
-    return SegmentationManifestDataset(
+    dataset_cls = SegmentationFDAManifestDataset if use_fda else SegmentationManifestDataset
+    kwargs: dict[str, Any] = {}
+    if use_fda:
+        kwargs.update(
+            {
+                "fda_alpha": float(data_cfg.get("fda_alpha", 0.05)),
+                "fda_probability": float(data_cfg.get("fda_probability", 1.0)),
+                "fda_target_domain": data_cfg.get("fda_target_domain"),
+                "fda_apply_to_target_domain": bool(
+                    data_cfg.get("fda_apply_to_target_domain", False)
+                ),
+            }
+        )
+    return dataset_cls(
         manifest_path=resolve_project_path(project_root, data_cfg["manifest_path"]),
         image_root=resolve_project_path(project_root, data_cfg.get("image_root", "data/raw")),
         split=data_cfg.get("train_split", "train"),
         transform=transform,
         seg_mask_size=int(data_cfg.get("image_size", 512)),
         mask_provider=mask_provider,
+        **kwargs,
     )
 
 
@@ -166,6 +192,7 @@ def _build_seg_datasets(
         project_root,
         transform=train_transform,
         mask_provider=mask_provider,
+        use_fda=bool(data_cfg.get("use_fda", False)),
     )
     val_dataset = _make_dataset(
         config,
@@ -175,12 +202,57 @@ def _build_seg_datasets(
     )
     train_dataset.frame = base_dataset.frame.iloc[train_idx].reset_index(drop=True)
     val_dataset.frame = base_dataset.frame.iloc[val_idx].reset_index(drop=True)
+    if isinstance(train_dataset, SegmentationFDAManifestDataset):
+        train_dataset.rebuild_domain_indices()
 
     domain_counts = {
         str(k): int(v)
         for k, v in base_dataset.frame.iloc[valid_indices]["domain"].value_counts().items()
     }
     return train_dataset, val_dataset, manifest_path, domain_counts
+
+
+def _build_domain_sampler(
+    dataset: ManifestDataset,
+    config: dict[str, Any],
+    *,
+    generator: torch.Generator,
+) -> WeightedRandomSampler | None:
+    data_cfg = config["data"]
+    domain_sampling = str(data_cfg.get("domain_sampling", "")).strip().lower()
+    domain_weights_cfg = data_cfg.get("domain_sample_weights") or {}
+    if not domain_sampling and not domain_weights_cfg:
+        return None
+
+    if "domain" not in dataset.frame.columns:
+        raise ValueError("domain_sampling requires a domain column in the training manifest.")
+
+    domains = [str(v) for v in dataset.frame["domain"].tolist()]
+    counts = {domain: domains.count(domain) for domain in sorted(set(domains))}
+    weights: list[float] = []
+    if domain_sampling == "balanced":
+        weights = [1.0 / max(counts[domain], 1) for domain in domains]
+    else:
+        weights = [1.0 for _ in domains]
+
+    if domain_weights_cfg:
+        domain_weights = {
+            str(domain): float(weight) for domain, weight in domain_weights_cfg.items()
+        }
+        weights = [
+            weight * domain_weights.get(domain, 1.0)
+            for weight, domain in zip(weights, domains, strict=True)
+        ]
+
+    if not any(weight > 0 for weight in weights):
+        raise ValueError("domain_sample_weights produced all-zero training weights.")
+
+    return WeightedRandomSampler(
+        weights=torch.as_tensor(weights, dtype=torch.double),
+        num_samples=len(weights),
+        replacement=True,
+        generator=generator,
+    )
 
 
 def _build_loaders(
@@ -197,10 +269,12 @@ def _build_loaders(
     persistent_workers = bool(data_cfg.get("persistent_workers", False)) and num_workers > 0
     generator = torch.Generator().manual_seed(int(config["train"].get("seed", 42)))
     drop_last = bool(data_cfg.get("drop_last", False))
+    sampler = _build_domain_sampler(train_dataset, config, generator=generator)
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=sampler is None,
+        sampler=sampler,
         num_workers=num_workers,
         pin_memory=device.type == "cuda",
         persistent_workers=persistent_workers,
@@ -340,6 +414,26 @@ def run_segmentation_training(
         pretrained=bool(config["model"].get("pretrained", True)),
         decoder_channels=tuple(config["model"].get("decoder_channels", [256, 128, 64, 32])),
     ).to(device)
+    initial_checkpoint_path: Path | None = None
+    initial_missing: list[str] = []
+    initial_unexpected: list[str] = []
+    initial_path_value = str(config["train"].get("initial_checkpoint_path", "")).strip()
+    if initial_path_value:
+        initial_checkpoint_path = resolve_project_path(project_root, initial_path_value)
+        if not initial_checkpoint_path.exists():
+            raise FileNotFoundError(f"initial_checkpoint_path not found: {initial_checkpoint_path}")
+        checkpoint = torch.load(initial_checkpoint_path, map_location="cpu", weights_only=False)
+        initial_missing, initial_unexpected = load_state_from_checkpoint(
+            model,
+            checkpoint,
+            strict=bool(config["train"].get("initial_checkpoint_strict", True)),
+        )
+        print(
+            "loaded initial segmentation checkpoint "
+            f"{initial_checkpoint_path} "
+            f"(missing={len(initial_missing)} unexpected={len(initial_unexpected)})",
+            flush=True,
+        )
 
     criterion = _build_criterion(config).to(device)
     optimizer = torch.optim.AdamW(
@@ -416,6 +510,7 @@ def run_segmentation_training(
             "optimizer_state_dict": optimizer.state_dict(),
             "config": config,
             "metrics": {"train": train_metrics, "val": val_metrics},
+            "initial_checkpoint_path": str(initial_checkpoint_path) if initial_checkpoint_path else None,
         }
         torch.save(payload, last_path)
         val_mdice = val_metrics.get("mdice")
@@ -451,6 +546,9 @@ def run_segmentation_training(
         "mask_valid_domain_counts": domain_counts,
         "device": str(device),
         "amp_enabled": amp_enabled,
+        "initial_checkpoint_path": str(initial_checkpoint_path) if initial_checkpoint_path else None,
+        "initial_checkpoint_missing": initial_missing,
+        "initial_checkpoint_unexpected": initial_unexpected,
         "seg_loss_type": str(config["train"].get("seg_loss_type", "dice_bce")),
         "best_epoch": best_epoch,
         "best_val_mdice": best_val_mdice if best_val_mdice >= 0 else None,
