@@ -151,6 +151,16 @@ def _load_xai_eval_metrics(
     block_label = _xai_block_label(infer_cfg)
     split = str(infer_cfg.get("xai_eval_split", "test"))
     method = str(infer_cfg.get("gradcam_method", "gradcam")).strip().lower() or "gradcam"
+    evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
+    if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
+        metrics = _load_lesion_segmentation_eval_metrics(
+            project_root,
+            version,
+            split=split,
+        )
+        if metrics:
+            return metrics
+
     eval_dir = get_run_evaluation_dir(project_root, version)
     raw_candidates = [
         eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
@@ -175,6 +185,31 @@ def _load_xai_eval_metrics(
         if metrics:
             return metrics
 
+    return None
+
+
+def _load_lesion_segmentation_eval_metrics(
+    project_root: Path,
+    version: str,
+    *,
+    split: str,
+) -> dict[str, Any] | None:
+    compact_dir = Path(project_root) / "artifacts" / "evaluations"
+    compact_candidates = [
+        compact_dir / f"xai_{version}_lesion_segmentation_{split}_best_metrics.json",
+        compact_dir / f"xai_{version}_segmentation_{split}_best_metrics.json",
+    ]
+    for path in compact_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_compact_xai_eval_metrics(
+            path,
+            split=split,
+            block_label="lesion_segmentation",
+        )
+        if metrics:
+            metrics.setdefault("xai_evidence_type", "lesion_segmentation")
+            return metrics
     return None
 
 
@@ -249,6 +284,17 @@ def _load_compact_xai_eval_metrics(
         "xai_iou_top20": _as_valid_threshold(pick("xai_iou_top20")),
         "xai_iou_top30": _as_valid_threshold(pick("xai_iou_top30")),
     }
+    for key, value in metric_source.items():
+        if not key.startswith("xai_") or key in metrics or value is None:
+            continue
+        if isinstance(value, bool):
+            metrics[key] = value
+        elif isinstance(value, int):
+            metrics[key] = value
+        elif isinstance(value, float):
+            metrics[key] = float(value)
+        elif isinstance(value, str):
+            metrics[key] = value
     return {key: value for key, value in metrics.items() if value is not None}
 
 
