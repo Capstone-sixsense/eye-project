@@ -10,10 +10,9 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 
-from drscreen.infer.service import InferenceSession
-
 from make_result_img import render_report_image_bytes
 from models.quickqual_wrapper import QuickQualWrapper
+from fundus_checker import check_fundus_heuristics
 import traceback
 
 import history
@@ -23,11 +22,10 @@ import io
 
 _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 
-# 'bad' 확률이 이 값을 넘으면 경고 (응답에 포함). 거부하려면 REJECT_BAD_QUALITY=True
+# 'bad' 확률이 이 값을 넘으면 경고 메시지를 응답에 포함 (usable 등급 대상)
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
-REJECT_BAD_QUALITY = os.environ.get("REJECT_BAD_QUALITY", "false").lower() == "true"
 
-_session: InferenceSession | None = None
+_session: Any = None
 _session_error: str | None = None
 _quickqual: QuickQualWrapper | None = None
 _quickqual_error: str | None = None
@@ -71,13 +69,11 @@ async def lifespan(app: FastAPI):
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
     #개발중인 AI 모델
     try:
+        from drscreen.infer.service import InferenceSession
         _configure_cpu_threads()
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
-    except FileNotFoundError as exc:
-        _session = None
-        _session_error = str(exc)
-    except Exception as exc:
+    except (ImportError, FileNotFoundError, Exception) as exc:
         _session = None
         _session_error = str(exc)
         
@@ -175,6 +171,23 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         except Exception:
             raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
 
+        # 안저 이미지 여부 판별 — 비안저 이미지는 QuickQual/AI 추론 전에 조기 거부
+        is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
+        if not is_fundus:
+            print(
+                f"[analyze] 안저 이미지 아님 → 거부 "
+                f"(reason={reject_reason}, details={fundus_details})",
+                flush=True,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "not_fundus_image",
+                    "message": "안저 이미지가 아닌 것으로 판단됩니다.",
+                    "reject_reason": reject_reason,
+                },
+            )
+
         #QuickQual 전처리 + 품질 평가
         t_qq = time.perf_counter()
         preprocessed_img, quality = await run_in_threadpool(
@@ -187,21 +200,22 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         )
 
         #품질 게이트 ----
+        if quality["label"] == "bad":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "low_image_quality",
+                    "message": f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). 다시 촬영해 주세요.",
+                    "quality": quality,
+                },
+            )
+
         quality_warning = None
         if quality["bad"] >= QUICKQUAL_BAD_THRESHOLD:
             quality_warning = (
                 f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). "
                 "결과 신뢰도가 떨어질 수 있습니다."
             )
-            if REJECT_BAD_QUALITY:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "code": "low_image_quality",
-                        "message": quality_warning,
-                        "quality": quality,
-                    },
-                )
         
         #타이머 종료
         print(

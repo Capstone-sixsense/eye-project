@@ -1,3 +1,5 @@
 ﻿*.sh text eol=lf
 ai/artifacts/checkpoints/best.pt filter=lfs diff=lfs merge=lfs -text
 ai/artifacts/ssl/backbone_best.pt filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text
