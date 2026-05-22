@@ -24,11 +24,14 @@ _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 
 # 'bad' 확률이 이 값을 넘으면 경고 메시지를 응답에 포함 (usable 등급 대상)
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
+# 안저 이미지 판별 필터 활성화 여부 (테스트 중 정확도 미보장 시 false로 비활성화)
+FUNDUS_CHECK_ENABLED = os.environ.get("FUNDUS_CHECK_ENABLED", "true").lower() == "true"
 
 _session: Any = None
 _session_error: str | None = None
 _quickqual: QuickQualWrapper | None = None
 _quickqual_error: str | None = None
+_deploy_metrics: dict[str, Any] | None = None
 
 logging.basicConfig(
     filename="server_errors.log",
@@ -89,6 +92,11 @@ async def lifespan(app: FastAPI):
         _quickqual_error = f"{type(exc).__name__}: {exc}"
         logger.error(f"[lifespan] QuickQual load failed:\n{traceback.format_exc()}")
 
+    if _session is not None:
+        global _deploy_metrics
+        _deploy_metrics = dict(_session.eval_metrics) if isinstance(_session.eval_metrics, dict) else {}
+        _deploy_metrics.setdefault("decision_threshold", _session.decision_threshold)
+
     yield
     _session = None
     _quickqual = None
@@ -129,6 +137,13 @@ def health() -> dict[str, Any]:
         payload["quickqual_error"] = _quickqual_error
     status = 200 if (_session and _quickqual) else 503
     return JSONResponse(status_code=status, content=payload)
+
+@app.get("/deploy-metric")
+def deploy_metric() -> dict[str, Any]:
+    if _deploy_metrics is None:
+        raise HTTPException(status_code=503, detail="아직 분석 이력이 없습니다.")
+    return _deploy_metrics
+
 
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
@@ -171,22 +186,23 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         except Exception:
             raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
 
-        # 안저 이미지 여부 판별 — 비안저 이미지는 QuickQual/AI 추론 전에 조기 거부
-        is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
-        if not is_fundus:
-            print(
-                f"[analyze] 안저 이미지 아님 → 거부 "
-                f"(reason={reject_reason}, details={fundus_details})",
-                flush=True,
-            )
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "not_fundus_image",
-                    "message": "안저 이미지가 아닌 것으로 판단됩니다.",
-                    "reject_reason": reject_reason,
-                },
-            )
+        # 안저 이미지 여부 판별 — FUNDUS_CHECK_ENABLED=false 로 비활성화 가능
+        if FUNDUS_CHECK_ENABLED:
+            is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
+            if not is_fundus:
+                print(
+                    f"[analyze] 안저 이미지 아님 → 거부 "
+                    f"(reason={reject_reason}, details={fundus_details})",
+                    flush=True,
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "not_fundus_image",
+                        "message": "안저 이미지가 아닌 것으로 판단됩니다.",
+                        "reject_reason": reject_reason,
+                    },
+                )
 
         #QuickQual 전처리 + 품질 평가
         t_qq = time.perf_counter()
