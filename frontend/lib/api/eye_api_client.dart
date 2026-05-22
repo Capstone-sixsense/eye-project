@@ -8,6 +8,35 @@ import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
 
+/// FastAPI `detail`·JSON 본문에서 사용자용 메시지 추출.
+String parseApiErrorMessage(String rawBody) {
+  final trimmed = rawBody.trim();
+  if (trimmed.isEmpty) return '알 수 없는 오류';
+  try {
+    final decoded = jsonDecode(trimmed);
+    if (decoded is Map<String, dynamic>) {
+      final fromDetail = _detailMessage(decoded['detail']);
+      if (fromDetail != null && fromDetail.isNotEmpty) return fromDetail;
+      final message = decoded['message'];
+      if (message is String && message.isNotEmpty) return message;
+    }
+  } catch (_) {}
+  if (trimmed.length <= 400 && !trimmed.startsWith('{')) return trimmed;
+  return '요청을 처리할 수 없습니다.';
+}
+
+String? _detailMessage(dynamic detail) {
+  if (detail is Map) {
+    final message = detail['message'];
+    if (message is String && message.isNotEmpty) return message;
+  }
+  if (detail is String && detail.isNotEmpty) return detail;
+  if (detail is List && detail.isNotEmpty) {
+    return detail.map((e) => e.toString()).join(', ');
+  }
+  return null;
+}
+
 /// 백엔드/게이트웨이가 돌려주는 HTTP 오류 본문에서 코드 추출 (가능할 때만).
 String? parseErrorCodeFromBody(String body) {
   try {
@@ -131,13 +160,7 @@ class EyeApiClient {
       '${response.body.length > 200 ? "${response.body.substring(0, 200)}..." : response.body}',
     );
     final code = parseErrorCodeFromBody(response.body);
-    final detail = jsonMap?['detail'];
-    final msg = detail is String
-        ? detail
-        : detail is List
-            ? detail.map((e) => e.toString()).join(', ')
-            : response.body;
-    throw EyeApiException(response.statusCode, msg, errorCode: code);
+    throw EyeApiException(response.statusCode, response.body, errorCode: code);
   }
 
   /// `GET /history` — 페이지네이션 목록 (최신순 서버 순서).

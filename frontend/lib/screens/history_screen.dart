@@ -8,6 +8,7 @@ import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
+import '../ui/notice_dialog.dart' show showErrorNotice, showNoticeDialog;
 
 /// 판정 필터 — [`_HistoryJudgmentIcon`]·목록 배지와 같은 기준.
 enum _JudgmentFilter { all, abnormal, normal, unknown }
@@ -408,9 +409,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       if (!mounted) return;
       setState(() => _loadingMore = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('추가 로드 실패: $e')),
-        );
+        await showErrorNotice(context, e);
       }
     } finally {
       _loadMoreBusy = false;
@@ -481,8 +480,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (_entries.isEmpty || _loadingRefresh) return;
 
     if (_selectedIndices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('삭제할 항목을 선택해주세요.')),
+      await showNoticeDialog(
+        context,
+        message: '삭제할 항목을 선택해주세요.',
       );
       return;
     }
@@ -519,17 +519,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('선택한 이력을 삭제했습니다.')),
+      await showNoticeDialog(
+        context,
+        message: '선택한 이력을 삭제했습니다.',
       );
 
       _exitSelectionMode();
       await _loadFirstPage();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('삭제 요청 실패: $e')),
-      );
+      await showErrorNotice(context, e);
     }
   }
 
