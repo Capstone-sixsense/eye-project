@@ -31,6 +31,7 @@ _session: Any = None
 _session_error: str | None = None
 _quickqual: QuickQualWrapper | None = None
 _quickqual_error: str | None = None
+_deploy_metrics: dict[str, Any] | None = None
 
 logging.basicConfig(
     filename="server_errors.log",
@@ -91,6 +92,11 @@ async def lifespan(app: FastAPI):
         _quickqual_error = f"{type(exc).__name__}: {exc}"
         logger.error(f"[lifespan] QuickQual load failed:\n{traceback.format_exc()}")
 
+    if _session is not None:
+        global _deploy_metrics
+        _deploy_metrics = dict(_session.eval_metrics) if isinstance(_session.eval_metrics, dict) else {}
+        _deploy_metrics.setdefault("decision_threshold", _session.decision_threshold)
+
     yield
     _session = None
     _quickqual = None
@@ -131,6 +137,13 @@ def health() -> dict[str, Any]:
         payload["quickqual_error"] = _quickqual_error
     status = 200 if (_session and _quickqual) else 503
     return JSONResponse(status_code=status, content=payload)
+
+@app.get("/deploy-metric")
+def deploy_metric() -> dict[str, Any]:
+    if _deploy_metrics is None:
+        raise HTTPException(status_code=503, detail="아직 분석 이력이 없습니다.")
+    return _deploy_metrics
+
 
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
