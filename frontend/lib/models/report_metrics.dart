@@ -11,12 +11,9 @@ class ReportMetrics {
     this.decisionThreshold,
     this.xaiEvalSplit,
     this.xaiEvalTargetBlock,
-    this.xaiPointingGame,
-    this.xaiAuprc,
+    this.xaiSegUnionIou,
+    this.xaiSegMdice,
     this.xaiAucIou,
-    this.xaiIouTop10,
-    this.xaiIouTop20,
-    this.xaiIouTop30,
     this.xaiEvalN,
     this.isFromServer = false,
   });
@@ -33,12 +30,9 @@ class ReportMetrics {
   final double? decisionThreshold;
   final String? xaiEvalSplit;
   final String? xaiEvalTargetBlock;
-  final double? xaiPointingGame;
-  final double? xaiAuprc;
+  final double? xaiSegUnionIou;
+  final double? xaiSegMdice;
   final double? xaiAucIou;
-  final double? xaiIouTop10;
-  final double? xaiIouTop20;
-  final double? xaiIouTop30;
   final int? xaiEvalN;
 
   static const List<({String key, String title, String subtitle})> _ratioRows = [
@@ -67,42 +61,27 @@ class ReportMetrics {
     (key: 'xai_eval_split', title: 'XAI 평가 split', subtitle: 'xai_eval_split'),
     (
       key: 'xai_eval_target_block',
-      title: 'CAM 대상 block',
-      subtitle: 'Grad-CAM / Layer-CAM 대상 (xai_eval_target_block)',
+      title: 'XAI 평가 대상',
+      subtitle: '병변 evidence 평가 블록 (xai_eval_target_block)',
     ),
     (key: 'xai_eval_n', title: 'XAI 평가 이미지 수', subtitle: 'xai_eval_n'),
   ];
 
   static const List<({String key, String title, String subtitle})> _xaiRatioRows = [
     (
-      key: 'xai_pointing_game',
-      title: 'Pointing game',
-      subtitle: '히트맵 최고 활성점이 병변 영역 내 비율',
+      key: 'xai_seg_union_iou',
+      title: '병변 후보 영역 IoU',
+      subtitle: 'xai_seg_union_iou',
     ),
     (
-      key: 'xai_auprc',
-      title: 'AUPRC',
-      subtitle: '히트맵·병변 mask 정렬 (precision-recall)',
+      key: 'xai_seg_mdice',
+      title: '병변 segmentation Dice',
+      subtitle: 'xai_seg_mdice',
     ),
     (
       key: 'xai_auc_iou',
       title: 'AUC-IoU',
-      subtitle: '임계값 sweep IoU 평균 성격',
-    ),
-    (
-      key: 'xai_iou_top10',
-      title: 'IoU (상위 10%)',
-      subtitle: '히트맵 상위 10% 영역과 병변 mask',
-    ),
-    (
-      key: 'xai_iou_top20',
-      title: 'IoU (상위 20%)',
-      subtitle: '히트맵 상위 20% 영역과 병변 mask',
-    ),
-    (
-      key: 'xai_iou_top30',
-      title: 'IoU (상위 30%)',
-      subtitle: '히트맵 상위 30% 영역과 병변 mask',
+      subtitle: 'threshold sweep 안정성 지표',
     ),
   ];
 
@@ -176,12 +155,9 @@ class ReportMetrics {
         'sensitivity' => sensitivity,
         'specificity' => specificity,
         'f1' => f1,
-        'xai_pointing_game' => xaiPointingGame,
-        'xai_auprc' => xaiAuprc,
+        'xai_seg_union_iou' => xaiSegUnionIou,
+        'xai_seg_mdice' => xaiSegMdice,
         'xai_auc_iou' => xaiAucIou,
-        'xai_iou_top10' => xaiIouTop10,
-        'xai_iou_top20' => xaiIouTop20,
-        'xai_iou_top30' => xaiIouTop30,
         _ => null,
       };
 
@@ -213,12 +189,9 @@ class ReportMetrics {
       decisionThreshold: _readRatio(m['decision_threshold']),
       xaiEvalSplit: m['xai_eval_split'] as String?,
       xaiEvalTargetBlock: m['xai_eval_target_block'] as String?,
-      xaiPointingGame: _readRatio(m['xai_pointing_game']),
-      xaiAuprc: _readRatio(m['xai_auprc']),
+      xaiSegUnionIou: _readRatio(m['xai_seg_union_iou']),
+      xaiSegMdice: _readRatio(m['xai_seg_mdice']),
       xaiAucIou: _readRatio(m['xai_auc_iou']),
-      xaiIouTop10: _readRatio(m['xai_iou_top10']),
-      xaiIouTop20: _readRatio(m['xai_iou_top20']),
-      xaiIouTop30: _readRatio(m['xai_iou_top30']),
       xaiEvalN: _readInt(m['xai_eval_n']),
     );
   }
@@ -238,12 +211,9 @@ class ReportMetrics {
       decisionThreshold: decisionThreshold ?? this.decisionThreshold,
       xaiEvalSplit: xaiEvalSplit,
       xaiEvalTargetBlock: xaiEvalTargetBlock,
-      xaiPointingGame: xaiPointingGame,
-      xaiAuprc: xaiAuprc,
+      xaiSegUnionIou: xaiSegUnionIou,
+      xaiSegMdice: xaiSegMdice,
       xaiAucIou: xaiAucIou,
-      xaiIouTop10: xaiIouTop10,
-      xaiIouTop20: xaiIouTop20,
-      xaiIouTop30: xaiIouTop30,
       xaiEvalN: xaiEvalN,
       isFromServer: isFromServer ?? this.isFromServer,
     );
