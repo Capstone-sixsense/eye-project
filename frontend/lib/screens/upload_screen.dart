@@ -7,8 +7,13 @@ import 'package:flutter/material.dart';
 import '../api/eye_api_client.dart';
 import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
+import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
+import '../services/deploy_metrics_store.dart';
 import '../ui/medical_ui.dart';
+import '../ui/notice_dialog.dart'
+    show showCodeNoticeDialog, showErrorNotice, showNoticeDialog;
+import '../ui/report_metrics_dialog.dart';
 
 const int _kMaxUploadBytes = 10 * 1024 * 1024;
 const Set<String> _kAllowedImageExtensions = {'jpg', 'jpeg', 'png'};
@@ -35,8 +40,15 @@ class _UploadScreenState extends State<UploadScreen> {
   String? fileName;
   Uint8List? fileBytes;
   bool _uploading = false;
+  ReportMetrics? _deployMetrics;
 
   final EyeApiClient _api = EyeApiClient();
+
+  @override
+  void initState() {
+    super.initState();
+    _deployMetrics = DeployMetricsStore.cached;
+  }
 
   Future<void> pickFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -51,13 +63,9 @@ class _UploadScreenState extends State<UploadScreen> {
     final ext = _normalizedExtension(f);
     if (ext == null || !_kAllowedImageExtensions.contains(ext)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'jpg, jpeg, png 형식만 업로드할 수 있습니다.',
-            ),
-            duration: Duration(seconds: 4),
-          ),
+        await showNoticeDialog(
+          context,
+          message: 'jpg, jpeg, png 형식만 업로드할 수 있습니다.',
         );
       }
       return;
@@ -67,11 +75,9 @@ class _UploadScreenState extends State<UploadScreen> {
         f.size > 0 ? f.size : (f.bytes?.length ?? 0);
     if (sizeBytes > _kMaxUploadBytes) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('10MB를 초과하는 파일은 업로드할 수 없습니다.'),
-            duration: Duration(seconds: 4),
-          ),
+        await showNoticeDialog(
+          context,
+          message: '10MB를 초과하는 파일은 업로드할 수 없습니다.',
         );
       }
       return;
@@ -80,14 +86,11 @@ class _UploadScreenState extends State<UploadScreen> {
     final bytes = f.bytes;
     if (bytes == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
+        await showNoticeDialog(
+          context,
+          message:
               '이 브라우저에서 파일 데이터를 읽지 못했습니다. '
               '다른 이미지로 다시 시도하거나 크롬/엣지를 사용해 보세요.',
-            ),
-            duration: Duration(seconds: 5),
-          ),
         );
       }
       return;
@@ -95,11 +98,9 @@ class _UploadScreenState extends State<UploadScreen> {
 
     if (bytes.length > _kMaxUploadBytes) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('10MB를 초과하는 파일은 업로드할 수 없습니다.'),
-            duration: Duration(seconds: 4),
-          ),
+        await showNoticeDialog(
+          context,
+          message: '10MB를 초과하는 파일은 업로드할 수 없습니다.',
         );
       }
       return;
@@ -109,25 +110,6 @@ class _UploadScreenState extends State<UploadScreen> {
       fileBytes = bytes;
       fileName = f.name;
     });
-  }
-
-  Future<void> _showInputChannelUnsupportedDialog() async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('지원하지 않는 이미지 형식'),
-        content: SelectableText(
-          '4채널·CMYK 등은 분석할 수 없습니다.\n\n${ApiErrorCodes.inputChannelUnsupported}',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('확인'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _uploadAndAnalyze() async {
@@ -166,8 +148,17 @@ class _UploadScreenState extends State<UploadScreen> {
       if (!mounted) return;
 
       if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
-        await _showInputChannelUnsupportedDialog();
+        await showCodeNoticeDialog(
+          context,
+          code: ApiErrorCodes.inputChannelUnsupported,
+          message: '4채널·CMYK 등은 분석할 수 없습니다.',
+        );
         return;
+      }
+
+      DeployMetricsStore.updateFromAnalyze(res);
+      if (mounted) {
+        setState(() => _deployMetrics = DeployMetricsStore.cached);
       }
 
       await Navigator.pushNamed(
@@ -181,34 +172,14 @@ class _UploadScreenState extends State<UploadScreen> {
     } on TimeoutException catch (e) {
       debugPrint('analyze 타임아웃: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$e'),
-          duration: const Duration(seconds: 8),
-        ),
-      );
+      await showErrorNotice(context, e);
     } on EyeApiException catch (e) {
       if (!mounted) return;
-      final isInputCh = e.errorCode == ApiErrorCodes.inputChannelUnsupported ||
-          e.body.contains(ApiErrorCodes.inputChannelUnsupported);
-      if (isInputCh) {
-        await _showInputChannelUnsupportedDialog();
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('서버 오류 (${e.statusCode}): ${e.body}')),
-      );
+      await showErrorNotice(context, e);
     } catch (e, st) {
       debugPrint('Upload/analyze 실패: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '요청 실패: $e\n브라우저 주소창과 백엔드 포트를 확인하세요.',
-          ),
-          duration: const Duration(seconds: 6),
-        ),
-      );
+      await showErrorNotice(context, e);
     } finally {
       if (mounted) {
         final nav = Navigator.of(context, rootNavigator: true);
@@ -216,6 +187,12 @@ class _UploadScreenState extends State<UploadScreen> {
         setState(() => _uploading = false);
       }
     }
+  }
+
+  String _deployMetricsLabel() {
+    final m = _deployMetrics;
+    if (m != null && m.hasDisplayableContent) return '성능 지표 보기';
+    return '성능 지표 (분석 후 표시)';
   }
 
   @override
@@ -298,6 +275,15 @@ class _UploadScreenState extends State<UploadScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: MedicalTokens.spaceMd),
+                  MedicalSecondaryButton(
+                    label: _deployMetricsLabel(),
+                    onPressed: () => showReportMetricsInfoDialog(
+                      context,
+                      metrics: _deployMetrics,
+                    ),
+                    leading: const Icon(Icons.bar_chart_outlined, size: 18),
                   ),
                 ],
               ),

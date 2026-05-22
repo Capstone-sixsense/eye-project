@@ -223,16 +223,29 @@ class MedicalSecondaryButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.leading,
   });
 
   final String label;
   final VoidCallback? onPressed;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
+    final labelWidget = Text(label);
     return OutlinedButton(
       onPressed: onPressed,
-      child: Text(label),
+      child: leading == null
+          ? labelWidget
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                leading!,
+                const SizedBox(width: 8),
+                labelWidget,
+              ],
+            ),
     );
   }
 }

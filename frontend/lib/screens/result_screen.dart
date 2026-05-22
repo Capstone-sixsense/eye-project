@@ -9,9 +9,9 @@ import 'package:printing/printing.dart';
 import '../config/api_config.dart';
 import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
-import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
+import '../ui/notice_dialog.dart';
 
 const double _kResultImageMaxHeight = 300;
 
@@ -404,8 +404,6 @@ class ResultScreen extends StatelessWidget {
                             const MedicalSectionTitle('이상 확률'),
                             const SizedBox(height: MedicalTokens.spaceSm),
                             _ProbabilityCard(response: res),
-                            const SizedBox(height: MedicalTokens.spaceLg),
-                            _ReportMetricsSection(response: res),
                             const SizedBox(height: MedicalTokens.spaceMd),
                           ],
                         ),
@@ -472,15 +470,17 @@ Future<void> _exportResultPdf(
     await Printing.sharePdf(bytes: bytes, filename: filename);
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PDF 내보내기가 완료되었습니다.')),
+      await showNoticeDialog(
+        context,
+        message: 'PDF보내기가 완료되었습니다.',
       );
     }
   } catch (_) {
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PDF 내보내기에 실패했습니다. 다시 시도해주세요.')),
+      await showNoticeDialog(
+        context,
+        message: 'PDF보내기에 실패했습니다. 다시 시도해주세요.',
       );
     }
   }
@@ -1046,369 +1046,6 @@ class _JudgmentCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// 성능 지표 — 접었다 펼치기. `/analyze`·이력 `metrics`(eval_metrics)가 있을 때만 수치 표시.
-class _ReportMetricsSection extends StatefulWidget {
-  const _ReportMetricsSection({required this.response});
-
-  final AnalyzeResponse? response;
-
-  @override
-  State<_ReportMetricsSection> createState() => _ReportMetricsSectionState();
-}
-
-class _ReportMetricsSectionState extends State<_ReportMetricsSection> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final res = widget.response;
-    if (res == null || !res.canShowInferenceResults) {
-      return const SizedBox.shrink();
-    }
-
-    final metrics = res.modelPerformanceMetrics;
-    final hasMetrics = metrics != null;
-    final theme = Theme.of(context);
-    final trailingLabel = _expanded
-        ? '접기'
-        : hasMetrics
-            ? '펼쳐서 보기'
-            : '지표 없음';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      Text(
-                        '성능 지표',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: MedicalTokens.textMain,
-                        ),
-                      ),
-                      if (hasMetrics)
-                        Text(
-                          '외부 테스트 배포 모델 평가 지표',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: MedicalTokens.textSubtle,
-                            height: 1.45,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Text(
-                  trailingLabel,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: MedicalTokens.textSubtle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 20,
-                  color: MedicalTokens.textSubtle,
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_expanded) ...[
-          const SizedBox(height: MedicalTokens.spaceSm),
-          if (hasMetrics)
-            _ReportMetricsCard(metrics: metrics)
-          else
-            const MedicalNoticeBanner(
-              title: '성능 지표',
-              body: 'AI eval_metrics가 응답에 없습니다.\n'
-                  '서버 재시작 후에도 비어 있으면 '
-                  'ai/artifacts/evaluations/ 평가 JSON을 확인하세요.',
-            ),
-        ],
-        const SizedBox(height: MedicalTokens.spaceLg),
-      ],
-    );
-  }
-}
-
-/// 백엔드 `/analyze` · 이력 `metrics` (AI external test eval_metrics).
-class _ReportMetricsCard extends StatelessWidget {
-  const _ReportMetricsCard({required this.metrics});
-
-  final ReportMetrics metrics;
-
-  @override
-  Widget build(BuildContext context) {
-    final rows = metrics.displayRows;
-    final thresholds = metrics.thresholdDisplayRows;
-    final xaiMeta = metrics.xaiMetaDisplayRows;
-    final xaiRows = metrics.xaiDisplayRows;
-
-    return _InfoCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _MetricSectionHeader(title: '분류 성능'),
-          const SizedBox(height: 8),
-          _MetricIndentedGroup(
-            children: [
-              for (var i = 0; i < rows.length; i++)
-                _MetricRatioTile(
-                  title: rows[i].title,
-                  subtitle: rows[i].subtitle,
-                  valueText: ReportMetrics.formatPercent(rows[i].ratio),
-                  topGap: i > 0,
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _MetricSectionHeader(title: '\n임계값'),
-          const SizedBox(height: 8),
-          _MetricIndentedGroup(
-            children: [
-              for (var i = 0; i < thresholds.length; i++)
-                _MetricThresholdTile(
-                  title: thresholds[i].title,
-                  subtitle: thresholds[i].subtitle,
-                  valueText:
-                      ReportMetrics.formatThreshold(thresholds[i].value),
-                  topGap: i > 0,
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _MetricSectionHeader(title: '\nXAI 평가 설정'),
-          const SizedBox(height: 8),
-          _MetricIndentedGroup(
-            children: [
-              for (var i = 0; i < xaiMeta.length; i++)
-                _MetricTextTile(
-                  title: xaiMeta[i].title,
-                  subtitle: xaiMeta[i].subtitle,
-                  valueText: xaiMeta[i].value,
-                  topGap: i > 0,
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _MetricSectionHeader(title: '\nXAI 지표'),
-          const SizedBox(height: 8),
-          _MetricIndentedGroup(
-            children: [
-              for (var i = 0; i < xaiRows.length; i++)
-                _MetricRatioTile(
-                  title: xaiRows[i].title,
-                  subtitle: xaiRows[i].subtitle,
-                  valueText: ReportMetrics.formatPercent(xaiRows[i].ratio),
-                  topGap: i > 0,
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricSectionHeader extends StatelessWidget {
-  const _MetricSectionHeader({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final base = theme.textTheme.titleSmall;
-    return Text(
-      title,
-      style: base?.copyWith(
-        fontSize: (base.fontSize ?? 14) + 1,
-        fontWeight: FontWeight.w800,
-        color: MedicalTokens.textMain,
-        height: 1.3,
-      ),
-    );
-  }
-}
-
-class _MetricIndentedGroup extends StatelessWidget {
-  const _MetricIndentedGroup({required this.children});
-
-  final List<Widget> children;
-
-  static const double _indent = 18;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: _indent),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      ),
-    );
-  }
-}
-
-class _MetricTextTile extends StatelessWidget {
-  const _MetricTextTile({
-    required this.title,
-    required this.subtitle,
-    required this.valueText,
-    this.topGap = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String valueText;
-  final bool topGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (topGap) const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: MedicalTokens.textMain,
-                ),
-              ),
-            ),
-            MedicalBadge(
-              text: valueText,
-              backgroundColor: const Color(0xFFF0F4F8),
-              foregroundColor: MedicalTokens.textMain,
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MetricRatioTile extends StatelessWidget {
-  const _MetricRatioTile({
-    required this.title,
-    required this.subtitle,
-    required this.valueText,
-    this.topGap = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String valueText;
-  final bool topGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (topGap) const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: MedicalTokens.textMain,
-                ),
-              ),
-            ),
-            MedicalBadge(text: valueText),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MetricThresholdTile extends StatelessWidget {
-  const _MetricThresholdTile({
-    required this.title,
-    required this.subtitle,
-    required this.valueText,
-    this.topGap = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String valueText;
-  final bool topGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (topGap) const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: MedicalTokens.textMain,
-                ),
-              ),
-            ),
-            MedicalBadge(
-              text: valueText,
-              backgroundColor: const Color(0xFFF0F4F8),
-              foregroundColor: MedicalTokens.textMain,
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
     );
   }
 }
