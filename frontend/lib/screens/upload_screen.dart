@@ -10,6 +10,7 @@ import '../models/analyze_response.dart';
 import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
 import '../services/deploy_metrics_store.dart';
+import '../ui/analyze_progress_dialog.dart';
 import '../ui/medical_ui.dart';
 import '../ui/notice_dialog.dart'
     show showCodeNoticeDialog, showErrorNotice, showNoticeDialog;
@@ -125,20 +126,7 @@ class _UploadScreenState extends State<UploadScreen> {
         builder: (ctx) => PopScope(
           canPop: false,
           child: AlertDialog(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 20),
-                Text(
-                  '서버로 전송 후 AI 분석 중입니다.\n\n'
-                  'Docker CPU 모드에서는 EfficientNet 추론에 '
-                  '${EyeApiClient.analyzeTimeout.inMinutes}분 가까이 걸릴 수 있습니다. '
-                  '백엔드 로그에 [analyze] 수신이 보이면 정상 처리 중입니다.',
-                  style: Theme.of(ctx).textTheme.bodyMedium,
-                ),
-              ],
-            ),
+            content: const AnalyzeProgressDialog(),
           ),
         ),
       );
