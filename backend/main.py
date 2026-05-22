@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import os, logging, datetime, time
+import os, logging, time
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 
-from drscreen.infer.service import InferenceSession
-
 from make_result_img import render_report_image_bytes
 from models.quickqual_wrapper import QuickQualWrapper
+from fundus_checker import check_fundus_heuristics
 import traceback
 
 import history
@@ -23,14 +21,11 @@ import io
 
 
 _DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
-UPLOAD_DIR = history.UPLOAD_DIR # "storage"
-RESULTS_DIR = history.RESULTS_DIR # "results"
 
-# 'bad' 확률이 이 값을 넘으면 경고 (응답에 포함). 거부하려면 REJECT_BAD_QUALITY=True
+# 'bad' 확률이 이 값을 넘으면 경고 메시지를 응답에 포함 (usable 등급 대상)
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
-REJECT_BAD_QUALITY = os.environ.get("REJECT_BAD_QUALITY", "false").lower() == "true"
 
-_session: InferenceSession | None = None
+_session: Any = None
 _session_error: str | None = None
 _quickqual: QuickQualWrapper | None = None
 _quickqual_error: str | None = None
@@ -64,17 +59,21 @@ async def lifespan(app: FastAPI):
     del app
     global _session, _session_error, _quickqual, _quickqual_error
 
+    try:
+        history.init_db()
+    except Exception as exc:
+        logger.error(f"[lifespan] DB 초기화 실패: {exc}")
+        raise
+
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
     #개발중인 AI 모델
     try:
+        from drscreen.infer.service import InferenceSession
         _configure_cpu_threads()
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
-    except FileNotFoundError as exc:
-        _session = None
-        _session_error = str(exc)
-    except Exception as exc:
+    except (ImportError, FileNotFoundError, Exception) as exc:
         _session = None
         _session_error = str(exc)
         
@@ -93,10 +92,9 @@ async def lifespan(app: FastAPI):
     yield
     _session = None
     _quickqual = None
+    history.close_db()
 
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True)
 
 app = FastAPI(title="eye-project backend", lifespan=lifespan)
 
@@ -173,9 +171,22 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         except Exception:
             raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
 
-        # 유효성 확인 후 원본 암호화 저장
-        raw_path = history.save_raw_image(record_id, content, ext=ext)
-        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
+        # 안저 이미지 여부 판별 — 비안저 이미지는 QuickQual/AI 추론 전에 조기 거부
+        is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
+        if not is_fundus:
+            print(
+                f"[analyze] 안저 이미지 아님 → 거부 "
+                f"(reason={reject_reason}, details={fundus_details})",
+                flush=True,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "not_fundus_image",
+                    "message": "안저 이미지가 아닌 것으로 판단됩니다.",
+                    "reject_reason": reject_reason,
+                },
+            )
 
         #QuickQual 전처리 + 품질 평가
         t_qq = time.perf_counter()
@@ -189,21 +200,22 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
         )
 
         #품질 게이트 ----
+        if quality["label"] == "bad":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "low_image_quality",
+                    "message": f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). 다시 촬영해 주세요.",
+                    "quality": quality,
+                },
+            )
+
         quality_warning = None
         if quality["bad"] >= QUICKQUAL_BAD_THRESHOLD:
             quality_warning = (
                 f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). "
                 "결과 신뢰도가 떨어질 수 있습니다."
             )
-            if REJECT_BAD_QUALITY:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "code": "low_image_quality",
-                        "message": quality_warning,
-                        "quality": quality,
-                    },
-                )
         
         #타이머 종료
         print(
@@ -220,10 +232,12 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
 
         # 리포트 이미지 합성
         # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
-        #ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else Image.open(proc_path)
         ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else preprocessed_img
         report_bytes = render_report_image_bytes(ai_image)
-        report_path = history.save_report_image(record_id, report_bytes)
+        # 추론 완료 후 저장 — 실패 시 고아 파일이 남지 않도록 이 시점에 한꺼번에 저장
+        raw_path = history.save_raw_image(record_id, content, ext=ext)
+        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
+        history.save_report_image(record_id, report_bytes)
 
 
         prob = pred.payload.get("abnormal_probability", 0.0)
@@ -252,6 +266,7 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             quality=quality,
             metrics=metrics,
             evidence=evidence,
+            raw_ext=ext,
         )
 
 
@@ -280,6 +295,15 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
+        for p in (
+            history.raw_path_for(record_id, ext=ext),
+            history.report_image_path_for(record_id),
+        ):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
         logger.error(f"[analyze] {name}: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="분석 실패") from e
 
@@ -332,10 +356,9 @@ def serve_report_image(record_id: str) -> Response:
 #   1) 쿼리스트링(limit, offset) 검증.
 #      - limit는 1..200 범위로 제한해 한 번의 응답이 너무 커지지 않도록 한다.
 #      - offset은 음수 차단.
-#   2) history.list_records(limit, offset) 으로 실제 데이터 수집.
-#   3) history.count_records() 로 전체 건수 계산
+#   2) list_records_with_total(limit, offset) 으로 데이터와 전체 건수를 한 번에 수집.
 #      → 프론트가 "전체 87건 중 1~50" 같은 페이지 인디케이터를 만들 수 있게 한다.
-#   4) 응답 dict를 그대로 반환 (FastAPI가 JSON 직렬화).
+#   3) 응답 dict를 그대로 반환 (FastAPI가 JSON 직렬화).
 #
 # [응답 스키마]
 #   {

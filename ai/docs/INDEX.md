@@ -28,6 +28,14 @@ The primary documentation has been consolidated into `AI_HANDOFF.md`.
 6. **[SPRINT3_Devlog.md](./SPRINT3_Devlog.md)**
    - Sprint 3 retrospective / submission summary for the AI part.
 
+7. **[SPRINT4_Devlog.md](./SPRINT4_Devlog.md)**
+   - Sprint 4 retrospective / submission summary for the AI part.
+   - Summarizes the v31 active decision, XAI/shortcut diagnostics, Phase 4-E/F results, and Sprint 5 carry-over items.
+
+8. **[SPRINT5_Devlog.md](./SPRINT5_Devlog.md)**
+   - Sprint 5 retrospective / running summary for the AI part.
+   - Tracks Phase 4-G, TJDR/DDR_SEG integration, MAPLES ROI correction, v8b evidence, v31+v8b late fusion diagnostics, and `v31_v8b_fusion_v2` AI-side deployment packaging.
+
 ---
 
 **Notes:**

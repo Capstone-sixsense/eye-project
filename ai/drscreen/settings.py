@@ -45,10 +45,44 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v29_with_attention": "05_xai_attention_ablation",
     "v30_gated_pooling": "06_xai_classifier_routing",
     "v31_no_se_gated": "07_lesion_evidence",
+    "v31_syncfix_rerun": "07_lesion_evidence",
+    "v31_syncfix_seed43": "07_lesion_evidence",
+    "v31_syncfix_seed44": "07_lesion_evidence",
     "v32_lesion_seg_evidence": "07_lesion_evidence",
     "v33_per_lesion_routing": "07_lesion_evidence",
     "v34_calibrated_routing": "07_lesion_evidence",
     "v35_warmstart_routing": "07_lesion_evidence",
+    "v36_xai_multi": "08_xai_decoder_alignment",
+    "v37_xai_multi_maples": "08_xai_decoder_alignment",
+    "v37b_xai_unet_only": "08_xai_decoder_alignment",
+    "v37b_aux03": "08_xai_decoder_alignment",
+    "v37b_aux04": "08_xai_decoder_alignment",
+    "v37b_aux05": "08_xai_decoder_alignment",
+    "v37c_xai_maples_r1plus": "08_xai_decoder_alignment",
+    "v38_xai_coral": "08_xai_decoder_alignment",
+    "v39_unet_2stage": "08_xai_decoder_alignment",
+    "seg_evidence_v1": "09_evidence_segmentation",
+    "seg_evidence_v2_focal_tversky": "09_evidence_segmentation",
+    "seg_evidence_v2_geomfix_retrain": "09_evidence_segmentation",
+    "seg_evidence_v3_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v4_deeplab_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v5_maples_fda_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v6_maples_finetune_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v7_maples_only": "09_evidence_segmentation",
+    "seg_evidence_v8_ddrseg_tjdr": "09_evidence_segmentation",
+    "seg_evidence_v8b_ddrseg_tjdr_maplesfix": "09_evidence_segmentation",
+    "seg_evidence_v5b_maples_fda_tjdr_maplesfix": "09_evidence_segmentation",
+    "v31_dfr_v1": "10_grounded_classifier",
+    "bagnet_v1_p33_r256": "10_grounded_classifier",
+    "bagnet_v1_p65_r512": "10_grounded_classifier",
+    "cbm_v1_stage1": "10_grounded_classifier",
+    "cbm_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_grid_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_clsdomains_v1": "10_grounded_classifier",
+    "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_v2": "10_grounded_classifier",
 }
 
 
@@ -154,12 +188,16 @@ def find_classification_metrics_path(
     *,
     split_name: str = "external_test",
     checkpoint_stem: str = "best",
+    prefer_compact: bool = False,
 ) -> Path:
     filename = classification_metrics_filename(split_name, version, checkpoint_stem)
-    candidates = [
-        get_run_evaluation_dir(project_root, version) / filename,
-        Path(project_root) / "artifacts" / "evaluations" / filename,
-    ]
+    run_candidate = get_run_evaluation_dir(project_root, version) / filename
+    compact_candidate = Path(project_root) / "artifacts" / "evaluations" / filename
+    candidates = (
+        [compact_candidate, run_candidate]
+        if prefer_compact
+        else [run_candidate, compact_candidate]
+    )
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -239,9 +277,57 @@ def build_effective_checkpoint_config(
                     "use_gated_pooling",
                     effective_config["model"].get("use_gated_pooling", False),
                 ),
+                "decoder_type": checkpoint_model_config.get(
+                    "decoder_type",
+                    effective_config["model"].get("decoder_type", "single_block"),
+                ),
+                "decoder_blocks": checkpoint_model_config.get(
+                    "decoder_blocks",
+                    effective_config["model"].get("decoder_blocks"),
+                ),
                 "use_mil_attention": checkpoint_model_config.get(
                     "use_mil_attention",
                     effective_config["model"].get("use_mil_attention", False),
+                ),
+                "bagnet_patch_size": checkpoint_model_config.get(
+                    "bagnet_patch_size",
+                    effective_config["model"].get("bagnet_patch_size", 33),
+                ),
+                "bagnet_patch_stride": checkpoint_model_config.get(
+                    "bagnet_patch_stride",
+                    effective_config["model"].get("bagnet_patch_stride", 8),
+                ),
+                "bagnet_hidden_channels": checkpoint_model_config.get(
+                    "bagnet_hidden_channels",
+                    effective_config["model"].get("bagnet_hidden_channels", 128),
+                ),
+                "bagnet_depth": checkpoint_model_config.get(
+                    "bagnet_depth",
+                    effective_config["model"].get("bagnet_depth", 4),
+                ),
+                "bagnet_dropout": checkpoint_model_config.get(
+                    "bagnet_dropout",
+                    effective_config["model"].get("bagnet_dropout", 0.15),
+                ),
+                "bagnet_aggregation": checkpoint_model_config.get(
+                    "bagnet_aggregation",
+                    effective_config["model"].get("bagnet_aggregation", "mean"),
+                ),
+                "concept_block": checkpoint_model_config.get(
+                    "concept_block",
+                    effective_config["model"].get("concept_block", 4),
+                ),
+                "concept_channels": checkpoint_model_config.get(
+                    "concept_channels",
+                    effective_config["model"].get("concept_channels", 4),
+                ),
+                "concept_head_hidden_channels": checkpoint_model_config.get(
+                    "concept_head_hidden_channels",
+                    effective_config["model"].get("concept_head_hidden_channels"),
+                ),
+                "concept_dropout": checkpoint_model_config.get(
+                    "concept_dropout",
+                    effective_config["model"].get("concept_dropout", 0.3),
                 ),
                 "pretrained": False,
             },

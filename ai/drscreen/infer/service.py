@@ -73,6 +73,12 @@ def _checkpoint_optimal_threshold(checkpoint: dict[str, Any]) -> float | None:
         threshold = _as_valid_threshold(checkpoint.get(key))
         if threshold is not None:
             return threshold
+    thresholds = checkpoint.get("thresholds")
+    if isinstance(thresholds, dict):
+        for key in ("fusion_score", "classification", "v31_legacy"):
+            threshold = _as_valid_threshold(thresholds.get(key))
+            if threshold is not None:
+                return threshold
     return None
 
 
@@ -80,6 +86,18 @@ def _mean_metric(section: Any) -> float | None:
     if not isinstance(section, dict):
         return None
     return _as_valid_threshold(section.get("mean"))
+
+
+def _as_non_negative_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
 
 
 def _xai_block_label(infer_cfg: dict[str, Any]) -> str:
@@ -132,17 +150,81 @@ def _load_xai_eval_metrics(
 ) -> dict[str, Any] | None:
     block_label = _xai_block_label(infer_cfg)
     split = str(infer_cfg.get("xai_eval_split", "test"))
-    path = (
-        get_run_evaluation_dir(project_root, version)
-        / f"xai_iou_{version}_{block_label}_{split}.json"
-    )
-    if not path.exists():
-        return None
+    method = str(infer_cfg.get("gradcam_method", "gradcam")).strip().lower() or "gradcam"
+    evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
+    if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
+        metrics = _load_lesion_segmentation_eval_metrics(
+            project_root,
+            version,
+            split=split,
+        )
+        if metrics:
+            return metrics
 
+    compact_dir = Path(project_root) / "artifacts" / "evaluations"
+    compact_candidates = [
+        compact_dir / f"xai_{version}_{method}_{block_label}_{split}_best_metrics.json",
+        compact_dir / f"xai_{version}_{block_label}_{split}_best_metrics.json",
+    ]
+    for path in compact_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_compact_xai_eval_metrics(path, split=split, block_label=block_label)
+        if metrics:
+            return metrics
+
+    eval_dir = get_run_evaluation_dir(project_root, version)
+    raw_candidates = [
+        eval_dir / f"xai_iou_{version}_{method}_{block_label}_{split}.json",
+        eval_dir / f"xai_iou_{version}_{block_label}_{split}.json",
+    ]
+    for path in raw_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_raw_xai_eval_metrics(path, split=split, block_label=block_label)
+        if metrics:
+            return metrics
+
+    return None
+
+
+def _load_lesion_segmentation_eval_metrics(
+    project_root: Path,
+    version: str,
+    *,
+    split: str,
+) -> dict[str, Any] | None:
+    compact_dir = Path(project_root) / "artifacts" / "evaluations"
+    compact_candidates = [
+        compact_dir / f"xai_{version}_lesion_segmentation_{split}_best_metrics.json",
+        compact_dir / f"xai_{version}_segmentation_{split}_best_metrics.json",
+    ]
+    for path in compact_candidates:
+        if not path.exists():
+            continue
+        metrics = _load_compact_xai_eval_metrics(
+            path,
+            split=split,
+            block_label="lesion_segmentation",
+        )
+        if metrics:
+            metrics.setdefault("xai_evidence_type", "lesion_segmentation")
+            return metrics
+    return None
+
+
+def _load_raw_xai_eval_metrics(
+    path: Path,
+    *,
+    split: str,
+    block_label: str,
+) -> dict[str, Any] | None:
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except Exception:
+        return None
+    if not isinstance(data, dict):
         return None
 
     aggregate = data.get("aggregate", {})
@@ -151,7 +233,7 @@ def _load_xai_eval_metrics(
     metrics: dict[str, Any] = {
         "xai_eval_split": data.get("split", split),
         "xai_eval_target_block": data.get("target_block", block_label),
-        "xai_eval_n": data.get("n_images"),
+        "xai_eval_n": _as_non_negative_int(data.get("n_images")),
         "xai_pointing_game": _mean_metric(aggregate.get("pointing_game")),
         "xai_auprc": _mean_metric(aggregate.get("auprc")),
         "xai_auc_iou": _mean_metric(aggregate.get("auc_iou")),
@@ -162,6 +244,57 @@ def _load_xai_eval_metrics(
             value = _as_valid_threshold(top_metrics.get("mean_iou_union"))
             metrics[f"xai_iou_{top_key}"] = value
 
+    return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _load_compact_xai_eval_metrics(
+    path: Path,
+    *,
+    split: str,
+    block_label: str,
+) -> dict[str, Any] | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    metric_source = data.get("metrics", {})
+    if not isinstance(metric_source, dict):
+        metric_source = {}
+
+    def pick(*keys: str) -> Any:
+        for key in keys:
+            if key in metric_source and metric_source[key] is not None:
+                return metric_source[key]
+            if key in data and data[key] is not None:
+                return data[key]
+        return None
+
+    metrics: dict[str, Any] = {
+        "xai_eval_split": pick("xai_eval_split", "split") or split,
+        "xai_eval_target_block": pick("xai_eval_target_block", "target_block") or block_label,
+        "xai_eval_n": _as_non_negative_int(pick("xai_eval_n", "n_images")),
+        "xai_pointing_game": _as_valid_threshold(pick("xai_pointing_game")),
+        "xai_auprc": _as_valid_threshold(pick("xai_auprc")),
+        "xai_auc_iou": _as_valid_threshold(pick("xai_auc_iou")),
+        "xai_iou_top10": _as_valid_threshold(pick("xai_iou_top10")),
+        "xai_iou_top20": _as_valid_threshold(pick("xai_iou_top20")),
+        "xai_iou_top30": _as_valid_threshold(pick("xai_iou_top30")),
+    }
+    for key, value in metric_source.items():
+        if not key.startswith("xai_") or key in metrics or value is None:
+            continue
+        if isinstance(value, bool):
+            metrics[key] = value
+        elif isinstance(value, int):
+            metrics[key] = value
+        elif isinstance(value, float):
+            metrics[key] = float(value)
+        elif isinstance(value, str):
+            metrics[key] = value
     return {key: value for key, value in metrics.items() if value is not None}
 
 
@@ -184,8 +317,29 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
     return (labels == largest_label).astype(np.float32)
 
 
+def _config_float(
+    config: dict[str, Any] | None,
+    key: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if config is None:
+        return default
+    try:
+        value = float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(value):
+        return default
+    return float(np.clip(value, minimum, maximum))
+
+
 def _render_gradcam_overlay(
-    image: Image.Image, heatmap: torch.Tensor
+    image: Image.Image,
+    heatmap: torch.Tensor,
+    infer_cfg: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, bool]:
     normalized = heatmap.detach().cpu().clamp(0.0, 1.0).numpy().astype(np.float32)
     retina_mask = _build_retina_mask(image)
@@ -196,14 +350,27 @@ def _render_gradcam_overlay(
     )
     resized *= retina_mask
 
-    # Suppress weak activations so the overlay highlights only strong evidence regions.
-    activation_threshold = 0.45
+    # Suppress weak activations while keeping enough mid-strength evidence visible.
+    activation_threshold = _config_float(
+        infer_cfg,
+        "heatmap_activation_threshold",
+        0.25,
+        minimum=0.0,
+        maximum=0.95,
+    )
     emphasized = np.clip(
         (resized - activation_threshold) / (1.0 - activation_threshold),
         0.0,
         1.0,
     )
-    emphasized = np.power(emphasized, 0.8, dtype=np.float32)
+    heatmap_gamma = _config_float(
+        infer_cfg,
+        "heatmap_gamma",
+        0.65,
+        minimum=0.1,
+        maximum=3.0,
+    )
+    emphasized = np.power(emphasized, heatmap_gamma, dtype=np.float32)
 
     retina_pixel_count = float(retina_mask.sum())
     if retina_pixel_count > 0:
@@ -217,7 +384,14 @@ def _render_gradcam_overlay(
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
 
     original = np.asarray(image.convert("RGB"), dtype=np.float32)
-    alpha_mask = emphasized[..., None] * 0.82
+    heatmap_alpha = _config_float(
+        infer_cfg,
+        "heatmap_alpha",
+        0.86,
+        minimum=0.0,
+        maximum=1.0,
+    )
+    alpha_mask = emphasized[..., None] * heatmap_alpha
     overlay = (original * (1.0 - alpha_mask)) + (heat_rgb * alpha_mask)
     return Image.fromarray(np.uint8(np.clip(overlay, 0.0, 255.0))), xai_no_region
 
@@ -399,6 +573,33 @@ class InferenceSession:
             aux_seg_channels=int(effective_config["model"].get("aux_seg_channels", 1)),
             use_gated_pooling=bool(effective_config["model"].get("use_gated_pooling", False)),
             use_mil_attention=bool(effective_config["model"].get("use_mil_attention", False)),
+            decoder_type=str(effective_config["model"].get("decoder_type", "single_block")),
+            decoder_blocks=(
+                [int(block) for block in effective_config["model"]["decoder_blocks"]]
+                if effective_config["model"].get("decoder_blocks") is not None
+                else None
+            ),
+            bagnet_patch_size=int(effective_config["model"].get("bagnet_patch_size", 33)),
+            bagnet_patch_stride=int(effective_config["model"].get("bagnet_patch_stride", 8)),
+            bagnet_hidden_channels=int(effective_config["model"].get("bagnet_hidden_channels", 128)),
+            bagnet_depth=int(effective_config["model"].get("bagnet_depth", 4)),
+            bagnet_dropout=float(effective_config["model"].get("bagnet_dropout", 0.15)),
+            bagnet_aggregation=str(effective_config["model"].get("bagnet_aggregation", "mean")),
+            concept_block=int(effective_config["model"].get("concept_block", 4)),
+            concept_channels=int(effective_config["model"].get("concept_channels", 4)),
+            concept_head_hidden_channels=(
+                int(effective_config["model"]["concept_head_hidden_channels"])
+                if effective_config["model"].get("concept_head_hidden_channels") is not None
+                else None
+            ),
+            concept_dropout=float(effective_config["model"].get("concept_dropout", 0.3)),
+            segmenter_encoder=str(effective_config["model"].get("segmenter_encoder", "resnet50")),
+            segmenter_out_channels=int(effective_config["model"].get("segmenter_out_channels", 4)),
+            segmenter_decoder_channels=(
+                [int(channel) for channel in effective_config["model"]["segmenter_decoder_channels"]]
+                if effective_config["model"].get("segmenter_decoder_channels") is not None
+                else None
+            ),
         ).to(device)
         load_state_from_checkpoint(model, checkpoint)
         model.eval()
@@ -432,6 +633,7 @@ class InferenceSession:
             version,
             split_name="external_test",
             checkpoint_stem="best",
+            prefer_compact=True,
         )
         eval_metrics = None
         if eval_metrics_path.exists():
@@ -524,26 +726,62 @@ class InferenceSession:
             original_image = self.preprocessor(original_image)
         image_tensor = self.eval_transform(original_image).to(self.device)
 
-        result = run_single_image_inference(
-            model=self.model,
-            image_tensor=image_tensor,
-            label_names=self.label_names,
-            threshold=self.decision_threshold,
-        )
+        infer_cfg = self.config.get("infer", {})
+        fusion_output: dict[str, Any] | None = None
+        cached_lesion_prob: torch.Tensor | None = None
+        fusion_summary: dict[str, Any] | None = None
+        if bool(infer_cfg.get("use_meta_classifier", False)):
+            if not hasattr(self.model, "predict_fusion_score"):
+                raise RuntimeError("use_meta_classifier=True requires predict_fusion_score().")
+            fusion_output = self.model.predict_fusion_score(image_tensor.unsqueeze(0))
+            meta_prob = fusion_output.get("meta_probability")
+            if meta_prob is None:
+                raise RuntimeError("Fusion model did not produce meta_probability.")
+            abnormal_probability = float(meta_prob)
+            predicted_index = int(abnormal_probability >= self.decision_threshold)
+            predicted_label = self.label_names[predicted_index]
+            result = InferenceResult(
+                predicted_index=predicted_index,
+                predicted_label=predicted_label,
+                abnormal_probability=abnormal_probability,
+            )
+            cached_seg = fusion_output.get("seg_prob")
+            if isinstance(cached_seg, torch.Tensor):
+                cached_lesion_prob = cached_seg[0]
+            feature_extraction = getattr(self.model, "feature_extraction", {}) or {}
+            fusion_summary = {
+                "v31_prob_pre_meta": float(fusion_output["v31_probability"]),
+                "v31_logit_pre_meta": float(fusion_output["v31_logit"]),
+                "meta_prob": abnormal_probability,
+                "fusion_threshold": float(self.decision_threshold),
+                "feature_schema_len": len(getattr(self.model, "feature_schema", []) or []),
+                "fusion_features_first10": [float(v) for v in fusion_output.get("features", [])[:10]],
+                "feature_area_thresholds": feature_extraction.get("area_thresholds"),
+                "feature_topk_fracs": feature_extraction.get("topk_fracs"),
+            }
+        else:
+            result = run_single_image_inference(
+                model=self.model,
+                image_tensor=image_tensor,
+                label_names=self.label_names,
+                threshold=self.decision_threshold,
+            )
 
         heatmap_overlay = None
         xai_error_code = None
         xai_no_region = False
         lesion_summary = None
         evidence_warning = None
-        infer_cfg = self.config.get("infer", {})
         evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
         if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
             evidence_type = "lesion_segmentation"
             try:
-                if not hasattr(self.model, "predict_seg"):
-                    raise ValueError("Model does not expose predict_seg().")
-                lesion_prob = self.model.predict_seg(image_tensor.unsqueeze(0))[0]
+                if cached_lesion_prob is not None:
+                    lesion_prob = cached_lesion_prob
+                else:
+                    if not hasattr(self.model, "predict_seg"):
+                        raise ValueError("Model does not expose predict_seg().")
+                    lesion_prob = self.model.predict_seg(image_tensor.unsqueeze(0))[0]
                 lesion_threshold = (
                     _as_valid_threshold(infer_cfg.get("lesion_threshold"))
                     or 0.5
@@ -558,9 +796,26 @@ class InferenceSession:
                     lesion_prob,
                     lesion_threshold=lesion_threshold,
                 )
+                if fusion_summary is not None:
+                    lesion_summary = {**lesion_summary, **fusion_summary}
             except Exception:
                 xai_error_code = "XAI_002"
                 evidence_warning = "LESION_EVIDENCE_UNAVAILABLE"
+        elif evidence_type in {"grounded_classifier", "bagnet", "patch_logits"}:
+            evidence_type = "grounded_classifier"
+            try:
+                if not hasattr(self.model, "get_evidence_map"):
+                    raise ValueError("Model does not expose get_evidence_map().")
+                evidence = self.model.get_evidence_map(image_tensor.unsqueeze(0))[0, 0]
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    evidence,
+                    infer_cfg,
+                )
+                evidence_warning = "GROUNDED_EVIDENCE_LOW_CONFIDENCE" if xai_no_region else None
+            except Exception:
+                xai_error_code = "XAI_003"
+                evidence_warning = "GROUNDED_EVIDENCE_UNAVAILABLE"
         else:
             evidence_type = "cam_research"
             try:
@@ -575,7 +830,11 @@ class InferenceSession:
                     target_layer=target_layer,
                     method=gradcam_method,
                 )
-                heatmap_overlay, xai_no_region = _render_gradcam_overlay(original_image, gradcam.heatmap[0])
+                heatmap_overlay, xai_no_region = _render_gradcam_overlay(
+                    original_image,
+                    gradcam.heatmap[0],
+                    infer_cfg,
+                )
             except Exception:
                 xai_error_code = "XAI_001"
 
@@ -587,7 +846,7 @@ class InferenceSession:
             prediction_path = _build_timestamped_path(self.prediction_dir, stem, ".json")
             if heatmap_overlay is not None:
                 heatmap_path = _build_timestamped_path(self.heatmap_dir, stem, ".png")
-                if evidence_type == "lesion_segmentation":
+                if evidence_type in {"lesion_segmentation", "grounded_classifier"}:
                     lesion_map_path = heatmap_path
 
         payload = InferencePayload(

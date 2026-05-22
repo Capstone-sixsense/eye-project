@@ -1,5 +1,5 @@
 project:
-  version: v31_no_se_gated
+  version: v31_v8b_fusion_v2
   task: binary_dr_screening
   output_root: artifacts
 
@@ -27,7 +27,7 @@ labels:
 
 
 model:
-  architecture: efficientnet_b5
+  architecture: v31_v8b_fusion
   pretrained: true
   num_outputs: 1
   use_attention: false
@@ -38,6 +38,9 @@ model:
   use_gated_pooling: true
   use_ibn: false
   grad_checkpointing: false
+  segmenter_encoder: resnet50
+  segmenter_out_channels: 4
+  segmenter_decoder_channels: [256, 128, 64, 32]
 train:
   seed: 42
   device: cuda
@@ -62,7 +65,12 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
-  threshold: 0.35
+  threshold: 0.38
+  use_meta_classifier: true
   gradcam_method: layercam
   gradcam_target_block: 4
-  evidence_type: cam_research
+  heatmap_activation_threshold: 0.25
+  heatmap_gamma: 0.65
+  heatmap_alpha: 0.86
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5

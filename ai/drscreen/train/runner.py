@@ -26,6 +26,7 @@ from drscreen.train.model_setup import (
     build_scheduler,
     build_training_phases,
     load_pretrained_backbone,
+    prepare_model_for_decoder_only_training,
     prepare_model_for_head_only_training,
     resolve_device,
     set_phase_trainability,
@@ -47,6 +48,7 @@ def describe_training_setup(
     train_dataset, val_dataset, manifest_path = _build_datasets(config, project_root)
     profile = get_model_profile(str(config["model"]["architecture"]))
     phases = build_training_phases(config)
+    training_mode = str(config["train"].get("training_mode", "standard")).lower()
     return {
         "project_root": str(project_root),
         "config_path": str(config_path),
@@ -54,7 +56,10 @@ def describe_training_setup(
         "manifest_exists": manifest_path.exists(),
         "train_rows": len(train_dataset),
         "val_rows": len(val_dataset),
+        "train_dataset_type": train_dataset.__class__.__name__,
         "architecture": profile.architecture,
+        "training_mode": training_mode,
+        "synchronized_mask_transform": bool(float(config["train"].get("lambda_aux_seg", 0.0) or 0.0) > 0.0),
         "recommended_profile": profile.to_dict(),
         "phases": [
             {"name": phase.name, "epochs": phase.epochs, "head_only": phase.head_only}
@@ -78,6 +83,9 @@ def run_training(
 
     model = build_model_for_training(config, device)
     load_pretrained_backbone(model, config, project_root)
+    training_mode = str(config["train"].get("training_mode", "standard")).lower()
+    if training_mode not in {"standard", "decoder_only"}:
+        raise ValueError(f"Unsupported train.training_mode: {training_mode!r}")
 
     criterion = build_criterion(config).to(device)
     version = str(config["project"].get("version", "")).strip()
@@ -91,12 +99,23 @@ def run_training(
     use_coral = bool(config["train"].get("use_coral", False))
     lambda_coral = float(config["train"].get("lambda_coral", 1.0))
     lambda_aux_seg = float(config["train"].get("lambda_aux_seg", 0.0))
+    lambda_cam_align = float(config["train"].get("lambda_cam_align", 0.0))
+    lambda_patch_l1 = float(config["train"].get("lambda_patch_l1", 0.0))
+    lambda_concept = float(config["train"].get("lambda_concept", 0.0))
+    coral_block_cfg = config["train"].get("coral_block")
+    coral_block = int(coral_block_cfg) if coral_block_cfg is not None else None
     seg_loss_type = str(config["train"].get("seg_loss_type", "bce"))
     coral_criterion: torch.nn.Module | None = None
     if use_coral:
         from drscreen.train.loss import CoralLoss
         coral_criterion = CoralLoss().to(device)
-        LOGGER.info("CORAL enabled: lambda=%.4f", lambda_coral)
+        LOGGER.info(
+            "CORAL enabled: lambda=%.4f block=%s",
+            lambda_coral,
+            "final_pooled" if coral_block is None else f"block{coral_block}",
+        )
+    if lambda_cam_align > 0.0:
+        LOGGER.info("CAM alignment enabled: lambda=%.4f", lambda_cam_align)
 
     amp_enabled = bool(config["train"].get("amp", False)) and device.type == "cuda"
     # BF16 has the same exponent range as FP32, so GradScaler is not needed.
@@ -127,23 +146,41 @@ def run_training(
     for phase in build_training_phases(config):
         if should_stop:
             break
-        set_phase_trainability(model, architecture, head_only=phase.head_only)
-        optimizer = build_optimizer(config, model, architecture=architecture, head_only=phase.head_only)
+        if training_mode == "decoder_only":
+            if phase.head_only:
+                raise ValueError("decoder_only training does not support head_only phases.")
+            prepare_model_for_decoder_only_training(model)
+            optimizer_head_only = False
+            model_train_setup = prepare_model_for_decoder_only_training
+        else:
+            set_phase_trainability(model, architecture, head_only=phase.head_only)
+            optimizer_head_only = phase.head_only
+            model_train_setup = (
+                (lambda m: prepare_model_for_head_only_training(m, architecture))
+                if phase.head_only else None
+            )
+        optimizer = build_optimizer(
+            config,
+            model,
+            architecture=architecture,
+            head_only=optimizer_head_only,
+        )
         scheduler = build_scheduler(config, optimizer, phase.epochs)
 
         for phase_epoch in range(1, phase.epochs + 1):
             global_epoch += 1
             train_metrics = train_one_epoch(
                 model, train_loader, criterion, optimizer, device,
-                model_train_setup=(
-                    (lambda m: prepare_model_for_head_only_training(m, architecture))
-                    if phase.head_only else None
-                ),
+                model_train_setup=model_train_setup,
                 amp_enabled=amp_enabled, scaler=scaler, gradient_clip_norm=gradient_clip_norm,
                 coral_criterion=coral_criterion,
                 lambda_coral=lambda_coral,
                 lambda_aux_seg=lambda_aux_seg,
                 seg_loss_type=seg_loss_type,
+                lambda_cam_align=lambda_cam_align,
+                coral_block=coral_block,
+                lambda_patch_l1=lambda_patch_l1,
+                lambda_concept=lambda_concept,
             )
             val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
             if scheduler is not None:

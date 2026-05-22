@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 
@@ -163,7 +165,231 @@ def _build_messidor_rows(raw_root: Path, *, split: str = "external_test") -> lis
     return rows
 
 
+_MAPLES_R_GRADE_RE = re.compile(r"^R(\d+)$")
+
+
+def _build_maples_rows(raw_root: Path) -> list[dict[str, object]]:
+    """Add MAPLES-DR training rows pointing at MESSIDOR images.
+
+    MAPLES-DR provides pixel-level lesion masks for a subset of MESSIDOR
+    images. For the binary DR screening task we use the diagnosis CSV's R
+    grade (R0 → 0, R1+ → 1, matching the standard Messidor R-scale binary
+    mapping). The image path is the MESSIDOR file the mask annotates. R1+
+    rows use ``domain='MAPLES'`` so a MAPLES-aware mask provider can dispatch
+    on them. R0 rows are kept as ``domain='Messidor'`` duplicates because
+    their lesion masks are effectively empty and should not contribute
+    negative pixel-level supervision.
+
+    Only the MAPLES-DR ``train`` split is exported here. The ``test`` split
+    is reserved as a clean external evaluation cohort.
+    """
+    maples_root = raw_root / "MAPLES-DR" / "MAPLES-DR" / "train"
+    diag_csv = maples_root / "diagnosis.csv"
+    if not diag_csv.exists():
+        raise FileNotFoundError(
+            f"MAPLES-DR train diagnosis CSV not found: {diag_csv}\n"
+            "Expected layout: data/raw/MAPLES-DR/MAPLES-DR/train/diagnosis.csv "
+            "with columns 'name, DR, ME'."
+        )
+
+    messidor_image_dir = raw_root / "Messidor" / "images"
+    if not messidor_image_dir.is_dir():
+        messidor_image_dir = raw_root / "Messidor"
+
+    frame = _normalize_columns(pd.read_csv(diag_csv))
+    _ensure_columns(frame, {"name", "DR"}, diag_csv)
+
+    rows: list[dict[str, object]] = []
+    for row in frame.itertuples(index=False):
+        stem = str(row.name)
+        dr_token = str(row.DR).strip()
+        m = _MAPLES_R_GRADE_RE.match(dr_token)
+        if not m:
+            continue
+        original_grade = int(m.group(1))
+        resolved = _resolve_messidor_image_path(messidor_image_dir, stem)
+        if resolved is None:
+            # MAPLES references a MESSIDOR image not present locally — skip.
+            continue
+        relative_image_path = resolved.relative_to(raw_root)
+        label = binary_label_from_grade(original_grade)
+        rows.append(
+            {
+                "image_id": stem,
+                "image_path": relative_image_path.as_posix(),
+                "label": label,
+                "original_grade": original_grade,
+                "split": "train",
+                "domain": "MAPLES" if label == 1 else "Messidor",
+                "source_split": "maples_train" if label == 1 else "maples_train_no_mask",
+            }
+        )
+    return rows
+
+
 _DDR_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+
+
+def _tjdr_has_lesion(mask_path: Path) -> bool:
+    from PIL import Image as PILImage
+
+    arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    return bool((arr > 0).any())
+
+
+def _ddr_seg_has_lesion(root: Path, split: str, stem: str) -> bool:
+    from PIL import Image as PILImage
+
+    ann_split = "test" if split != "test" else "tet"
+    if (root / "annotations" / split).is_dir():
+        ann_split = split
+    for code in ("MA", "HE", "EX", "SE"):
+        directory = root / "annotations" / ann_split / code
+        for ext in (".tif", ".tiff", ".png", ".jpg", ".jpeg"):
+            mask_path = directory / f"{stem}{ext}"
+            if not mask_path.exists():
+                continue
+            arr = np.array(PILImage.open(mask_path), dtype=np.uint8)
+            if bool((arr > 0).any()):
+                return True
+    return False
+
+
+def _ddr_seg_mask_exists(root: Path, split: str, code: str, stem: str) -> bool:
+    ann_split = "test" if split != "test" else "tet"
+    if (root / "annotations" / split).is_dir():
+        ann_split = split
+    directory = root / "annotations" / ann_split / code
+    return any(
+        (directory / f"{stem}{ext}").exists()
+        for ext in (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+    )
+
+
+def _build_ddr_seg_rows(raw_root: Path, *, include_test: bool = False) -> list[dict[str, object]]:
+    """Add DDR lesion-segmentation rows.
+
+    The classification DDR rows use ``domain='DDR'`` and stay in
+    ``split='external_test'``. These pixel-mask rows are separate
+    ``domain='DDR_SEG'`` rows so they can be used for segmentation evidence
+    training without polluting the DDR grading external-test cohort.
+
+    Expected layout: ``data/raw/ddr/lesion_segmentation/images/{train,val,test}``
+    and ``data/raw/ddr/lesion_segmentation/annotations/{train,val,tet|test}``.
+    ``train`` and ``val`` are both emitted as manifest ``split='train'`` because
+    the segmentation runner creates its own validation split from mask-valid rows.
+    """
+    dataset_root = raw_root / "ddr" / "lesion_segmentation"
+    if not dataset_root.is_dir():
+        raise FileNotFoundError(
+            f"DDR segmentation root not found: {dataset_root}\n"
+            "Expected layout from the DDR lesion_segmentation subset."
+        )
+
+    split_specs = [("train", "train"), ("val", "train")]
+    if include_test:
+        split_specs.append(("test", "ddr_seg_test"))
+
+    rows: list[dict[str, object]] = []
+    for source_split, manifest_split in split_specs:
+        image_dir = dataset_root / "images" / source_split
+        ann_split = "test" if source_split != "test" else "tet"
+        if (dataset_root / "annotations" / source_split).is_dir():
+            ann_split = source_split
+        ann_root = dataset_root / "annotations" / ann_split
+        if not image_dir.is_dir():
+            raise FileNotFoundError(f"DDR segmentation image directory not found: {image_dir}")
+        if not ann_root.is_dir():
+            raise FileNotFoundError(f"DDR segmentation annotation directory not found: {ann_root}")
+        for code in ("MA", "HE", "EX", "SE"):
+            code_dir = ann_root / code
+            if not code_dir.is_dir():
+                raise FileNotFoundError(f"DDR segmentation annotation directory not found: {code_dir}")
+
+        images = sorted(
+            p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+        )
+        missing_masks: list[str] = []
+        for image_path in images:
+            for code in ("MA", "HE", "EX", "SE"):
+                if not _ddr_seg_mask_exists(dataset_root, source_split, code, image_path.stem):
+                    missing_masks.append(f"{source_split}/{code}/{image_path.stem}")
+            has_lesion = _ddr_seg_has_lesion(dataset_root, source_split, image_path.stem)
+            relative_image_path = image_path.relative_to(raw_root)
+            rows.append(
+                {
+                    "image_id": image_path.stem,
+                    "image_path": relative_image_path.as_posix(),
+                    "label": 1 if has_lesion else 0,
+                    "original_grade": 1 if has_lesion else 0,
+                    "split": manifest_split,
+                    "domain": "DDR_SEG",
+                    "source_split": f"ddr_seg_{source_split}",
+                }
+            )
+        if missing_masks:
+            raise FileNotFoundError(
+                "DDR segmentation image/mask pairs are incomplete for "
+                f"{source_split}. First missing: {missing_masks[0]}"
+            )
+    return rows
+
+
+def _build_tjdr_rows(raw_root: Path, *, include_test: bool = False) -> list[dict[str, object]]:
+    """Add TJDR lesion-mask rows.
+
+    TJDR annotations are palette PNGs with integer labels:
+    0=background, 1=EX, 2=HE, 3=MA, 4=SE. The manifest rows point at the
+    raw fundus images; the mask provider performs label-to-channel mapping.
+
+    Only the TJDR train split is exported by default. Keeping TJDR test out of
+    ``split='test'`` avoids mixing it with the existing IDRiD test evaluation
+    split. Pass ``include_test=True`` only when a dedicated TJDR split is needed;
+    those rows are written as ``split='tjdr_test'``.
+    """
+    dataset_root = raw_root / "TJDR"
+    rows: list[dict[str, object]] = []
+    split_specs = [("train", "train")]
+    if include_test:
+        split_specs.append(("test", "tjdr_test"))
+
+    for source_split, manifest_split in split_specs:
+        image_dir = dataset_root / source_split / "image"
+        ann_dir = dataset_root / source_split / "annotation"
+        if not image_dir.is_dir():
+            raise FileNotFoundError(f"TJDR image directory not found: {image_dir}")
+        if not ann_dir.is_dir():
+            raise FileNotFoundError(f"TJDR annotation directory not found: {ann_dir}")
+
+        images = {p.stem: p for p in sorted(image_dir.glob("*.png"))}
+        annotations = {p.stem: p for p in sorted(ann_dir.glob("*.png"))}
+        missing_annotations = sorted(set(images) - set(annotations))
+        missing_images = sorted(set(annotations) - set(images))
+        if missing_annotations or missing_images:
+            raise FileNotFoundError(
+                "TJDR image/annotation pairs are incomplete for "
+                f"{source_split}: missing_annotations={len(missing_annotations)}, "
+                f"missing_images={len(missing_images)}"
+            )
+
+        for stem, image_path in images.items():
+            ann_path = annotations[stem]
+            has_lesion = _tjdr_has_lesion(ann_path)
+            relative_image_path = image_path.relative_to(raw_root)
+            rows.append(
+                {
+                    "image_id": stem,
+                    "image_path": relative_image_path.as_posix(),
+                    "label": 1 if has_lesion else 0,
+                    "original_grade": 1 if has_lesion else 0,
+                    "split": manifest_split,
+                    "domain": "TJDR",
+                    "source_split": f"tjdr_{source_split}",
+                }
+            )
+    return rows
 
 
 def _build_ddr_rows(raw_root: Path) -> list[dict[str, object]]:
@@ -218,6 +444,11 @@ def build_manifest_frame(
     include_messidor: bool = False,
     messidor_as_train: bool = False,
     include_ddr: bool = False,
+    include_ddr_seg: bool = False,
+    include_ddr_seg_test: bool = False,
+    include_maples: bool = False,
+    include_tjdr: bool = False,
+    include_tjdr_test: bool = False,
 ) -> pd.DataFrame:
     """Build a manifest DataFrame from the raw dataset root.
 
@@ -229,12 +460,20 @@ def build_manifest_frame(
         messidor_as_train: Move Messidor from external_test into the train split.
             Requires ``include_messidor=True``.
         include_ddr: Include DDR images as ``external_test``.
+        include_ddr_seg: Include DDR lesion-segmentation train/val rows as
+            ``domain='DDR_SEG'`` training rows.
     """
     raw_root = Path(raw_root)
     rows = [*_build_aptos_rows(raw_root), *_build_idrid_rows(raw_root)]
     if include_messidor:
         messidor_split = "train" if messidor_as_train else "external_test"
         rows.extend(_build_messidor_rows(raw_root, split=messidor_split))
+    if include_maples:
+        rows.extend(_build_maples_rows(raw_root))
+    if include_tjdr:
+        rows.extend(_build_tjdr_rows(raw_root, include_test=include_tjdr_test))
+    if include_ddr_seg:
+        rows.extend(_build_ddr_seg_rows(raw_root, include_test=include_ddr_seg_test))
     if include_ddr:
         rows.extend(_build_ddr_rows(raw_root))
     frame = pd.DataFrame(rows)
@@ -264,6 +503,11 @@ def write_manifest(
     include_messidor: bool = False,
     messidor_as_train: bool = False,
     include_ddr: bool = False,
+    include_ddr_seg: bool = False,
+    include_ddr_seg_test: bool = False,
+    include_maples: bool = False,
+    include_tjdr: bool = False,
+    include_tjdr_test: bool = False,
 ) -> ManifestSummary:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -272,6 +516,11 @@ def write_manifest(
         include_messidor=include_messidor,
         messidor_as_train=messidor_as_train,
         include_ddr=include_ddr,
+        include_ddr_seg=include_ddr_seg,
+        include_ddr_seg_test=include_ddr_seg_test,
+        include_maples=include_maples,
+        include_tjdr=include_tjdr,
+        include_tjdr_test=include_tjdr_test,
     )
     frame.to_csv(output_path, index=False)
     return summarize_manifest(frame)

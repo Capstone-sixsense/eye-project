@@ -1,0 +1,25 @@
+project:
+  version: v8b_evidence_classifier_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_tjdr_ddrseg_preprocessed.csv
+  image_root: data/raw
+  batch_size: 16
+  num_workers: 0
+  train_split: train
+  threshold_split: val
+  eval_splits: [train, val, test, external_test]
+
+segmentation:
+  config_path: configs/seg_evidence_v8b_ddrseg_tjdr_maplesfix.yaml
+  checkpoint_path: artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/checkpoints/best.pt
+
+classifier:
+  seed: 43
+  c_value: 1.0
+  class_weight: balanced
+  threshold_metric: balanced_accuracy
+  thresholds:
+    min: 0.01
+    max: 0.99
+    steps: 99

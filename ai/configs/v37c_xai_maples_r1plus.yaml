@@ -1,0 +1,38 @@
+project:
+  version: v37c_xai_maples_r1plus
+
+# Branch A follow-up: v37-equivalent training after excluding MAPLES R0 empty
+# masks from pixel-level supervision. The manifest keeps R1+ rows as
+# domain='MAPLES' and tags R0 rows as domain='Messidor'.
+data:
+  manifest_path: data/processed/manifest_with_maples_r1plus_preprocessed.csv
+  seg_mask_mode: composite
+
+model:
+  use_attention: false
+  attention_mode: none
+  use_aux_seg: true
+  aux_seg_block: 4
+  aux_seg_channels: 1
+  decoder_type: unet
+  decoder_blocks: [2, 3, 4]
+  use_gated_pooling: false
+
+train:
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.75
+  head_epochs: 0
+  finetune_epochs: 15
+  backbone_learning_rate: 0.00004
+  lambda_aux_seg: 0.2
+  lambda_cam_align: 0.1
+  seg_loss_type: dice_bce
+  pretrained_backbone_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train/checkpoints/best.pt
+
+infer:
+  checkpoint_path: artifacts/runs/08_xai_decoder_alignment/v37c_xai_maples_r1plus/checkpoints/best.pt
+  threshold: 0.35
+  gradcam_method: layercam
+  gradcam_target_block: 4
+  evidence_type: cam_research

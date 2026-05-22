@@ -10,7 +10,12 @@ from PIL import Image
 
 from drscreen.infer.service import InferenceSession
 from drscreen.settings import get_run_evaluation_dir
-from drscreen.xai.gradcam import generate_gradcam, resolve_default_target_layer
+from drscreen.xai.gradcam import (
+    generate_gradcam,
+    generate_multiblock_cam,
+    resolve_default_target_layer,
+)
+from drscreen.xai.faithfulness import faithfulness_auc
 from drscreen.xai.iou import (
     LESION_CODES,
     binarize_cam,
@@ -26,6 +31,13 @@ from drscreen.xai.iou import (
     pointing_game,
     union_mask,
 )
+from drscreen.xai.perturbation import (
+    PERTURBATION_METHODS,
+    occlusion_attribution,
+    rise_attribution,
+)
+
+DIRECT_EVIDENCE_METHODS = {"bagnet", "patch_logits", "patchlogits"}
 
 _SPLIT_IMAGE_SUBDIR = {
     "train": "a. Training Set",
@@ -65,6 +77,168 @@ def _build_retina_mask(image: Image.Image) -> np.ndarray:
         return np.ones(gray.shape, dtype=np.uint8)
     largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
     return (labels == largest).astype(np.uint8)
+
+
+def _guided_filter_fallback(
+    guide_rgb: np.ndarray,
+    src: np.ndarray,
+    radius: int = 8,
+    eps: float = 1e-2,
+) -> np.ndarray:
+    """Single-channel guided filter fallback when cv2.ximgproc is unavailable."""
+    guide = cv2.cvtColor(guide_rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+    guide /= 255.0
+    src = np.ascontiguousarray(src.astype(np.float32))
+    ksize = (radius * 2 + 1, radius * 2 + 1)
+
+    mean_i = cv2.boxFilter(guide, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+    mean_p = cv2.boxFilter(src, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+    corr_i = cv2.boxFilter(guide * guide, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+    corr_ip = cv2.boxFilter(guide * src, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+
+    var_i = corr_i - mean_i * mean_i
+    cov_ip = corr_ip - mean_i * mean_p
+    a = cov_ip / (var_i + eps)
+    b = mean_p - a * mean_i
+
+    mean_a = cv2.boxFilter(a, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+    mean_b = cv2.boxFilter(b, cv2.CV_32F, ksize, normalize=True, borderType=cv2.BORDER_REFLECT)
+    return np.clip(mean_a * guide + mean_b, 0.0, 1.0).astype(np.float32)
+
+
+def _apply_cam_postprocess(
+    cam: np.ndarray,
+    image_rgb: np.ndarray,
+    mode: str,
+) -> np.ndarray:
+    """Smooth/connect a CAM after extraction.
+
+    - ``none``:   return as-is.
+    - ``morph``:  morphological closing with a 15x15 kernel — merges nearby
+                  high-activation points into connected regions. Works on
+                  binarized intermediates but applied here to the continuous
+                  CAM via uint8 quantization.
+    - ``guided``: edge-preserving guided filter using the RGB image as guide
+                  (radius=8, eps=1e-2). Smooths within homogeneous regions
+                  while keeping lesion boundaries sharp. Uses cv2.ximgproc
+                  when available and falls back to a grayscale guided filter.
+    """
+    if mode in (None, "", "none"):
+        return cam
+    cam = cam.astype(np.float32)
+    if mode == "morph":
+        cam_u8 = np.clip(cam * 255.0, 0, 255).astype(np.uint8)
+        kernel = np.ones((15, 15), dtype=np.uint8)
+        closed = cv2.morphologyEx(cam_u8, cv2.MORPH_CLOSE, kernel)
+        return closed.astype(np.float32) / 255.0
+    if mode == "guided":
+        guide = np.ascontiguousarray(image_rgb.astype(np.uint8))
+        if hasattr(cv2, "ximgproc"):
+            return cv2.ximgproc.guidedFilter(guide, np.ascontiguousarray(cam), 8, 1e-2)
+        return _guided_filter_fallback(guide, cam, 8, 1e-2)
+    raise ValueError(f"unknown cam postprocess mode: {mode!r}")
+
+
+def _tta_orientations(mode: str) -> list[tuple[int, bool]]:
+    """Return list of (n_rot90, hflip) augmentation orientations."""
+    if mode in (None, "", "none"):
+        return [(0, False)]
+    if mode == "flip4":
+        return [(0, False), (0, True), (2, False), (2, True)]
+    if mode == "rot8":
+        return [(r, f) for r in (0, 1, 2, 3) for f in (False, True)]
+    raise ValueError(f"unknown tta mode: {mode!r}")
+
+
+def _apply_orientation(t: torch.Tensor, n_rot: int, hflip: bool) -> torch.Tensor:
+    if hflip:
+        t = torch.flip(t, dims=[-1])
+    if n_rot:
+        t = torch.rot90(t, k=n_rot, dims=[-2, -1])
+    return t
+
+
+def _invert_orientation(arr: np.ndarray, n_rot: int, hflip: bool) -> np.ndarray:
+    if n_rot:
+        arr = np.rot90(arr, k=-n_rot)
+    if hflip:
+        arr = np.flip(arr, axis=-1)
+    return np.ascontiguousarray(arr)
+
+
+def _compute_cam(
+    session,
+    image_tensor: torch.Tensor,
+    method: str,
+    target_layer=None,
+    target_layers: list | None = None,
+    target_layer_weights: list[float] | None = None,
+    tta: str = "none",
+    perturbation_options: dict | None = None,
+) -> np.ndarray:
+    """Run CAM (single-block or multi-block) optionally with TTA, return [H, W] float."""
+    method = method.lower()
+    perturbation_options = perturbation_options or {}
+    if method in DIRECT_EVIDENCE_METHODS:
+        if target_layer is not None or target_layers is not None:
+            raise ValueError(f"{method} evidence does not use target layers")
+        if tta and tta != "none":
+            raise ValueError(f"{method} evidence does not support TTA")
+        if not hasattr(session.model, "get_evidence_map"):
+            raise ValueError("Model does not expose get_evidence_map().")
+        evidence = session.model.get_evidence_map(image_tensor.unsqueeze(0))
+        return evidence[0, 0].detach().cpu().numpy()
+
+    if method in PERTURBATION_METHODS:
+        if target_layer is not None or target_layers is not None:
+            raise ValueError(f"{method} attribution does not use target layers")
+        if tta and tta != "none":
+            raise ValueError(f"{method} attribution does not support TTA")
+        x = image_tensor.unsqueeze(0).contiguous()
+        if method == "occlusion":
+            return occlusion_attribution(
+                session.model,
+                x,
+                grid_size=int(perturbation_options.get("grid_size", 16)),
+                patch_value=float(perturbation_options.get("patch_value", 0.0)),
+                batch_size=int(perturbation_options.get("batch_size", 16)),
+            )
+        return rise_attribution(
+            session.model,
+            x,
+            num_masks=int(perturbation_options.get("rise_num_masks", 4000)),
+            mask_resolution=int(perturbation_options.get("rise_mask_resolution", 7)),
+            keep_prob=float(perturbation_options.get("rise_keep_prob", 0.5)),
+            batch_size=int(perturbation_options.get("rise_batch_size", 32)),
+            seed=int(perturbation_options.get("rise_seed", 0)),
+        )
+
+    orientations = _tta_orientations(tta)
+    cams: list[np.ndarray] = []
+    for n_rot, hflip in orientations:
+        x = _apply_orientation(image_tensor, n_rot, hflip).unsqueeze(0).contiguous()
+        if target_layers is not None and len(target_layers) > 1:
+            res = generate_multiblock_cam(
+                session.model,
+                x,
+                target_layers,
+                weights=target_layer_weights,
+                method=method,
+            )
+        else:
+            single_layer = target_layer
+            if single_layer is None and target_layers is not None:
+                single_layer = target_layers[0]
+            res = generate_gradcam(
+                session.model,
+                x,
+                method=method,
+                target_layer=single_layer,
+            )
+        cam_arr = res.heatmap[0].detach().cpu().numpy()
+        cam_arr = _invert_orientation(cam_arr, n_rot, hflip)
+        cams.append(cam_arr)
+    return np.mean(np.stack(cams, axis=0), axis=0).astype(np.float32)
 
 
 def _eval_cam(
@@ -109,17 +283,25 @@ def _process_image(
     gradcam_method: str,
     top_percents: list[float],
     target_layer=None,
+    target_layers: list | None = None,
+    target_layer_weights: list[float] | None = None,
+    postprocess: str = "none",
+    tta: str = "none",
     use_seg_head: bool = False,
     run_baselines: bool = False,
     method_override: str | None = None,
     use_mil_attention: bool = False,
     mask_loader=None,
     od_mask_loader=None,
+    perturbation_options: dict | None = None,
+    add_faithfulness: bool = False,
+    faithfulness_steps: int = 100,
 ) -> dict:
     image_stem = image_path.stem
     pil_image = Image.open(image_path).convert("RGB")
     image_tensor = session.eval_transform(pil_image).to(session.device)
     cam_h, cam_w = image_tensor.shape[-2], image_tensor.shape[-1]
+    pil_resized = pil_image.resize((cam_w, cam_h), Image.BILINEAR)
 
     active_method = method_override if method_override is not None else gradcam_method
 
@@ -127,26 +309,35 @@ def _process_image(
         attn = session.model.get_attention_map(image_tensor.unsqueeze(0))
         cam = attn[0].cpu().numpy()
     elif use_seg_head:
-        seg_prob = session.model.predict_seg(image_tensor.unsqueeze(0))
+        if hasattr(session.model, "predict_seg_union"):
+            seg_prob = session.model.predict_seg_union(image_tensor.unsqueeze(0))
+        else:
+            seg_prob = session.model.predict_seg(image_tensor.unsqueeze(0))
         cam_raw = seg_prob[0, 0].detach().cpu().numpy()
         if cam_raw.shape != (cam_h, cam_w):
             cam_raw = cv2.resize(cam_raw, (cam_w, cam_h), interpolation=cv2.INTER_LINEAR)
         cam = cam_raw
     else:
-        gradcam = generate_gradcam(
-            session.model,
-            image_tensor.unsqueeze(0),
+        cam = _compute_cam(
+            session,
+            image_tensor,
             method=active_method,
             target_layer=target_layer,
+            target_layers=target_layers,
+            target_layer_weights=target_layer_weights,
+            tta=tta,
+            perturbation_options=perturbation_options,
         )
-        cam = gradcam.heatmap[0].detach().cpu().numpy()
+
+    if postprocess and postprocess != "none":
+        rgb_resized = np.asarray(pil_resized.convert("RGB"))
+        cam = _apply_cam_postprocess(cam, rgb_resized, postprocess)
 
     if od_mask_loader is not None:
         od_mask = od_mask_loader(image_stem, (cam_w, cam_h))
         if od_mask is not None:
             cam = cam * (1.0 - od_mask.astype(np.float32))
 
-    pil_resized = pil_image.resize((cam_w, cam_h), Image.BILINEAR)
     retina_mask = _build_retina_mask(pil_resized)
     if mask_loader is not None:
         gt_masks = mask_loader(image_stem, (cam_w, cam_h))
@@ -156,6 +347,15 @@ def _process_image(
 
     metrics = _eval_cam(cam, retina_mask, gt_masks, gt_union, top_percents)
     result: dict = {"image_id": image_stem, "masks_present": list(gt_masks.keys()), **metrics}
+
+    if add_faithfulness:
+        cam_norm = normalize_cam_fov(cam, retina_mask)
+        result["faithfulness"] = faithfulness_auc(
+            session.model,
+            image_tensor.unsqueeze(0).contiguous(),
+            cam_norm,
+            n_steps=faithfulness_steps,
+        )
 
     if run_baselines and gt_union is not None:
         rng = np.random.default_rng(0)
@@ -174,6 +374,17 @@ def _process_image(
 
 def _agg_scalar(per_image: list[dict], key: str) -> dict | None:
     vals = [r[key] for r in per_image if r.get(key) is not None]
+    if not vals:
+        return None
+    return {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "n": len(vals)}
+
+
+def _agg_nested_scalar(per_image: list[dict], parent: str, key: str) -> dict | None:
+    vals = [
+        r[parent][key]
+        for r in per_image
+        if isinstance(r.get(parent), dict) and r[parent].get(key) is not None
+    ]
     if not vals:
         return None
     return {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "n": len(vals)}
@@ -231,7 +442,31 @@ def _aggregate(per_image: list[dict], top_percents: list[float]) -> dict:
                     "mean_iou_union": float(np.mean(b_union_ious)) if b_union_ious else None,
                 }
 
+    if any("faithfulness" in r for r in per_image):
+        agg["faithfulness"] = {
+            "deletion_auc": _agg_nested_scalar(per_image, "faithfulness", "deletion_auc"),
+            "insertion_auc": _agg_nested_scalar(per_image, "faithfulness", "insertion_auc"),
+            "insertion_minus_deletion": _agg_nested_scalar(
+                per_image, "faithfulness", "insertion_minus_deletion"
+            ),
+        }
+
     return agg
+
+
+def _method_output_label(
+    method: str,
+    block_label: str,
+    perturbation_options: dict | None = None,
+) -> str:
+    opts = perturbation_options or {}
+    if method == "occlusion":
+        return f"occlusion_grid{int(opts.get('grid_size', 16))}"
+    if method == "rise":
+        return f"rise_n{int(opts.get('rise_num_masks', 4000))}"
+    if method in DIRECT_EVIDENCE_METHODS:
+        return "bagnet_patchlogits"
+    return f"{method}_{block_label}"
 
 
 def evaluate(
@@ -240,6 +475,11 @@ def evaluate(
     idrid_root: str | None = None,
     top_percents: list[float] | None = None,
     target_block: int | None = None,
+    target_blocks: list[int] | None = None,
+    target_layer_weights: list[float] | None = None,
+    method_override: str | None = None,
+    postprocess: str = "none",
+    tta: str = "none",
     output_path: str | None = None,
     use_seg_head: bool = False,
     use_mil_attention: bool = False,
@@ -247,6 +487,9 @@ def evaluate(
     gate_sigma: float = 2.0,
     mask_optic_disc: bool = False,
     od_dilation_px: int = 0,
+    perturbation_options: dict | None = None,
+    add_faithfulness: bool = False,
+    faithfulness_steps: int = 100,
 ) -> dict:
     if top_percents is None:
         top_percents = [0.10, 0.20, 0.30]
@@ -270,21 +513,47 @@ def evaluate(
     session.preprocessor = None
 
     gradcam_method = session.config.get("infer", {}).get("gradcam_method", "gradcam")
+    if method_override is not None:
+        gradcam_method = method_override
+    gradcam_method = str(gradcam_method).lower()
     version = session.config.get("project", {}).get("version", "unknown")
 
     target_layer = None
-    if use_mil_attention:
+    target_layers = None
+    if gradcam_method in DIRECT_EVIDENCE_METHODS:
+        block_label = "patchlogits"
+        if target_block is not None or target_blocks is not None:
+            raise ValueError(f"{gradcam_method} evidence does not support target blocks")
+    elif gradcam_method in PERTURBATION_METHODS:
+        block_label = "input"
+        if target_block is not None or target_blocks is not None:
+            raise ValueError(f"{gradcam_method} attribution does not support target blocks")
+    elif use_mil_attention:
         block_label = "mil_attention"
     elif use_seg_head:
         block_label = "seg_head"
     else:
         block_label = "default"
-    if not use_seg_head and not use_mil_attention and target_block is not None:
+    if (
+        not use_seg_head
+        and not use_mil_attention
+        and gradcam_method not in DIRECT_EVIDENCE_METHODS
+    ):
         blocks = getattr(session.model, "blocks", getattr(session.model, "features", None))
-        if blocks is None:
-            raise ValueError("Model has neither .blocks nor .features attribute")
-        target_layer = blocks[target_block]
-        block_label = f"block{target_block}"
+        if target_blocks is not None and len(target_blocks) > 0:
+            if blocks is None:
+                raise ValueError("Model has neither .blocks nor .features attribute")
+            target_layers = [blocks[i] for i in target_blocks]
+            if len(target_blocks) == 1:
+                target_layer = target_layers[0]
+                block_label = f"block{target_blocks[0]}"
+            else:
+                block_label = "block" + "-".join(str(i) for i in target_blocks)
+        elif target_block is not None:
+            if blocks is None:
+                raise ValueError("Model has neither .blocks nor .features attribute")
+            target_layer = blocks[target_block]
+            block_label = f"block{target_block}"
 
     image_paths = sorted(image_dir.glob("*.jpg")) + sorted(image_dir.glob("*.png"))
     if not image_paths:
@@ -301,19 +570,30 @@ def evaluate(
     print(f"Version   : {version}")
     print(f"Method    : {gradcam_method}")
     print(f"Layer     : {block_label}")
+    print(f"Postproc  : {postprocess}")
+    print(f"TTA       : {tta}")
     print(f"Split     : {split}  ({len(image_paths)} images)")
     print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
     print(f"Baselines : {run_baselines}")
     print(f"OD mask   : {mask_optic_disc} (dilation={od_dilation_px}px)")
+    print(f"Faithful  : {add_faithfulness} (steps={faithfulness_steps})")
     print()
 
     per_image: list[dict] = []
     for i, image_path in enumerate(image_paths, 1):
         rec = _process_image(
-            session, image_path, mask_base_dir, gradcam_method, top_percents, target_layer,
+            session, image_path, mask_base_dir, gradcam_method, top_percents,
+            target_layer=target_layer,
+            target_layers=target_layers,
+            target_layer_weights=target_layer_weights,
+            postprocess=postprocess,
+            tta=tta,
             use_seg_head=use_seg_head, use_mil_attention=use_mil_attention,
             run_baselines=run_baselines,
             od_mask_loader=_idrid_od_loader if mask_optic_disc else None,
+            perturbation_options=perturbation_options,
+            add_faithfulness=add_faithfulness,
+            faithfulness_steps=faithfulness_steps,
         )
         iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
@@ -322,6 +602,11 @@ def evaluate(
             f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}  iou=N/A",
             f"  auprc={rec['auprc']:.4f}" if rec["auprc"] is not None else "  auprc=N/A",
             f"  pg={rec['pointing_game']}",
+            (
+                f"  del={rec['faithfulness']['deletion_auc']:.4f}"
+                f" ins={rec['faithfulness']['insertion_auc']:.4f}"
+                if "faithfulness" in rec else ""
+            ),
         )
         per_image.append(rec)
 
@@ -344,6 +629,13 @@ def evaluate(
         miou = agg_t["mean_iou_union"]
         miou_str = f"{miou:.4f}" if miou is not None else "N/A"
         print(f"IoU top{int(top_pct*100):02d}%    : {miou_str}  (n={agg_t['n_images_with_gt']})")
+    if aggregate.get("faithfulness"):
+        fa = aggregate["faithfulness"]
+        print("Faithfulness:")
+        for key in ("deletion_auc", "insertion_auc", "insertion_minus_deletion"):
+            item = fa.get(key)
+            if item:
+                print(f"  {key:24s}: {item['mean']:.4f} ± {item['std']:.4f}  (n={item['n']})")
 
     if run_baselines and "baselines" in aggregate:
         print()
@@ -393,6 +685,15 @@ def evaluate(
         "checkpoint_path": str(session.checkpoint_path),
         "gradcam_method": gradcam_method,
         "target_block": block_label,
+        "target_blocks": target_blocks,
+        "target_layer_weights": target_layer_weights,
+        "perturbation_options": perturbation_options or {},
+        "faithfulness": {
+            "enabled": add_faithfulness,
+            "steps": faithfulness_steps,
+        },
+        "postprocess": postprocess,
+        "tta": tta,
         "split": split,
         "n_images": len(per_image),
         "top_percents": top_percents,
@@ -404,7 +705,18 @@ def evaluate(
     if output_path is None:
         eval_dir = get_run_evaluation_dir(project_root, str(version))
         eval_dir.mkdir(parents=True, exist_ok=True)
-        output_path = str(eval_dir / f"xai_iou_{version}_{block_label}_{split}.json")
+        suffix_parts: list[str] = []
+        if postprocess and postprocess != "none":
+            suffix_parts.append(f"pp-{postprocess}")
+        if tta and tta != "none":
+            suffix_parts.append(f"tta-{tta}")
+        if add_faithfulness:
+            suffix_parts.append(f"faith{faithfulness_steps}")
+        suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
+        method_label = _method_output_label(gradcam_method, block_label, perturbation_options)
+        output_path = str(
+            eval_dir / f"xai_iou_{version}_{method_label}_{split}{suffix}.json"
+        )
 
     Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"\nSaved: {output_path}")
@@ -517,11 +829,20 @@ def evaluate_maples(
     messidor_images_dir: str | None = None,
     top_percents: list[float] | None = None,
     target_block: int | None = None,
+    target_blocks: list[int] | None = None,
+    target_layer_weights: list[float] | None = None,
+    method_override: str | None = None,
+    postprocess: str = "none",
+    tta: str = "none",
     output_path: str | None = None,
+    use_seg_head: bool = False,
     run_baselines: bool = False,
     gate_sigma: float = 2.0,
     mask_optic_disc: bool = False,
     od_dilation_px: int = 0,
+    perturbation_options: dict | None = None,
+    add_faithfulness: bool = False,
+    faithfulness_steps: int = 100,
 ) -> dict:
     """XAI evaluation against MAPLES-DR lesion masks on MESSIDOR images."""
     import yaml
@@ -559,16 +880,43 @@ def evaluate_maples(
     session = InferenceSession.from_config_path(config_path)
     session.preprocessor = None
     gradcam_method = session.config.get("infer", {}).get("gradcam_method", "gradcam")
+    if method_override is not None:
+        gradcam_method = method_override
+    gradcam_method = str(gradcam_method).lower()
     version = session.config.get("project", {}).get("version", "unknown")
 
     target_layer = None
-    block_label = "default"
-    if target_block is not None:
+    target_layers = None
+    if gradcam_method in DIRECT_EVIDENCE_METHODS:
+        block_label = "patchlogits"
+        if target_block is not None or target_blocks is not None:
+            raise ValueError(f"{gradcam_method} evidence does not support target blocks")
+    elif gradcam_method in PERTURBATION_METHODS:
+        block_label = "input"
+        if target_block is not None or target_blocks is not None:
+            raise ValueError(f"{gradcam_method} attribution does not support target blocks")
+    else:
+        block_label = "seghead" if use_seg_head else "default"
+    if (
+        not use_seg_head
+        and gradcam_method not in PERTURBATION_METHODS
+        and gradcam_method not in DIRECT_EVIDENCE_METHODS
+    ):
         blocks = getattr(session.model, "blocks", getattr(session.model, "features", None))
-        if blocks is None:
-            raise ValueError("Model has neither .blocks nor .features attribute")
-        target_layer = blocks[target_block]
-        block_label = f"block{target_block}"
+        if target_blocks is not None and len(target_blocks) > 0:
+            if blocks is None:
+                raise ValueError("Model has neither .blocks nor .features attribute")
+            target_layers = [blocks[i] for i in target_blocks]
+            if len(target_blocks) == 1:
+                target_layer = target_layers[0]
+                block_label = f"block{target_blocks[0]}"
+            else:
+                block_label = "block" + "-".join(str(i) for i in target_blocks)
+        elif target_block is not None:
+            if blocks is None:
+                raise ValueError("Model has neither .blocks nor .features attribute")
+            target_layer = blocks[target_block]
+            block_label = f"block{target_block}"
 
     def _mask_loader(image_stem: str, target_size: tuple[int, int]) -> dict:
         return load_maples_masks(annotations_dir, image_stem, target_size)
@@ -584,17 +932,29 @@ def evaluate_maples(
     print(f"Version   : {version}")
     print(f"Method    : {gradcam_method}")
     print(f"Layer     : {block_label}")
+    print(f"Postproc  : {postprocess}")
+    print(f"TTA       : {tta}")
     print(f"Dataset   : MAPLES-DR ({split}, {len(image_paths)} images)")
     print(f"Thresholds: top {[int(p*100) for p in top_percents]}%")
     print(f"Baselines : {run_baselines}")
+    print(f"Faithful  : {add_faithfulness} (steps={faithfulness_steps})")
     print()
 
     per_image: list[dict] = []
     for i, image_path in enumerate(image_paths, 1):
         rec = _process_image(
-            session, image_path, None, gradcam_method, top_percents, target_layer,
+            session, image_path, None, gradcam_method, top_percents,
+            target_layer=target_layer,
+            target_layers=target_layers,
+            target_layer_weights=target_layer_weights,
+            postprocess=postprocess,
+            tta=tta,
+            use_seg_head=use_seg_head,
             run_baselines=run_baselines, mask_loader=_mask_loader,
             od_mask_loader=_od_mask_loader if mask_optic_disc else None,
+            perturbation_options=perturbation_options,
+            add_faithfulness=add_faithfulness,
+            faithfulness_steps=faithfulness_steps,
         )
         iou20 = rec["thresholds"].get("top20", {}).get("iou_union")
         print(
@@ -603,6 +963,11 @@ def evaluate_maples(
             f"  [{i:02d}/{len(image_paths)}] {rec['image_id']}  iou=N/A",
             f"  auprc={rec['auprc']:.4f}" if rec["auprc"] is not None else "  auprc=N/A",
             f"  pg={rec['pointing_game']}",
+            (
+                f"  del={rec['faithfulness']['deletion_auc']:.4f}"
+                f" ins={rec['faithfulness']['insertion_auc']:.4f}"
+                if "faithfulness" in rec else ""
+            ),
         )
         per_image.append(rec)
 
@@ -625,6 +990,13 @@ def evaluate_maples(
         miou = agg_t["mean_iou_union"]
         miou_str = f"{miou:.4f}" if miou is not None else "N/A"
         print(f"IoU top{int(top_pct*100):02d}%    : {miou_str}  (n={agg_t['n_images_with_gt']})")
+    if aggregate.get("faithfulness"):
+        fa = aggregate["faithfulness"]
+        print("Faithfulness:")
+        for key in ("deletion_auc", "insertion_auc", "insertion_minus_deletion"):
+            item = fa.get(key)
+            if item:
+                print(f"  {key:24s}: {item['mean']:.4f} ± {item['std']:.4f}  (n={item['n']})")
 
     if run_baselines and "baselines" in aggregate:
         print()
@@ -674,6 +1046,15 @@ def evaluate_maples(
         "checkpoint_path": str(session.checkpoint_path),
         "gradcam_method": gradcam_method,
         "target_block": block_label,
+        "target_blocks": target_blocks,
+        "target_layer_weights": target_layer_weights,
+        "perturbation_options": perturbation_options or {},
+        "faithfulness": {
+            "enabled": add_faithfulness,
+            "steps": faithfulness_steps,
+        },
+        "postprocess": postprocess,
+        "tta": tta,
         "split": split,
         "dataset": "maples",
         "n_images": len(per_image),
@@ -686,8 +1067,24 @@ def evaluate_maples(
     if output_path is None:
         eval_dir = get_run_evaluation_dir(project_root, str(version))
         eval_dir.mkdir(parents=True, exist_ok=True)
-        od_suffix = "_od" if mask_optic_disc else ""
-        output_path = str(eval_dir / f"xai_maples_{version}_{block_label}_{split}{od_suffix}.json")
+        suffix_parts: list[str] = []
+        if mask_optic_disc:
+            suffix_parts.append("od")
+        if postprocess and postprocess != "none":
+            suffix_parts.append(f"pp-{postprocess}")
+        if tta and tta != "none":
+            suffix_parts.append(f"tta-{tta}")
+        if add_faithfulness:
+            suffix_parts.append(f"faith{faithfulness_steps}")
+        suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
+        if use_seg_head:
+            filename = f"xai_maples_{version}_seghead_{split}{suffix}.json"
+        else:
+            method_label = _method_output_label(
+                gradcam_method, block_label, perturbation_options
+            )
+            filename = f"xai_maples_{version}_{method_label}_{split}{suffix}.json"
+        output_path = str(eval_dir / filename)
 
     Path(output_path).write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"\nSaved: {output_path}")

@@ -46,6 +46,10 @@ def main() -> None:
     )
     parser.add_argument("--output", help="Output JSON path")
     parser.add_argument(
+        "--use-seg-head", action="store_true",
+        help="Use auxiliary seg_head sigmoid output as heatmap instead of CAM"
+    )
+    parser.add_argument(
         "--baselines", action="store_true",
         help="Also evaluate random / center-Gaussian / retina-uniform baseline heatmaps"
     )
@@ -71,6 +75,7 @@ def main() -> None:
         top_percents=args.top_percents,
         target_block=args.target_block,
         output_path=args.output,
+        use_seg_head=args.use_seg_head,
         run_baselines=args.baselines,
         gate_sigma=args.gate_sigma,
         mask_optic_disc=args.mask_optic_disc,
