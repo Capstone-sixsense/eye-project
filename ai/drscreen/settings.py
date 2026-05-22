@@ -82,6 +82,7 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v8b_evidence_classifier_clsdomains_v1": "10_grounded_classifier",
     "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
     "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_v2": "10_grounded_classifier",
 }
 
 
@@ -187,12 +188,16 @@ def find_classification_metrics_path(
     *,
     split_name: str = "external_test",
     checkpoint_stem: str = "best",
+    prefer_compact: bool = False,
 ) -> Path:
     filename = classification_metrics_filename(split_name, version, checkpoint_stem)
-    candidates = [
-        get_run_evaluation_dir(project_root, version) / filename,
-        Path(project_root) / "artifacts" / "evaluations" / filename,
-    ]
+    run_candidate = get_run_evaluation_dir(project_root, version) / filename
+    compact_candidate = Path(project_root) / "artifacts" / "evaluations" / filename
+    candidates = (
+        [compact_candidate, run_candidate]
+        if prefer_compact
+        else [run_candidate, compact_candidate]
+    )
     for candidate in candidates:
         if candidate.exists():
             return candidate

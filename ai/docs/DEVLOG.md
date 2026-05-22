@@ -8,6 +8,42 @@
 
 ---
 
+## 2026-05-21 Sprint boundary correction
+
+Phase 4-G는 Sprint 5 작업으로 재분류한다. 따라서 TJDR/DDR_SEG 통합, MAPLES ROI 좌표계 보정, v8b standalone lesion evidence baseline, v8b evidence classifier, v31+v8b late fusion은 Sprint 5 기록으로 본다.
+Sprint 4는 v31 active deployment 확정과 Phase 4-E/F 진단까지로 마감한다.
+
+---
+
+## 2026-05-21 Phase 4-G G-5 — v31+v8b fusion 배포 패키징
+
+DDR 20% calibration / 80% holdout 정책으로 확정한 `v31_v8b_late_fusion_sweep_v1`을 AI-side active deployment로 패키징했다. backend/frontend 코드는 변경하지 않고, AI 내부에서 composite checkpoint와 active config만 교체했다.
+
+변경:
+- `v31_v8b_fusion_v2` config 추가.
+- `V31V8bFusion` wrapper 추가: v31 classifier score, v8b lesion segmentation feature, numeric StandardScaler+LogReg meta-classifier를 한 모델로 묶는다.
+- `artifacts/checkpoints/best.pt`를 composite checkpoint로 교체하고, 기존 v31-only alias는 `artifacts/checkpoints/best_pre_fusion_v31_only.pt.bak`로 보존했다.
+- `configs/base.yaml`은 `model.architecture: v31_v8b_fusion`, `infer.threshold: 0.38`, `infer.use_meta_classifier: true`, `evidence_type: lesion_segmentation`을 사용한다.
+
+검증:
+
+| 항목 | 결과 |
+|---|---:|
+| DDR holdout AUROC | 0.9403 |
+| Threshold | 0.38 |
+| Sensitivity | 0.8118 |
+| Specificity | 0.9238 |
+| Latency probe mean | 0.4897 s |
+
+근거:
+- `configs/base.yaml`
+- `configs/v31_v8b_fusion_v2.yaml`
+- `artifacts/evaluations/external_test_v31_v8b_fusion_v2_best_metrics.json`
+- `artifacts/runs/10_grounded_classifier/v31_v8b_fusion_v2/evaluations/v31_v8b_fusion_v2_latency_probe.json`
+- `.omc/research/fusion/meta_numeric_holdout_audit.json`
+
+---
+
 ## 2026-05-21 Phase 4-G G-4 — v8b evidence classifier 진단
 
 v8b lesion segmentation evidence가 분류 logit을 대체할 수 있는지 확인하기 위해, v8b 4채널 lesion probability map에서 scalar feature를 추출하고 logistic calibrated classifier를 학습했다. 이 실험은 AI research-only 진단이며 `configs/base.yaml`, `artifacts/checkpoints/best.pt`, backend, frontend는 변경하지 않았다.
@@ -30,11 +66,69 @@ DDR external_test 결과:
 판단:
 - v8b는 현재 best standalone lesion evidence baseline이지만, scalar evidence feature만으로는 active v31 classifier를 대체하지 못한다.
 - active v31 reference는 DDR AUROC 0.9160, threshold 0.35, Sens 0.7983, Spec 0.8677이다.
-- Phase 4-G는 현재 로컬 데이터/코드 범위에서 완료한다. Sprint 5에서는 더 큰 4채널 병변 마스크 데이터, stronger fundus/segmentation encoder, 또는 classifier-only fallback UX를 별도 의사결정으로 다룬다.
+- v8b evidence-only classifier 경로는 여기서 종료한다. 추가 MA/HE/EX/SE 4채널 병변 마스크 데이터 확장과 신규 데이터셋 통합은 Sprint 5 변경사항으로 분리한다.
 
 근거:
 - `artifacts/runs/10_grounded_classifier/v8b_evidence_classifier_grid_v1/evaluations/v8b_evidence_classifier_grid_v1_metrics.json`
 - `artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`
+
+---
+
+## 2026-05-21 Phase 4-G G-5 — v31 + v8b late fusion 진단
+
+v31 classifier가 병변 위치를 제대로 설명하지 못하고, v8b standalone evidence classifier는 분류 성능이 v31보다 낮았기 때문에 두 출력을 결합하는 late fusion을 진단했다. 이 단계의 sweep은 v31 score와 v8b lesion-map scalar features를 함께 입력으로 쓰는 logistic meta-classifier이며, 당시에는 `base.yaml`, `artifacts/checkpoints/best.pt`, backend/frontend를 변경하지 않았다. 이후 위 배포 패키징 단계에서 active alias를 `v31_v8b_fusion_v2`로 교체했다.
+
+비교 feature set:
+- `v31_score_only`
+- `v8b_evidence_only`
+- `late_fusion` = v31 probability/logit + v8b lesion evidence features
+
+DDR external_test 결과:
+
+| Model | AUROC | Threshold policy | Accuracy | Sens | Spec | F1 |
+|---|---:|---|---:|---:|---:|---:|
+| active v31 reference | 0.9160 | recorded opt 0.35 | 0.8330 | 0.7983 | 0.8677 | 0.8269 |
+| v8b evidence-only best | 0.8942 | external balanced 0.49 | 0.8191 | 0.8061 | 0.8321 | 0.8166 |
+| v31+v8b late fusion | **0.9379** | external balanced 0.28 | **0.8665** | **0.8314** | **0.9015** | **0.8615** |
+| v31+v8b late fusion | **0.9379** | sensitivity guard 0.38 | **0.8617** | **0.7999** | **0.9234** | **0.8525** |
+
+판단:
+- late fusion은 AUROC 기준 v31 대비 +0.0219이며, external balanced threshold 기준 Accuracy/Sensitivity/Specificity/F1이 모두 개선된다.
+- sensitivity guard threshold에서도 v31 sensitivity를 유지하면서 specificity와 F1을 개선한다.
+- 단, val-selected threshold는 0.86으로 과도하게 보수적이어서 sensitivity가 0.6541까지 떨어졌다. 이 문제는 아래 DDR 20/80 calibration split 정책으로 후속 정정했다.
+- 이 시점에는 `v31_v8b_late_fusion_sweep_v1`이 가장 강한 분류 후보였고, latency/backend contract 검증 전까지 active deployment는 v31로 유지했다. 이후 검증과 패키징을 거쳐 `v31_v8b_fusion_v2`로 승격했다.
+
+근거:
+- `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_sweep_v1/evaluations/v31_v8b_late_fusion_sweep_v1_metrics.json`
+- `artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`
+
+---
+
+## 2026-05-21 Phase 4-G G-5 — DDR calibration threshold 정책 확정
+
+late fusion의 정식 threshold 정책을 DDR `external_test` 20/80 split 기준으로 확정했다.
+기존 APTOS `val` 기준 threshold 0.86은 DDR sensitivity를 0.6541까지 낮췄기 때문에 배포 기준으로 쓰지 않는다.
+
+정책:
+- DDR `external_test`를 deterministic stratified split으로 나눈다.
+- `external_calibration`: 2,504장 (normal 1,253 / abnormal 1,251)
+- `external_holdout`: 10,018장 (normal 5,013 / abnormal 5,005)
+- calibration split에서 v31 sensitivity guard **0.7983** 이상을 만족하는 threshold 중 specificity가 가장 높은 값을 선택한다.
+
+확정 결과:
+
+| Split | Threshold | AUROC | Accuracy | Sens | Spec | F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| external_calibration | **0.38** | 0.9383 | 0.8598 | 0.7994 | 0.9202 | 0.8507 |
+| external_holdout | **0.38** | **0.9403** | **0.8678** | **0.8118** | **0.9238** | **0.8599** |
+
+판단:
+- `v31_v8b_late_fusion_sweep_v1`의 정식 threshold는 **0.38**로 고정한다.
+- threshold calibration 완료 후 두 모델 실행 latency와 backend contract를 확인했고, 이후 `v31_v8b_fusion_v2`로 AI-side active deployment를 교체했다.
+
+근거:
+- `configs/v31_v8b_late_fusion_sweep_v1.yaml`
+- `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_sweep_v1/evaluations/v31_v8b_late_fusion_sweep_v1_metrics.json`
 
 ---
 
@@ -70,7 +164,7 @@ MAPLES failure가 과도하게 낮아 데이터셋/loader를 재감사했다. �
 - MAPLES 성능 붕괴의 주 원인은 데이터셋 자체가 아니라 MAPLES ROI 좌표계 미보정이었다.
 - v8b는 현재 lesion segmentation evidence 계열 최고 후보이며, 이전 v3~v8의 MAPLES 관련 결론은 ROI 보정 전 수치로 confounded 처리한다.
 - v5b도 MAPLES가 회복됐지만 v8b보다 낮으므로, MAPLES reject 재실험 후보 중 최종 우위는 v8b다.
-- 배포 classifier는 여전히 v31 유지. v8b는 Phase 4-G 기준 현재 best standalone lesion evidence로 고정하되, backend/frontend 연동은 이번 AI 작업 범위에서 제외한다. 이후 Phase 4-G는 v8b를 기준선으로 두고 grounded classifier 재진입 또는 별도 evidence path 설계를 이어간다.
+- 이 시점에는 배포 classifier를 v31로 유지하고, v8b를 Phase 4-G 기준 best standalone lesion evidence로 고정했다. 이후 v31+v8b late fusion 패키징을 거쳐 active deployment는 `v31_v8b_fusion_v2`로 변경했다.
 
 근거:
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_ddrseg_tjdr_maplesfix/checkpoints/training_summary.json`
@@ -89,8 +183,8 @@ Sprint 4는 `v31_no_se_gated`를 active deployment로 유지한 상태에서 XAI
 - `v31_no_se_gated`는 DDR AUROC 0.9160, optimal threshold 0.35로 active deployment를 유지한다.
 - `v37b`, `v37b_aux03`, `cbm_v1` 등 일부 run은 DDR AUROC가 v31보다 높았지만, IDRiD/MAPLES lesion localization 또는 product evidence 기준을 만족하지 못했다.
 - Occlusion/RISE, DFR, Sparse BagNet, CBM, decoder alignment, standalone segmentation evidence 모두 제품용 causal XAI로 승격하지 않는다.
-- TJDR 통합은 IDRiD/TJDR segmentation evidence를 개선했지만, MAPLES generalization 문제는 해결하지 못했다.
-- MA/HE/EX/SE 4채널 병변 마스크 데이터 확장은 Sprint 5 개선점으로 이월한다. 단, FGADR는 접근 절차가 복잡해 active path에서 제외하고 DDR segmentation subset, Retinal-Lesions 등 대체 후보를 우선 검토한다.
+- Phase 4-G 전체는 Sprint 5 작업으로 이월한다. 여기에는 TJDR/DDR_SEG 통합, MAPLES ROI 좌표계 보정, v8b evidence baseline, v8b evidence classifier, v31+v8b late fusion이 포함된다.
+- MA/HE/EX/SE 4채널 병변 마스크 데이터 확장은 Sprint 5 개선점으로 유지한다. FGADR는 접근 절차가 복잡해 기본 경로에서 제외하고, Retinal-Lesions 등 접근성 및 라이선스가 명확한 대체 후보를 우선 검토한다.
 
 근거 요약은 `SPRINT4_Devlog.md`, 최신 active 상태는 `AI_HANDOFF.md`, run별 상태는 `EXPERIMENT_REGISTRY.md`를 따른다.
 
@@ -143,6 +237,8 @@ FGADR는 4채널 병변 마스크 규모 면에서 매력적이지만, access ag
 - 추가 데이터 후보는 DDR segmentation subset, Retinal-Lesions처럼 접근 절차가 더 단순한 데이터셋을 우선한다.
 - 데이터 추가가 지연되면 research-only fundus/segmentation encoder probe 또는 MAPLES domain-generalization 전략을 먼저 진행한다.
 - FGADR는 사용자가 로컬 원천 데이터를 별도로 제공한 경우에만 재검토한다.
+
+정정: 위 후보 목록은 2026-05-21 당시 계획 기준이다. 이후 DDR segmentation subset은 로컬 확보 및 v8/v8b 학습까지 완료했으나, 이 작업은 Sprint 5 Phase 4-G 범위로 분류한다. 추가 4채널 병변 마스크 데이터 확장도 Sprint 5 후속 개선점으로 유지한다.
 
 근거:
 - `.omc/plans/xai_improvement_phase4g.md`

@@ -99,14 +99,29 @@ docker compose up -d
 
 ## 데이터셋 출처
 
-학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 표기.
+학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.
+현재 배포 기준 `v31_v8b_fusion_v2`의 병변 feature는 `seg_evidence_v8b_ddrseg_tjdr_maplesfix` 모델에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.
+데이터 원본은 저장소에 포함하지 않으며, 다운로드와 재사용은 각 원 배포처의 라이선스 및 이용 조건을 따른다.
 
-| 데이터셋 | 출처 | 라이선스 |
-|---|---|---|
-| APTOS 2019 | [Kaggle — APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Aravind Eye Hospital) | Kaggle Competition Terms |
-| IDRiD | [IEEE DataPort — Indian Diabetic Retinopathy Image Dataset](https://ieee-dataport.org/open-access/indian-diabetic-retinopathy-image-dataset-idrid) | CC BY 4.0 |
-| Messidor | [ADCIS — Messidor](https://www.adcis.net/en/third-party/messidor/) | 비상업적 연구 목적 |
-| DDR | [GitHub — nkicsl/DDR-dataset](https://github.com/nkicsl/DDR-dataset) | 연구 목적 |
+| 데이터셋 | 이 프로젝트에서의 사용 | 출처 / 인용 | 라이선스 / 이용 조건 |
+|---|---|---|---|
+| APTOS 2019 | DR 분류 학습 보조 | [Kaggle — APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Aravind Eye Hospital) | Kaggle Competition Terms |
+| IDRiD | DR 분류, XAI 평가, v8b 병변 feature 학습(MA/HE/EX/SE mask) | [IDRiD Grand Challenge](https://idrid.grand-challenge.org/Data/) / [IEEE DataPort — Indian Diabetic Retinopathy Image Dataset](https://ieee-dataport.org/open-access/indian-diabetic-retinopathy-image-dataset-idrid) | CC BY 4.0 |
+| Messidor | DR 분류 학습 및 MAPLES-DR 원본 fundus image | [ADCIS — Messidor](https://www.adcis.net/en/third-party/messidor/) | 비상업적 연구 목적 |
+| MAPLES-DR | v8b 병변 feature 학습 및 평가(MA/HE/EX/CWS mask) | [LIV4D/MAPLES-DR](https://github.com/LIV4D/MAPLES-DR), [Scientific Data 2024](https://www.nature.com/articles/s41597-024-03739-6) | MAPLES-DR label/code repo: CC0-1.0. 논문: CC BY-NC-ND 4.0. 원본 fundus image는 Messidor 이용 조건을 따름 |
+| TJDR | v8b 병변 feature 학습(MA/HE/EX/SE pixel-level mask) | [TJDR dataset page](https://www.juheapi.com/datasets/tjdr), [arXiv:2312.15389](https://arxiv.org/abs/2312.15389) | 공개 연구용 데이터셋. 명시 라이선스 파일은 로컬 데이터와 공개 페이지에서 확인되지 않았으므로 원 배포처 조건 및 논문 인용 필요 |
+| DDR / DDR_SEG | DR 분류 평가 및 v8b 병변 feature 학습용 lesion segmentation subset | [GitHub — nkicsl/DDR-dataset](https://github.com/nkicsl/DDR-dataset) | 배포 repo: MIT License. README의 DDR 논문 인용 요구 및 원 배포처 조건 준수 |
+
+TJDR 인용:
+
+```bibtex
+@article{mao2023tjdr,
+  title={TJDR: A High-Quality Diabetic Retinopathy Pixel-Level Annotation Dataset},
+  author={Mao, Jingxin and Ma, Xiaoyu and Bi, Yanlong and Zhang, Rongqing},
+  journal={arXiv preprint arXiv:2312.15389},
+  year={2023}
+}
+```
 
 ---
 
