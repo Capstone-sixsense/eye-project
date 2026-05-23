@@ -8,6 +8,7 @@ import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
+import '../ui/dialog_keyboard.dart';
 import '../ui/notice_dialog.dart' show showErrorNotice, showNoticeDialog;
 
 /// 판정 필터 — [`_HistoryJudgmentIcon`]·목록 배지와 같은 기준.
@@ -494,20 +495,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final confirmed = await showDialog<bool>(
           context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('선택 항목 삭제'),
-            content: Text('선택한 $count건의 이력을 삭제할까요?\n삭제 후에는 되돌릴 수 없습니다.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('삭제'),
+          builder: (ctx) {
+            void confirm() => Navigator.pop(ctx, true);
+            void cancel() => Navigator.pop(ctx, false);
+            return dialogConfirmCancelShortcuts(
+              onConfirm: confirm,
+              onCancel: cancel,
+              child: AlertDialog(
+                title: const Text('선택 항목 삭제'),
+                content: Text(
+                  '선택한 $count건의 이력을 삭제할까요?\n삭제 후에는 되돌릴 수 없습니다.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: confirm,
+                    child: const Text('삭제'),
+                  ),
+                  TextButton(
+                    onPressed: cancel,
+                    child: const Text('취소'),
+                  ),
+                ],
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('취소'),
-              ),
-            ],
-          ),
+            );
+          },
         ) ??
         false;
 
