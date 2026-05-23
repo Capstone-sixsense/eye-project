@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/analyze_response.dart';
+import '../models/report_metrics.dart';
 
 /// FastAPI `detail`·JSON 본문에서 사용자용 메시지 추출.
 String parseApiErrorMessage(String rawBody) {
@@ -99,6 +100,31 @@ class EyeApiClient {
 
   /// CPU 추론·대용량 업로드까지 포함. 기본 20분.
   static const Duration analyzeTimeout = Duration(minutes: 20);
+
+  /// `GET /deploy-metric` — 서버 기동 시 로드된 배포 eval_metrics (flat dict).
+  Future<ReportMetrics?> fetchDeployMetrics() async {
+    final base =
+        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
+    final uri = Uri.parse(base).resolve('deploy-metric');
+    debugPrint('[EyeApi] GET $uri');
+    final response = await _client.get(uri);
+    debugPrint('[EyeApi] deploy-metric ${response.statusCode}');
+
+    if (response.statusCode == 503) {
+      return null;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw EyeApiException(response.statusCode, response.body);
+    }
+
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return ReportMetrics.tryParse(decoded);
+      }
+    } catch (_) {}
+    return null;
+  }
 
   Future<AnalyzeResponse> analyze(Uint8List imageBytes, String filename) async {
     return _analyzeWithTimeout(imageBytes, filename);
