@@ -9,7 +9,6 @@ import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
 import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
-import '../services/deploy_metrics_store.dart';
 import '../ui/analyze_progress_dialog.dart';
 import '../ui/medical_ui.dart';
 import '../ui/notice_dialog.dart'
@@ -41,6 +40,7 @@ class _UploadScreenState extends State<UploadScreen> {
   String? fileName;
   Uint8List? fileBytes;
   bool _uploading = false;
+  bool _deployMetricsLoading = true;
   ReportMetrics? _deployMetrics;
 
   final EyeApiClient _api = EyeApiClient();
@@ -48,7 +48,26 @@ class _UploadScreenState extends State<UploadScreen> {
   @override
   void initState() {
     super.initState();
-    _deployMetrics = DeployMetricsStore.cached;
+    _loadDeployMetrics();
+  }
+
+  Future<void> _loadDeployMetrics() async {
+    try {
+      final metrics = await _api.fetchDeployMetrics();
+      if (!mounted) return;
+      setState(() {
+        _deployMetrics = metrics;
+        _deployMetricsLoading = false;
+      });
+    } on EyeApiException catch (e) {
+      debugPrint('deploy-metric 실패: $e');
+      if (!mounted) return;
+      setState(() => _deployMetricsLoading = false);
+    } catch (e, st) {
+      debugPrint('deploy-metric 실패: $e\n$st');
+      if (!mounted) return;
+      setState(() => _deployMetricsLoading = false);
+    }
   }
 
   Future<void> pickFile() async {
@@ -144,11 +163,6 @@ class _UploadScreenState extends State<UploadScreen> {
         return;
       }
 
-      DeployMetricsStore.updateFromAnalyze(res);
-      if (mounted) {
-        setState(() => _deployMetrics = DeployMetricsStore.cached);
-      }
-
       await Navigator.pushNamed(
         context,
         '/result',
@@ -178,9 +192,8 @@ class _UploadScreenState extends State<UploadScreen> {
   }
 
   String _deployMetricsLabel() {
-    final m = _deployMetrics;
-    if (m != null && m.hasDisplayableContent) return '성능 지표 보기';
-    return '성능 지표 (분석 후 표시)';
+    if (_deployMetricsLoading) return '성능 지표 불러오는 중...';
+    return '성능 지표 보기';
   }
 
   @override
@@ -267,11 +280,19 @@ class _UploadScreenState extends State<UploadScreen> {
                   const SizedBox(height: MedicalTokens.spaceMd),
                   MedicalSecondaryButton(
                     label: _deployMetricsLabel(),
-                    onPressed: () => showReportMetricsInfoDialog(
-                      context,
-                      metrics: _deployMetrics,
-                    ),
-                    leading: const Icon(Icons.bar_chart_outlined, size: 18),
+                    onPressed: _deployMetricsLoading
+                        ? null
+                        : () => showReportMetricsInfoDialog(
+                              context,
+                              metrics: _deployMetrics,
+                            ),
+                    leading: _deployMetricsLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.bar_chart_outlined, size: 18),
                   ),
                 ],
               ),

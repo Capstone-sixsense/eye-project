@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' show ClientException;
 
 import '../api/eye_api_client.dart';
+import 'dialog_keyboard.dart';
 
 /// 안내 텍스트 한 줄 + OK (에러 코드 없음).
 Future<void> showNoticeDialog(
@@ -14,17 +15,21 @@ Future<void> showNoticeDialog(
     context: context,
     barrierDismissible: true,
     builder: (dialogContext) {
+      void close() => Navigator.of(dialogContext).pop();
       final bodyStyle = Theme.of(dialogContext).textTheme.bodyMedium?.copyWith(
             height: 1.5,
           );
-      return AlertDialog(
-        content: SelectableText(message, style: bodyStyle),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('OK'),
-          ),
-        ],
+      return dialogOkShortcuts(
+        onClose: close,
+        child: AlertDialog(
+          content: SelectableText(message, style: bodyStyle),
+          actions: [
+            TextButton(
+              onPressed: close,
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       );
     },
   );
@@ -40,6 +45,7 @@ Future<void> showCodeNoticeDialog(
     context: context,
     barrierDismissible: true,
     builder: (dialogContext) {
+      void close() => Navigator.of(dialogContext).pop();
       final theme = Theme.of(dialogContext);
       final codeStyle = theme.textTheme.titleLarge?.copyWith(
         fontWeight: FontWeight.w700,
@@ -48,22 +54,25 @@ Future<void> showCodeNoticeDialog(
       final bodyStyle = theme.textTheme.bodyMedium?.copyWith(
         height: 1.5,
       );
-      return AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SelectableText('Error Code: $code', style: codeStyle),
-            const SizedBox(height: 10),
-            SelectableText(message, style: bodyStyle),
+      return dialogOkShortcuts(
+        onClose: close,
+        child: AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText('Error Code: $code', style: codeStyle),
+              const SizedBox(height: 10),
+              SelectableText(message, style: bodyStyle),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: close,
+              child: const Text('OK'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('OK'),
-          ),
-        ],
       );
     },
   );

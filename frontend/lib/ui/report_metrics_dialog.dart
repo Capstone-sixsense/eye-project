@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../models/report_metrics.dart';
+import 'dialog_keyboard.dart';
 import 'medical_ui.dart';
 
-/// 성능 지표 안내 다이얼로그 — ESC·바깥 탭·[X]로 닫기.
+/// 성능 지표 안내 다이얼로그 — Enter·Esc·바깥 탭·[X]로 닫기.
 Future<void> showReportMetricsInfoDialog(
   BuildContext context, {
   ReportMetrics? metrics,
@@ -15,9 +16,12 @@ Future<void> showReportMetricsInfoDialog(
     context: context,
     barrierDismissible: true,
     builder: (dialogContext) {
+      void close() => Navigator.of(dialogContext).pop();
       final theme = Theme.of(dialogContext);
-      return Dialog(
-        child: ConstrainedBox(
+      return dialogOkShortcuts(
+        onClose: close,
+        child: Dialog(
+          child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: dialogWidth),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 8, 20),
@@ -51,7 +55,7 @@ Future<void> showReportMetricsInfoDialog(
                       ),
                     ),
                     IconButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      onPressed: close,
                       icon: const Icon(Icons.close),
                     ),
                   ],
@@ -69,6 +73,7 @@ Future<void> showReportMetricsInfoDialog(
             ),
           ),
         ),
+      ),
       );
     },
   );

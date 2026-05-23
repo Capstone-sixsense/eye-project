@@ -11,6 +11,7 @@ import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
 import '../models/result_screen_args.dart';
 import '../ui/medical_ui.dart';
+import '../ui/dialog_keyboard.dart';
 import '../ui/notice_dialog.dart';
 
 const double _kResultImageMaxHeight = 300;
@@ -654,10 +655,14 @@ void _showZoomViewer(
   showDialog<void>(
     context: context,
     builder: (dialogContext) {
-      return _FullscreenZoomViewer(
-        storedBytes: storedBytes,
-        response: response,
-        explanationAbsoluteUrl: explanationAbsoluteUrl,
+      void close() => Navigator.of(dialogContext).pop();
+      return dialogOkShortcuts(
+        onClose: close,
+        child: _FullscreenZoomViewer(
+          storedBytes: storedBytes,
+          response: response,
+          explanationAbsoluteUrl: explanationAbsoluteUrl,
+        ),
       );
     },
   );
