@@ -41,6 +41,10 @@ class _FilterConfirmIntent extends Intent {
   const _FilterConfirmIntent();
 }
 
+class _HistoryPopIntent extends Intent {
+  const _HistoryPopIntent();
+}
+
 /// 이력 보기 — 백엔드 `GET /history` 에 저장된 영구 이력을 표시.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -356,6 +360,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  /// 다이얼로그·필터가 없을 때 Esc → 이전 화면(결과)으로 pop.
+  void _popToPreviousIfAllowed() {
+    if (_filterPanelOpen) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+    if (!Navigator.of(context).canPop()) return;
+    Navigator.maybePop(context);
+  }
+
   void _resetFilters() {
     setState(() {
       _judgmentFilter = _JudgmentFilter.all;
@@ -658,7 +671,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final canPop = Navigator.of(context).canPop();
 
-    return Scaffold(
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.escape): _HistoryPopIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _HistoryPopIntent: CallbackAction<_HistoryPopIntent>(
+            onInvoke: (_) {
+              _popToPreviousIfAllowed();
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
       appBar: AppBar(
         actionsIconTheme: IconThemeData(
           color: MedicalTokens.textMain,
@@ -762,6 +790,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ),
         ],
+      ),
+          ),
+        ),
       ),
     );
   }
