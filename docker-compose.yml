@@ -47,7 +47,9 @@ services:
       # QuickQual 설정
       - QUICKQUAL_SVM_FILENAME=quickqual_dn121_512.pkl
       - QUICKQUAL_BAD_THRESHOLD=0.7
-      - REJECT_BAD_QUALITY=false   # true로 바꾸면 bad 이미지 422로 거부
+
+      # 안저 이미지 판별 필터 (테스트 중 정확도 미보장 시 false로 비활성화)
+      - FUNDUS_CHECK_ENABLED=true
 
       - IMAGE_ENCRYPTION_KEY=${IMAGE_ENCRYPTION_KEY}
     healthcheck:

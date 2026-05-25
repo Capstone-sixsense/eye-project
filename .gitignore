@@ -1,9 +1,3 @@
-# AI docs and agent instructions
-ai/docs/
-!ai/docs/
-ai/docs/*
-!ai/docs/SPRINT2_Devlog.md
-ai/AGENTS.md
 .omc/
 
 # AI training-only modules (not needed for inference)
@@ -29,6 +23,14 @@ ai/artifacts/quickqual/**
 ai/artifacts/checkpoints/**
 !ai/artifacts/checkpoints/
 !ai/artifacts/checkpoints/best.pt
+
+# Phase 4-E/F evaluations: ignore generated files while keeping selected decision artifacts trackable
+ai/artifacts/evaluations/*
+!ai/artifacts/evaluations/external_test_*_best_metrics.json
+!ai/artifacts/evaluations/phase4e_layercam_block4_faith100_test.json
+!ai/artifacts/evaluations/phase4e_smoke_occlusion_grid8_test.json
+!ai/artifacts/evaluations/phase4e_smoke_rise256_test.json
+!ai/artifacts/evaluations/xai_*_best_metrics.json
 
 # Archived AI files
 ai/archive/
