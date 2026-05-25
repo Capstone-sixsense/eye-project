@@ -9,6 +9,7 @@ import '../constants/api_error_codes.dart';
 import '../models/analyze_response.dart';
 import '../models/report_metrics.dart';
 import '../models/result_screen_args.dart';
+import '../ui/analyze_progress_controller.dart';
 import '../ui/analyze_progress_dialog.dart';
 import '../ui/medical_ui.dart';
 import '../ui/notice_dialog.dart'
@@ -138,6 +139,7 @@ class _UploadScreenState extends State<UploadScreen> {
     if (bytes == null || name == null) return;
 
     setState(() => _uploading = true);
+    final progressController = AnalyzeProgressController()..start();
     if (mounted) {
       showDialog<void>(
         context: context,
@@ -145,13 +147,23 @@ class _UploadScreenState extends State<UploadScreen> {
         builder: (ctx) => PopScope(
           canPop: false,
           child: AlertDialog(
-            content: const AnalyzeProgressDialog(),
+            content: ListenableBuilder(
+              listenable: progressController,
+              builder: (context, _) => AnalyzeProgressDialog(
+                progress: progressController.visualProgress,
+                phaseLabel: progressController.phaseLabel,
+              ),
+            ),
           ),
         ),
       );
     }
     try {
-      final AnalyzeResponse res = await _api.analyze(bytes, name);
+      final AnalyzeResponse res = await _api.analyze(
+        bytes,
+        name,
+        onProgress: progressController.updateFromServer,
+      );
       if (!mounted) return;
 
       if (res.errorCode == ApiErrorCodes.inputChannelUnsupported) {
@@ -162,6 +174,9 @@ class _UploadScreenState extends State<UploadScreen> {
         );
         return;
       }
+
+      await progressController.awaitVisualComplete();
+      if (!mounted) return;
 
       await Navigator.pushNamed(
         context,
@@ -183,6 +198,7 @@ class _UploadScreenState extends State<UploadScreen> {
       if (!mounted) return;
       await showErrorNotice(context, e);
     } finally {
+      progressController.dispose();
       if (mounted) {
         final nav = Navigator.of(context, rootNavigator: true);
         if (nav.canPop()) nav.pop();

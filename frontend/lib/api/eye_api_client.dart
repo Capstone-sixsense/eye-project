@@ -6,8 +6,12 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
+import '../models/analyze_job_status.dart';
 import '../models/analyze_response.dart';
 import '../models/report_metrics.dart';
+
+/// `GET /analyze/jobs/{id}` 폴링 시 UI 진행 표시.
+typedef AnalyzeProgressCallback = void Function(AnalyzeJobStatus status);
 
 /// FastAPI `detail`·JSON 본문에서 사용자용 메시지 추출.
 String parseApiErrorMessage(String rawBody) {
@@ -27,9 +31,11 @@ String parseApiErrorMessage(String rawBody) {
 }
 
 String? _detailMessage(dynamic detail) {
-  if (detail is Map) {
+      if (detail is Map) {
     final message = detail['message'];
     if (message is String && message.isNotEmpty) return message;
+    final code = detail['code'];
+    if (code is String && code.isNotEmpty) return code;
   }
   if (detail is String && detail.isNotEmpty) return detail;
   if (detail is List && detail.isNotEmpty) {
@@ -46,6 +52,10 @@ String? parseErrorCodeFromBody(String body) {
       final direct = decoded['error_code'] as String?;
       if (direct != null && direct.isNotEmpty) return direct;
       final detail = decoded['detail'];
+      if (detail is Map) {
+        final code = detail['code'];
+        if (code is String && code.isNotEmpty) return code;
+      }
       if (detail is String && detail.isNotEmpty) {
         if (RegExp(r'^[A-Z0-9_]+$').hasMatch(detail.trim())) {
           return detail.trim();
@@ -126,11 +136,30 @@ class EyeApiClient {
     return null;
   }
 
-  Future<AnalyzeResponse> analyze(Uint8List imageBytes, String filename) async {
-    return _analyzeWithTimeout(imageBytes, filename);
+  static const Duration _jobPollInterval = Duration(milliseconds: 400);
+
+  /// `POST /analyze` (202) → `GET /analyze/jobs/{id}` 폴링 후 결과 반환.
+  Future<AnalyzeResponse> analyze(
+    Uint8List imageBytes,
+    String filename, {
+    AnalyzeProgressCallback? onProgress,
+  }) async {
+    final started = await _startAnalyzeJob(imageBytes, filename);
+    if (started.immediate != null) {
+      onProgress?.call(
+        AnalyzeJobStatus(
+          status: 'done',
+          progress: 1.0,
+          phase: 'done',
+          result: started.immediate,
+        ),
+      );
+      return started.immediate!;
+    }
+    return _waitForAnalyzeJob(started.jobId!, onProgress: onProgress);
   }
 
-  Future<AnalyzeResponse> _analyzeWithTimeout(
+  Future<_AnalyzeStartResult> _startAnalyzeJob(
     Uint8List imageBytes,
     String filename,
   ) async {
@@ -146,27 +175,18 @@ class EyeApiClient {
     late http.StreamedResponse streamed;
     try {
       streamed = await _client.send(request).timeout(
-        analyzeTimeout,
-        onTimeout: () => throw TimeoutException(
-          '서버가 ${analyzeTimeout.inMinutes}분 안에 응답하지 않았습니다. '
-          'Docker CPU 모드는 추론에 매우 오래 걸릴 수 있습니다.',
-        ),
+        const Duration(minutes: 2),
+        onTimeout: () => throw TimeoutException('분석 요청 전송 시간이 초과되었습니다.'),
       );
     } on TimeoutException catch (e) {
       debugPrint('[EyeApi] send 타임아웃: $e');
       rethrow;
     }
 
-    late http.Response response;
-    try {
-      response = await http.Response.fromStream(streamed).timeout(
-        const Duration(minutes: 2),
-        onTimeout: () => throw TimeoutException('응답 본문 수신 시간 초과'),
-      );
-    } on TimeoutException catch (e) {
-      debugPrint('[EyeApi] 본문 수신 타임아웃: $e');
-      rethrow;
-    }
+    final response = await http.Response.fromStream(streamed).timeout(
+      const Duration(minutes: 2),
+      onTimeout: () => throw TimeoutException('응답 본문 수신 시간 초과'),
+    );
 
     Map<String, dynamic>? jsonMap;
     try {
@@ -176,17 +196,108 @@ class EyeApiClient {
       }
     } catch (_) {}
 
-    if (response.statusCode >= 200 && response.statusCode < 300 && jsonMap != null) {
-      debugPrint('[EyeApi] 응답 ${response.statusCode}, keys: ${jsonMap.keys.toList()}');
-      return AnalyzeResponse.fromJson(jsonMap);
+    if (response.statusCode == 202 && jsonMap != null) {
+      final jobId = jsonMap['job_id'] as String?;
+      if (jobId != null && jobId.isNotEmpty) {
+        debugPrint('[EyeApi] analyze job queued: $jobId');
+        return _AnalyzeStartResult(jobId: jobId);
+      }
+    }
+
+    // 구 API(동기 200) 호환
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        jsonMap != null &&
+        jsonMap.containsKey('status')) {
+      debugPrint('[EyeApi] analyze 동기 응답 ${response.statusCode}');
+      return _AnalyzeStartResult(
+        immediate: AnalyzeResponse.fromJson(jsonMap),
+      );
     }
 
     debugPrint(
-      '[EyeApi] 비정상 응답 ${response.statusCode}, body(앞 200자): '
+      '[EyeApi] analyze 시작 실패 ${response.statusCode}, body(앞 200자): '
       '${response.body.length > 200 ? "${response.body.substring(0, 200)}..." : response.body}',
     );
     final code = parseErrorCodeFromBody(response.body);
     throw EyeApiException(response.statusCode, response.body, errorCode: code);
+  }
+
+  Future<AnalyzeResponse> _waitForAnalyzeJob(
+    String jobId, {
+    AnalyzeProgressCallback? onProgress,
+  }) async {
+    final deadline = DateTime.now().add(analyzeTimeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      final status = await _fetchAnalyzeJob(jobId);
+      onProgress?.call(status);
+
+      if (status.isDone) {
+        final result = status.result;
+        if (result != null) {
+          debugPrint('[EyeApi] analyze job done: $jobId');
+          return result;
+        }
+        throw EyeApiException(
+          500,
+          '분석은 완료됐지만 결과가 없습니다.',
+        );
+      }
+
+      if (status.isFailed) {
+        _throwFromJobError(status.error);
+      }
+
+      await Future<void>.delayed(_jobPollInterval);
+    }
+
+    throw TimeoutException(
+      '서버가 ${analyzeTimeout.inMinutes}분 안에 분석을 끝내지 않았습니다. '
+      'CPU 추론은 시간이 오래 걸릴 수 있습니다.',
+    );
+  }
+
+  Future<AnalyzeJobStatus> _fetchAnalyzeJob(String jobId) async {
+    final base =
+        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
+    final uri = Uri.parse(base).resolve(
+      'analyze/jobs/${Uri.encodeComponent(jobId)}',
+    );
+    final response = await _client.get(uri);
+    if (response.statusCode == 404) {
+      throw EyeApiException(404, '분석 작업을 찾을 수 없습니다.');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw EyeApiException(response.statusCode, response.body);
+    }
+
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return AnalyzeJobStatus.fromJson(decoded);
+      }
+    } catch (_) {}
+    throw EyeApiException(response.statusCode, '작업 상태 JSON 파싱 실패');
+  }
+
+  void _throwFromJobError(Map<String, dynamic>? error) {
+    if (error == null) {
+      throw EyeApiException(500, '분석 실패');
+    }
+    final statusCode = (error['status_code'] as num?)?.toInt() ?? 500;
+    final detail = error['detail'];
+    String body;
+    String? code;
+    if (detail is Map<String, dynamic>) {
+      code = detail['code'] as String?;
+      body = detail['message'] as String? ?? jsonEncode(detail);
+    } else if (detail is String) {
+      body = detail;
+    } else {
+      body = jsonEncode(error);
+    }
+    throw EyeApiException(statusCode, body, errorCode: code);
   }
 
   /// `GET /history` — 페이지네이션 목록 (최신순 서버 순서).
@@ -253,4 +364,12 @@ class EyeApiClient {
   }
 
   void close() => _client.close();
+}
+
+class _AnalyzeStartResult {
+  const _AnalyzeStartResult({this.jobId, this.immediate})
+      : assert(jobId != null || immediate != null);
+
+  final String? jobId;
+  final AnalyzeResponse? immediate;
 }
