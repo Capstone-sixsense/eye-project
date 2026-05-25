@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os, logging, time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -32,6 +33,7 @@ _session_error: str | None = None
 _quickqual: QuickQualWrapper | None = None
 _quickqual_error: str | None = None
 _deploy_metrics: dict[str, Any] | None = None
+_jobs: dict[str, dict[str, Any]] = {}
 
 logging.basicConfig(
     filename="server_errors.log",
@@ -145,48 +147,29 @@ def deploy_metric() -> dict[str, Any]:
     return _deploy_metrics
 
 
-@app.post("/analyze")
-async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
-    name = image.filename or "upload.png"
+def _update_job(job_id: str, **kwargs: Any) -> None:
+    if job_id in _jobs:
+        _jobs[job_id].update(kwargs)
 
-    print(
-        f"[analyze] 요청 도착 (filename={image.filename!r}, 업로드 수신·추론 시작)",
-        flush=True,
-    )
 
-    if _session is None:
-        raise HTTPException(
-            status_code=503,
-            detail=_session_error or "AI 모델이 준비되지 않았습니다.",
-        )
-    if _quickqual is None:
-        raise HTTPException(
-            status_code=503,
-            detail=_quickqual_error or "QuickQual 모델이 준비되지 않았습니다.",
-        )
-    
-    # 분석 ID 발급 (이력 조회 시 raw, report, metadata를 한 번에 묶어주는 키)
-    record_id = history.make_record_id()
+async def _expire_job(job_id: str, delay: float = 600.0) -> None:
+    await asyncio.sleep(delay)
+    _jobs.pop(job_id, None)
 
-    # 원본 확장자 보존 (raw 파일명에 사용)
-    _, ext = os.path.splitext(image.filename or "upload.png")
-    ext = ext.lstrip(".").lower() or "png"
 
-    #타이머 시작
+async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> None:
+    record_id = job_id
     t0 = time.perf_counter()
+    _update_job(job_id, status="running")
 
     try:
-        # 이미지 수신
-        content = await image.read()
-        print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
-
-        # 유효성 검사 먼저 — 손상된 파일은 저장하지 않음
         try:
             raw_img = Image.open(io.BytesIO(content)).convert("RGB")
         except Exception:
-            raise HTTPException(status_code=400, detail="유효한 이미지 파일이 아닙니다.")
+            _update_job(job_id, status="failed", error={"status_code": 400, "detail": "유효한 이미지 파일이 아닙니다."})
+            return
+        _update_job(job_id, progress=0.05, phase="upload")
 
-        # 안저 이미지 여부 판별 — FUNDUS_CHECK_ENABLED=false 로 비활성화 가능
         if FUNDUS_CHECK_ENABLED:
             is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
             if not is_fundus:
@@ -195,16 +178,17 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
                     f"(reason={reject_reason}, details={fundus_details})",
                     flush=True,
                 )
-                raise HTTPException(
-                    status_code=422,
-                    detail={
+                _update_job(job_id, status="failed", error={
+                    "status_code": 422,
+                    "detail": {
                         "code": "not_fundus_image",
                         "message": "안저 이미지가 아닌 것으로 판단됩니다.",
                         "reject_reason": reject_reason,
                     },
-                )
+                })
+                return
+        _update_job(job_id, progress=0.10, phase="fundus_check")
 
-        #QuickQual 전처리 + 품질 평가
         t_qq = time.perf_counter()
         preprocessed_img, quality = await run_in_threadpool(
             _quickqual.preprocess_and_score, raw_img
@@ -215,16 +199,17 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             flush=True,
         )
 
-        #품질 게이트 ----
         if quality["label"] == "bad":
-            raise HTTPException(
-                status_code=422,
-                detail={
+            _update_job(job_id, status="failed", error={
+                "status_code": 422,
+                "detail": {
                     "code": "low_image_quality",
                     "message": f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). 다시 촬영해 주세요.",
                     "quality": quality,
                 },
-            )
+            })
+            return
+        _update_job(job_id, progress=0.25, phase="quickqual")
 
         quality_warning = None
         if quality["bad"] >= QUICKQUAL_BAD_THRESHOLD:
@@ -232,35 +217,32 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
                 f"이미지 품질이 낮습니다 (bad 확률={quality['bad']:.2f}). "
                 "결과 신뢰도가 떨어질 수 있습니다."
             )
-        
-        #타이머 종료
-        print(
-            f"[analyze] 전처리 완료 (총 {time.perf_counter() - t0:.2f}s)",
-            flush=True,
-        )
 
-        # 진단 추론 — 전처리된 이미지를 바이트로 직접 전달 (proc_path 디스크 쓰기 제거)
+        print(f"[analyze] 전처리 완료 (총 {time.perf_counter() - t0:.2f}s)", flush=True)
+
+        _update_job(job_id, progress=0.30, phase="inference")
         proc_buf = io.BytesIO()
         preprocessed_img.save(proc_buf, format="PNG")
         pred = await run_in_threadpool(
             _session.predict_image_bytes, proc_buf.getvalue(), image_name=name
         )
+        _update_job(job_id, progress=0.85)
 
-        # 리포트 이미지 합성
-        # heatmap_overlay가 없으면 전처리된 원본 이미지를 fallback으로 사용
         ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else preprocessed_img
         report_bytes = render_report_image_bytes(ai_image)
-        # 추론 완료 후 저장 — 실패 시 고아 파일이 남지 않도록 이 시점에 한꺼번에 저장
+        _update_job(job_id, progress=0.90, phase="report")
+
         raw_path = history.save_raw_image(record_id, content, ext=ext)
         print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
         history.save_report_image(record_id, report_bytes)
-
 
         prob = pred.payload.get("abnormal_probability", 0.0)
         decision_threshold = pred.payload.get("decision_threshold")
         eval_metrics = pred.payload.get("eval_metrics")
         metrics = dict(eval_metrics) if isinstance(eval_metrics, dict) else {}
         metrics.setdefault("decision_threshold", decision_threshold)
+        global _deploy_metrics
+        _deploy_metrics = metrics
         evidence = {
             "evidence_type": pred.payload.get("evidence_type"),
             "heatmap_path": pred.payload.get("heatmap_path"),
@@ -271,12 +253,11 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "xai_no_region": pred.payload.get("xai_no_region"),
         }
 
-        # 이력 메타데이터 저장(URL은 동적 엔드포인트 경로)
         history.save_metadata(
             record_id,
             original_filename=name,
-            raw_url=f"/image/raw/{record_id}",       # 동적 엔드포인트
-            report_url=f"/image/report/{record_id}", # 동적 엔드포인트
+            raw_url=f"/image/raw/{record_id}",
+            report_url=f"/image/report/{record_id}",
             label=pred.payload.get("predicted_label"),
             abnormal_probability=prob,
             quality=quality,
@@ -285,9 +266,8 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             raw_ext=ext,
         )
 
-
         print(f"[analyze] 완료: {time.perf_counter() - t0:.1f}s", flush=True)
-        return {
+        result = {
             "status": "success",
             "id": record_id,
             "label": pred.payload.get("predicted_label"),
@@ -305,11 +285,10 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
             "quality_warning": quality_warning,
             "report_url": f"/image/report/{record_id}",
             "raw_url": f"/image/raw/{record_id}",
-            "original_url": f"/image/raw/{record_id}",  # 기존 키 호환용
+            "original_url": f"/image/raw/{record_id}",
         }
+        _update_job(job_id, status="done", progress=1.0, phase="done", result=result)
 
-    except HTTPException:
-        raise
     except Exception as e:
         for p in (
             history.raw_path_for(record_id, ext=ext),
@@ -321,7 +300,40 @@ async def analyze(image: UploadFile = File(...)) -> dict[str, Any]:
                 except OSError:
                     pass
         logger.error(f"[analyze] {name}: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="분석 실패") from e
+        _update_job(job_id, status="failed", error={"status_code": 500, "detail": "분석 실패"})
+
+
+@app.post("/analyze")
+async def analyze(image: UploadFile = File(...)) -> JSONResponse:
+    name = image.filename or "upload.png"
+    print(f"[analyze] 요청 도착 (filename={image.filename!r})", flush=True)
+
+    if _session is None:
+        raise HTTPException(status_code=503, detail=_session_error or "AI 모델이 준비되지 않았습니다.")
+    if _quickqual is None:
+        raise HTTPException(status_code=503, detail=_quickqual_error or "QuickQual 모델이 준비되지 않았습니다.")
+
+    content = await image.read()
+    print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
+
+    _, ext = os.path.splitext(image.filename or "upload.png")
+    ext = ext.lstrip(".").lower() or "png"
+
+    job_id = history.make_record_id()
+    _jobs[job_id] = {"status": "queued", "progress": 0.0, "phase": None, "result": None, "error": None}
+
+    asyncio.create_task(_run_analyze_job(job_id, content, name, ext))
+    asyncio.create_task(_expire_job(job_id))
+
+    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "queued"})
+
+
+@app.get("/analyze/jobs/{job_id}")
+def analyze_job_status(job_id: str) -> dict[str, Any]:
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job
 
 
 # ---------------------------------------------------------------
