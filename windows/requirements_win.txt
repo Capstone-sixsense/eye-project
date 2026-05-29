@@ -1,0 +1,22 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+scikit-learn==1.2.2
+numpy==1.26.4
+PyYAML>=6.0
+pandas>=2.2
+Pillow>=10.0
+opencv-python-headless>=4.
+scipy
+joblib
+timm
+albumentations
+grad-cam
+captum
+cryptography>=42.0
+
+# CPU 전용 PyTorch — GPU 없는 환경에서 안전하게 동작
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1+cpu
+torchvision==0.24.1+cpu

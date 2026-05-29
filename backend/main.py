@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import os, logging, time
+import os, sys, logging, time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -21,7 +22,14 @@ import crypto  # 키 검증을 위해 import만 해도 충분 (모듈 로드 시
 import io
 
 
-_DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
+def _get_bundle_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        # PyInstaller one-dir: exe 파일이 있는 폴더
+        return Path(sys.executable).parent
+    # 개발 환경: backend/ 기준으로 ../ai/
+    return Path(__file__).parent.parent / "ai"
+
+_DEFAULT_CONFIG_PATH = str(_get_bundle_dir() / "configs" / "base.yaml")
 
 # 'bad' 확률이 이 값을 넘으면 경고 메시지를 응답에 포함 (usable 등급 대상)
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
@@ -69,6 +77,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"[lifespan] DB 초기화 실패: {exc}")
         raise
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            history.write_log(f"GPU 사용: {torch.cuda.get_device_name(0)}", phase="startup")
+        else:
+            history.write_log("GPU 없음 — CPU 모드로 실행", phase="startup")
+    except Exception:
+        pass
 
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
