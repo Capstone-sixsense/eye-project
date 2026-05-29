@@ -78,10 +78,12 @@ async def lifespan(app: FastAPI):
         _configure_cpu_threads()
         _session = InferenceSession.from_config_path(config_path, checkpoint_path=checkpoint_path)
         _session_error = None
+        history.write_log("AI 모델 로드 완료", phase="startup")
     except (ImportError, FileNotFoundError, Exception) as exc:
         _session = None
         _session_error = str(exc)
-        
+        history.write_log(f"AI 모델 로드 실패: {exc}", level="ERROR", phase="startup")
+
     #QuickQual 모델
     try:
         svm_filename = os.environ.get(
@@ -89,10 +91,12 @@ async def lifespan(app: FastAPI):
         )
         _quickqual = QuickQualWrapper(svm_filename=svm_filename)
         _quickqual_error = None
+        history.write_log("QuickQual 모델 로드 완료", phase="startup")
     except Exception as exc:
         _quickqual = None
         _quickqual_error = f"{type(exc).__name__}: {exc}"
         logger.error(f"[lifespan] QuickQual load failed:\n{traceback.format_exc()}")
+        history.write_log(f"QuickQual 모델 로드 실패: {exc}", level="ERROR", phase="startup")
 
     if _session is not None:
         global _deploy_metrics
@@ -152,7 +156,7 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
         _jobs[job_id].update(kwargs)
 
 
-async def _expire_job(job_id: str, delay: float = 600.0) -> None:
+async def _expire_job(job_id: str, delay: float = 7200.0) -> None:
     await asyncio.sleep(delay)
     _jobs.pop(job_id, None)
 
@@ -160,23 +164,25 @@ async def _expire_job(job_id: str, delay: float = 600.0) -> None:
 async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> None:
     record_id = job_id
     t0 = time.perf_counter()
+    _phase = "upload"
     _update_job(job_id, status="running")
 
     try:
         try:
             raw_img = Image.open(io.BytesIO(content)).convert("RGB")
         except Exception:
+            history.write_log("유효하지 않은 이미지 파일", level="WARNING", phase="upload", job_id=job_id)
             _update_job(job_id, status="failed", error={"status_code": 400, "detail": "유효한 이미지 파일이 아닙니다."})
             return
         _update_job(job_id, progress=0.05, phase="upload")
+        _phase = "fundus_check"
 
         if FUNDUS_CHECK_ENABLED:
-            is_fundus, reject_reason, fundus_details = check_fundus_heuristics(raw_img)
+            is_fundus, reject_reason, _ = check_fundus_heuristics(raw_img)
             if not is_fundus:
-                print(
-                    f"[analyze] 안저 이미지 아님 → 거부 "
-                    f"(reason={reject_reason}, details={fundus_details})",
-                    flush=True,
+                history.write_log(
+                    f"안저 이미지 아님 → 거부 (reason={reject_reason})",
+                    level="WARNING", phase="fundus_check", job_id=job_id,
                 )
                 _update_job(job_id, status="failed", error={
                     "status_code": 422,
@@ -188,18 +194,23 @@ async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> 
                 })
                 return
         _update_job(job_id, progress=0.10, phase="fundus_check")
+        _phase = "quickqual"
 
         t_qq = time.perf_counter()
         preprocessed_img, quality = await run_in_threadpool(
             _quickqual.preprocess_and_score, raw_img
         )
-        print(
-            f"[analyze] QuickQual 완료 ({time.perf_counter() - t_qq:.2f}s) "
-            f"label={quality['label']} bad={quality['bad']:.3f}",
-            flush=True,
+        elapsed_qq = time.perf_counter() - t_qq
+        history.write_log(
+            f"QuickQual 완료 label={quality['label']} bad={quality['bad']:.3f}",
+            phase="quickqual", job_id=job_id, elapsed=elapsed_qq,
         )
 
         if quality["label"] == "bad":
+            history.write_log(
+                f"품질 불량으로 거부 (bad={quality['bad']:.2f})",
+                level="WARNING", phase="quickqual", job_id=job_id,
+            )
             _update_job(job_id, status="failed", error={
                 "status_code": 422,
                 "detail": {
@@ -218,22 +229,33 @@ async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> 
                 "결과 신뢰도가 떨어질 수 있습니다."
             )
 
-        print(f"[analyze] 전처리 완료 (총 {time.perf_counter() - t0:.2f}s)", flush=True)
+        history.write_log(
+            f"전처리 완료 (총 {time.perf_counter() - t0:.2f}s)",
+            phase="quickqual", job_id=job_id, elapsed=time.perf_counter() - t0,
+        )
 
         _update_job(job_id, progress=0.30, phase="inference")
+        _phase = "inference"
+        t_inf = time.perf_counter()
         proc_buf = io.BytesIO()
         preprocessed_img.save(proc_buf, format="PNG")
         pred = await run_in_threadpool(
             _session.predict_image_bytes, proc_buf.getvalue(), image_name=name
+        )
+        elapsed_inf = time.perf_counter() - t_inf
+        history.write_log(
+            f"AI 추론 완료 label={pred.payload.get('predicted_label')}",
+            phase="inference", job_id=job_id, elapsed=elapsed_inf,
         )
         _update_job(job_id, progress=0.85)
 
         ai_image = pred.heatmap_overlay if pred.heatmap_overlay is not None else preprocessed_img
         report_bytes = render_report_image_bytes(ai_image)
         _update_job(job_id, progress=0.90, phase="report")
+        _phase = "report"
 
         raw_path = history.save_raw_image(record_id, content, ext=ext)
-        print(f"[analyze] 원본 암호화 저장: {raw_path}", flush=True)
+        history.write_log(f"원본 암호화 저장: {raw_path}", phase="report", job_id=job_id)
         history.save_report_image(record_id, report_bytes)
 
         prob = pred.payload.get("abnormal_probability", 0.0)
@@ -266,7 +288,8 @@ async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> 
             raw_ext=ext,
         )
 
-        print(f"[analyze] 완료: {time.perf_counter() - t0:.1f}s", flush=True)
+        elapsed_total = time.perf_counter() - t0
+        history.write_log(f"분석 완료 (총 {elapsed_total:.1f}s)", phase="done", job_id=job_id, elapsed=elapsed_total)
         result = {
             "status": "success",
             "id": record_id,
@@ -288,6 +311,7 @@ async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> 
             "original_url": f"/image/raw/{record_id}",
         }
         _update_job(job_id, status="done", progress=1.0, phase="done", result=result)
+        asyncio.create_task(_expire_job(job_id, delay=600.0))
 
     except Exception as e:
         for p in (
@@ -300,13 +324,14 @@ async def _run_analyze_job(job_id: str, content: bytes, name: str, ext: str) -> 
                 except OSError:
                     pass
         logger.error(f"[analyze] {name}: {traceback.format_exc()}")
+        history.write_log(f"분석 실패 ({_phase}): {e}", level="ERROR", phase=_phase, job_id=job_id)
         _update_job(job_id, status="failed", error={"status_code": 500, "detail": "분석 실패"})
+        asyncio.create_task(_expire_job(job_id, delay=600.0))
 
 
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)) -> JSONResponse:
     name = image.filename or "upload.png"
-    print(f"[analyze] 요청 도착 (filename={image.filename!r})", flush=True)
 
     if _session is None:
         raise HTTPException(status_code=503, detail=_session_error or "AI 모델이 준비되지 않았습니다.")
@@ -314,7 +339,6 @@ async def analyze(image: UploadFile = File(...)) -> JSONResponse:
         raise HTTPException(status_code=503, detail=_quickqual_error or "QuickQual 모델이 준비되지 않았습니다.")
 
     content = await image.read()
-    print(f"[analyze] 수신: filename={name!r}, bytes={len(content)}", flush=True)
 
     _, ext = os.path.splitext(image.filename or "upload.png")
     ext = ext.lstrip(".").lower() or "png"
@@ -322,11 +346,26 @@ async def analyze(image: UploadFile = File(...)) -> JSONResponse:
     job_id = history.make_record_id()
     _jobs[job_id] = {"status": "queued", "progress": 0.0, "phase": None, "result": None, "error": None}
 
+    history.write_log(f"분석 요청 수신: {name} ({len(content)} bytes)", phase="upload", job_id=job_id)
     asyncio.create_task(_run_analyze_job(job_id, content, name, ext))
     asyncio.create_task(_expire_job(job_id))
 
     return JSONResponse(status_code=202, content={"job_id": job_id, "status": "queued"})
 
+
+@app.get("/logs")
+def logs_list(
+    limit: int = 100,
+    offset: int = 0,
+    level: str | None = None,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be 1..1000")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    items, total = history.list_logs(limit=limit, offset=offset, level=level, job_id=job_id)
+    return {"total": total, "limit": limit, "offset": offset, "items": items}
 
 @app.get("/analyze/jobs/{job_id}")
 def analyze_job_status(job_id: str) -> dict[str, Any]:
