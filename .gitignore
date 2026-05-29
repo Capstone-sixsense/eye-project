@@ -100,3 +100,6 @@ results/
 .DS_Store
 Thumbs.db
 /.env
+
+#Text
+window_explain.md
