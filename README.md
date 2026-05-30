@@ -1,166 +1,117 @@
-# eye-project
+# eye-project · macOS 배포판
 
-**최종 갱신: 2026-05-25**
+**최종 갱신: 2026-05-30**
 
-안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.  
-이미지를 업로드하면 AI가 이상 여부를 추정하고, 설명(GradCAM·리포트)과 품질 정보를 함께 제공합니다.
+안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP의 **macOS 단독 실행판**입니다.  
+Docker·브라우저 없이 `EyeProject.app` 하나로 UI, API, AI 추론이 함께 동작합니다.
 
-> **의료 보조 용도** — 최종 판단은 반드시 의료 전문가가 합니다.  
-> 설계·운영은 **정확성·재현성·설정 일관성**을 속도보다 우선합니다.
-
----
-
-## 시스템 한눈에
-
-```text
-[Flutter Web UI]  :8080
-        │  HTTP
-        ▼
-[FastAPI Backend] :8000
-        │  import (PYTHONPATH=/ai)
-        ▼
-[drscreen · PyTorch]  configs · checkpoints · QuickQual
-```
-
-| 컴포넌트 | 역할 | 기술 |
-|----------|------|------|
-| **Frontend** | 업로드·진행·결과·이력·PDF | Flutter (Web / Docker nginx) |
-| **Backend** | API, 이력·암호화 저장, QuickQual, 추론 호출 | FastAPI, Uvicorn |
-| **AI** | 학습·추론·XAI·설정·체크포인트 | PyTorch, `drscreen` 패키지 |
+> **의료 보조 용도** — 최종 판단은 반드시 의료 전문가가 합니다.
 
 ---
 
-## 브랜치 · 상세 문서
+## 요구 사항
 
-팀별 개발 브랜치에서 작업 후 `main`에 머지합니다. **자세한 내용은 각 브랜치의 README·문서를 보세요.**
 
-| 브랜치 | 보는 것 | 문서로 이동 |
-|--------|---------|-------------|
-| [`frontend`](https://github.com/Capstone-sixsense/eye-project/tree/frontend) | Flutter 클라이언트, API 연동, 진행 UI | [`frontend/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/frontend/frontend/README.md) |
-| [`backend`](https://github.com/Capstone-sixsense/eye-project/tree/backend) | REST API, `storage/`·`results/`, Docker | `backend/` 디렉터리 · [`main.py`](https://github.com/Capstone-sixsense/eye-project/blob/backend/backend/main.py) |
-| [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
+| 항목               | 내용                           |
+| ---------------- | ---------------------------- |
+| OS               | macOS (Apple Silicon 권장)     |
+| Docker           | **불필요**                      |
+| Python / Flutter | **실행만 할 때 불필요** (`.app`에 포함) |
+| 디스크              | `.app` 약 **1.2GB**           |
 
-로컬에서 브랜치 전환:
+
+---
+
+## 실행 방법
+
+### `.app` 파일만 받은 경우
+
+1. `EyeProject.app`을 원하는 폴더에 둡니다.
+2. **더블클릭**으로 실행합니다.
+3. 첫 실행 시 AI 모델 로드로 **30~90초** 정도 걸릴 수 있습니다. 창이 뜬 뒤 이미지를 업로드해 분석하면 됩니다.
+
+macOS 보안 경고가 뜨면:
+
+- **우클릭 → 열기**로 한 번 실행하거나
+- 터미널에서:
 
 ```bash
-git fetch origin
-git checkout frontend   # 또는 backend, ai
+xattr -cr /path/to/EyeProject.app
+open /path/to/EyeProject.app
 ```
 
-`main`에는 통합 실행용 `docker-compose.yml`·`setup.sh`가 있습니다.
+### 저장소에서 직접 빌드한 경우
 
----
+빌드 산출물 경로:
 
-## 빠른 시작 (통합 실행)
+```text
+frontend/build/macos/Build/Products/Release/EyeProject.app
+```
+
+실행:
 
 ```bash
-git clone https://github.com/Capstone-sixsense/eye-project.git
-cd eye-project
-./setup.sh
-# 또는
-docker compose up -d
+open frontend/build/macos/Build/Products/Release/EyeProject.app
 ```
 
-| 서비스 | URL |
-|--------|-----|
-| UI | http://localhost:8080 |
-| API | http://localhost:8000 |
-| 헬스 | http://localhost:8000/health |
-
-- AI 체크포인트는 Git LFS일 수 있습니다. 수백 바이트 포인터만 보이면 `git lfs install && git lfs pull`.
-- 추론 기본 설정: `ai/configs/base.yaml` (Compose: `FUNDUS_CONFIG_PATH=/ai/configs/base.yaml`).
+`.app`이 없으면 아래 **최초 빌드**를 먼저 진행합니다.
 
 ---
 
-## 주요 API (요약)
+## 최초 빌드 (개발자)
 
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/health` | 모델·QuickQual 준비 상태 |
-| `POST` | `/analyze` | 분석 요청 (비동기 job, 202 + `job_id`) |
-| `GET` | `/analyze/jobs/{id}` | 분석 진행·결과 |
-| `GET` | `/history` | 분석 이력 |
-| `GET` | `/deploy-metric` | 배포용 eval 지표 |
-| `GET` | `/image/raw/{id}`, `/image/report/{id}` | 복호화 이미지 |
+저장소를 clone 한 뒤, 프로젝트 루트에서:
 
-상세 스키마·오류 코드는 **backend** 브랜치 코드·프론트 `eye_api_client`와 맞춰 확인하세요.
+```bash
+git lfs pull
+
+chmod +x packaging/macos/*.sh
+./packaging/macos/setup_venv.sh    # Python 3.11+ 필요, 최초 1회
+./packaging/macos/build_app.sh
+```
+
+코드 수정 후 `.app`을 다시 만들 때는 `build_app.sh`만 실행하면 됩니다.
+
+상세 빌드·개발 절차: `[packaging/macos/README.md](packaging/macos/README.md)`
 
 ---
 
-## 저장소 레이아웃 (`main` 기준)
+## 종료
 
-```text
-eye-project/
-├── ai/                 # drscreen 패키지, configs, artifacts
-├── backend/            # FastAPI, QuickQual 래퍼
-├── frontend/           # Flutter
-├── docker-compose.yml
-├── setup.sh
-└── README.md           # 이 파일
-```
-
-```text
-/upload (UploadScreen)
-  ├─ 이미지 선택·미리보기·10MB/확장자 검증
-  ├─ 업로드 및 분석 → 진행 다이얼로그
-  ├─ 서버 로그 (`GET /logs`, `server_logs_dialog.dart`)
-  └─ 성능 지표 (`GET /deploy-metric`)
-
-/result (ResultScreen)
-  ├─ 원본·설명(heatmap) 이미지, 판정·확률·품질
-  ├─ PDF 생성·공유 (printing)
-  ├─ 다시 업로드 → /upload (스택 제거)
-  └─ 이력 보기 → /history
-
-/history (HistoryScreen)
-  ├─ GET /history 목록·무한 스크롤
-  ├─ 대시보드 / 목록 뷰, 판정·기간 필터
-  ├─ 선택 삭제 (DELETE)
-  └─ 항목 탭 → /result (저장 메타 + 네트워크 이미지)
-```
-
-## 데이터셋 출처
-
-학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.  
-현재 배포 기준 `v31_v8b_fusion_v2`의 병변 feature는 `seg_evidence_v8b_ddrseg_tjdr_maplesfix` 모델에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.  
-데이터 원본은 저장소에 포함하지 않으며, 다운로드와 재사용은 각 원 배포처의 라이선스 및 이용 조건을 따른다.
-
-| 데이터셋 | 이 프로젝트에서의 사용 | 출처 / 인용 | 라이선스 / 이용 조건 |
-|---|---|---|---|
-| APTOS 2019 | DR 분류 학습 보조 | [Kaggle — APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Aravind Eye Hospital) | Kaggle Competition Terms |
-| IDRiD | DR 분류, XAI 평가, v8b 병변 feature 학습(MA/HE/EX/SE mask) | [IDRiD Grand Challenge](https://idrid.grand-challenge.org/Data/) / [IEEE DataPort — Indian Diabetic Retinopathy Image Dataset](https://ieee-dataport.org/open-access/indian-diabetic-retinopathy-image-dataset-idrid) | CC BY 4.0 |
-| Messidor | DR 분류 학습 및 MAPLES-DR 원본 fundus image | [ADCIS — Messidor](https://www.adcis.net/en/third-party/messidor/) | 비상업적 연구 목적 |
-| MAPLES-DR | v8b 병변 feature 학습 및 평가(MA/HE/EX/CWS mask) | [LIV4D/MAPLES-DR](https://github.com/LIV4D/MAPLES-DR), [Scientific Data 2024](https://www.nature.com/articles/s41597-024-03739-6) | MAPLES-DR label/code repo: CC0-1.0. 논문: CC BY-NC-ND 4.0. 원본 fundus image는 Messidor 이용 조건을 따름 |
-| TJDR | v8b 병변 feature 학습(MA/HE/EX/SE pixel-level mask) | [TJDR dataset page](https://www.juheapi.com/datasets/tjdr), [arXiv:2312.15389](https://arxiv.org/abs/2312.15389) | 공개 연구용 데이터셋. 명시 라이선스 파일은 로컬 데이터와 공개 페이지에서 확인되지 않았으므로 원 배포처 조건 및 논문 인용 필요 |
-| DDR / DDR_SEG | DR 분류 평가 및 v8b 병변 feature 학습용 lesion segmentation subset | [GitHub — nkicsl/DDR-dataset](https://github.com/nkicsl/DDR-dataset) | 배포 repo: MIT License. README의 DDR 논문 인용 요구 및 원 배포처 조건 준수 |
-
-TJDR 인용:
-
-```bibtex
-@article{mao2023tjdr,
-  title={TJDR: A High-Quality Diabetic Retinopathy Pixel-Level Annotation Dataset},
-  author={Mao, Jingxin and Ma, Xiaoyu and Bi, Yanlong and Zhang, Rongqing},
-  journal={arXiv preprint arXiv:2312.15389},
-  year={2023}
-}
-```
-
-(동일 표기: [`backend` 브랜치 README](https://github.com/Capstone-sixsense/eye-project/blob/backend/README.md))
+- 앱 창을 닫으면 백엔드(uvicorn)도 함께 종료됩니다.
+- Dock에 남아 있으면 **EyeProject → 종료**로 완전히 닫습니다.
 
 ---
 
-## 기여·규칙
+## 데이터·로그 위치
 
-- 컴포넌트별 작업: 해당 브랜치에서 PR → `main` 머지.
-- `ai/configs/base.yaml` 변경 시 Docker 추론·백엔드 응답 필드와 **함께** 검증.
-- Cursor/에이전트 규칙: [`.cursor/rules/eye-project.mdc`](.cursor/rules/eye-project.mdc)
+분석 이력과 암호화 이미지는 `.app` 밖 사용자 데이터 폴더에 저장됩니다.
 
-- `test/widget_test.dart`는 업로드 화면 빌드 스모크 테스트입니다. AppBar 문구가 `망막 이미지 분석`으로 바뀐 경우 테스트 문자열을 맞춰 주세요.
+
+| 경로                                                          | 내용        |
+| ----------------------------------------------------------- | --------- |
+| `~/Library/Application Support/EyeProject/storage/`         | DB·암호화 원본 |
+| `~/Library/Application Support/EyeProject/results/`         | 리포트 이미지   |
+| `~/Library/Application Support/EyeProject/logs/backend.log` | 백엔드 로그    |
+
 
 ---
 
-## 더 보기
+## 문제 해결
 
-- **프론트**: `git checkout frontend` → [`frontend/README.md`](frontend/README.md)
-- **백엔드**: `git checkout backend` → `backend/main.py`, `docker-compose.yml`
-- **AI**: `git checkout ai` → `ai/drscreen/`, `ai/configs/`, `ai/docs/`
+
+| 증상                    | 확인                                                                     |
+| --------------------- | ---------------------------------------------------------------------- |
+| 앱이 바로 종료됨             | `~/Library/Application Support/EyeProject/logs/backend.log`            |
+| “손상됨” / Gatekeeper 차단 | 위 **우클릭 → 열기** 또는 `xattr -cr`                                          |
+| 포트 충돌                 | 다른 EyeProject/Docker 백엔드가 `:8000`을 쓰는지 확인 후 종료                         |
+| 빌드 시 `best.pt` 오류     | `git lfs pull` 후 `file ai/artifacts/checkpoints/best.pt` → Zip archive |
+
+
+---
+
+## 다른 Mac으로 복사
+
+`EyeProject.app` **폴더 통째로** 복사하면 됩니다.  
+대상 Mac도 **Apple Silicon macOS**를 권장합니다.  
+팀 외부·불특정 다수 배포 시에는 Apple Developer **서명·공증(notarize)** 이 필요합니다. (현재 미수행)
