@@ -1,6 +1,6 @@
 # Eye Project · Frontend
 
-**최종 갱신: 2026-05-25**
+**최종 갱신: 2026-05-30**
 
 > `eye-project/frontend/` — **frontend** 브랜치 Flutter 클라이언트.  
 > 망막 이미지 업로드 → 백엔드 분석 API → 결과·이력·PDF를 담당합니다. AI·FastAPI·Docker 설정은 저장소 루트를 참고하세요.
@@ -52,7 +52,7 @@ frontend/
 │   ├── api/
 │   │   └── eye_api_client.dart   # REST 클라이언트
 │   ├── config/
-│   │   └── api_config.dart       # baseUrl, 이미지 URL resolve
+│   │   └── api_config.dart       # baseUrl, baseUri, 이미지 URL resolve
 │   ├── constants/
 │   │   └── api_error_codes.dart
 │   ├── models/
@@ -60,17 +60,21 @@ frontend/
 │   │   ├── analyze_job_status.dart
 │   │   ├── analysis_history_entry.dart
 │   │   ├── report_metrics.dart
-│   │   └── result_screen_args.dart
+│   │   ├── result_screen_args.dart
+│   │   └── server_log_entry.dart
 │   ├── screens/
 │   │   ├── upload_screen.dart    # 업로드·분석 시작
 │   │   ├── result_screen.dart    # 판정·XAI·PDF
 │   │   └── history_screen.dart   # 이력 대시보드·필터·삭제
+│   ├── util/
+│   │   └── format.dart           # 날짜·타임스탬프 표시 (이력·로그 공통)
 │   └── ui/
 │       ├── medical_ui.dart
 │       ├── notice_dialog.dart
 │       ├── analyze_progress_dialog.dart
 │       ├── analyze_progress_controller.dart
 │       ├── report_metrics_dialog.dart
+│       ├── server_logs_dialog.dart
 │       └── dialog_keyboard.dart
 ├── test/
 ├── web/, linux/, windows/         # 플랫폼 러너 (개발·Web Docker 빌드)
@@ -123,6 +127,7 @@ flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000
 | `GET` | `/analyze/jobs/{job_id}` | 분석 진행 폴링 (`progress`, `phase`, `result`) |
 | `GET` | `/history` | 이력 목록 (페이지네이션) |
 | `DELETE` | `/history/{id}` | 이력 삭제 |
+| `GET` | `/logs` | 업로드 화면 「서버 로그」 (레벨 필터·무한 스크롤) |
 | `GET` | `/image/raw/{id}`, `/image/report/{id}` | `ApiConfig.resolveAssetUrl` |
 
 - 멀티파트 필드명: **`image`** (백엔드와 동일).
@@ -153,7 +158,8 @@ POST /analyze (202, job_id)
 | `report` | 리포트 생성 중 |
 | `done` | 완료 |
 
-구현 파일: `analyze_progress_controller.dart`, `analyze_progress_dialog.dart`, `upload_screen.dart`.
+구현 파일: `analyze_progress_controller.dart`, `analyze_progress_dialog.dart`, `upload_screen.dart`.  
+기본 단계 문구는 `AnalyzeProgressDialog.defaultMessage` 한 곳에서 관리합니다.
 
 ---
 
@@ -163,7 +169,8 @@ POST /analyze (202, job_id)
 /upload (UploadScreen)
   ├─ 이미지 선택·미리보기·10MB/확장자 검증
   ├─ 업로드 및 분석 → 진행 다이얼로그
-  └─ 성능 지표 (deploy-metric)
+  ├─ 서버 로그 (`GET /logs`, `server_logs_dialog.dart`)
+  └─ 성능 지표 (`GET /deploy-metric`)
 
 /result (ResultScreen)
   ├─ 원본·설명(heatmap) 이미지, 판정·확률·품질
@@ -190,14 +197,18 @@ POST /analyze (202, job_id)
 
 | 경로 | 역할 |
 |------|------|
-| `eye_api_client.dart` | analyze job, history, deploy-metric, 오류 파싱 |
+| `api_config.dart` | `baseUrl`·`baseUri`(API 요청 베이스), `resolveAssetUrl` |
+| `eye_api_client.dart` | analyze job, history, logs, deploy-metric, 오류 파싱 |
 | `analyze_response.dart` | 분석·이력 JSON, `canShowInferenceResults`, XAI 경로 |
 | `analyze_job_status.dart` | job 폴링 상태·`phaseLabel` |
 | `analysis_history_entry.dart` | 이력 행 파싱 |
+| `server_log_entry.dart` | 서버 로그 행 파싱·`phaseLabel` |
 | `report_metrics.dart` | AUROC·민감도 등 배포 지표 |
+| `util/format.dart` | `formatLocalDateTime`, `formatIsoTimestamp` |
 | `medical_ui.dart` | 카드·버튼·배너·토큰 |
-| `notice_dialog.dart` | 코드·HTTP 오류 안내 다이얼로그 |
+| `notice_dialog.dart` | `showNoticeDialog`·`showCodeNoticeDialog`·`showErrorNotice` |
 | `report_metrics_dialog.dart` | 성능 지표 설명 UI |
+| `server_logs_dialog.dart` | 서버 로그 조회·레벨 필터 UI |
 
 ---
 
