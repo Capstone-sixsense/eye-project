@@ -357,13 +357,11 @@ class _UploadHeaderIconButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
-    this.iconColor = MedicalTokens.textMain,
     this.loading = false,
   });
 
   final String tooltip;
   final IconData icon;
-  final Color iconColor;
   final VoidCallback? onPressed;
   final bool loading;
 
@@ -390,7 +388,9 @@ class _UploadHeaderIconButton extends StatelessWidget {
           : Icon(
               icon,
               size: 22,
-              color: onPressed == null ? MedicalTokens.textSubtle : iconColor,
+              color: onPressed == null
+                  ? MedicalTokens.textSubtle
+                  : MedicalTokens.textMain,
             ),
     );
   }

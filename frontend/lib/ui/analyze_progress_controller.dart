@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/analyze_job_status.dart';
+import 'analyze_progress_dialog.dart';
 
 /// 서버 `progress`는 단계마다 점프하므로, UI용 퍼센트를 부드럽게 올린다.
 ///
@@ -16,9 +17,7 @@ class AnalyzeProgressController extends ChangeNotifier {
   Timer? _timer;
   double _confirmed = 0;
   double _visual = 0;
-  static const String _defaultPhaseLabel = '서버로 전송 후 AI 분석 중입니다.';
-
-  String _phaseLabel = _defaultPhaseLabel;
+  String _phaseLabel = AnalyzeProgressDialog.defaultMessage;
   String? _phase;
   String _status = 'queued';
   bool _terminal = false;
@@ -28,8 +27,6 @@ class AnalyzeProgressController extends ChangeNotifier {
 
   /// 0.0~1.0, UI 표시용
   double get visualProgress => _visual;
-
-  int get visualPercent => (_visual * 100).round().clamp(0, 100);
 
   String get phaseLabel => _phaseLabel;
 

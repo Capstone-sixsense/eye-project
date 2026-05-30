@@ -32,7 +32,7 @@ String parseApiErrorMessage(String rawBody) {
 }
 
 String? _detailMessage(dynamic detail) {
-      if (detail is Map) {
+  if (detail is Map) {
     final message = detail['message'];
     if (message is String && message.isNotEmpty) return message;
     final code = detail['code'];
@@ -78,14 +78,10 @@ String? parseErrorCodeFromBody(String body) {
 class HistoryListPage {
   const HistoryListPage({
     required this.total,
-    required this.limit,
-    required this.offset,
     required this.items,
   });
 
   final int total;
-  final int limit;
-  final int offset;
 
   /// 이미 검증된 엔트리만 포함 (파싱 실패 행 제외).
   final List<AnalysisHistoryEntry> items;
@@ -94,14 +90,10 @@ class HistoryListPage {
 class LogsListPage {
   const LogsListPage({
     required this.total,
-    required this.limit,
-    required this.offset,
     required this.items,
   });
 
   final int total;
-  final int limit;
-  final int offset;
   final List<ServerLogEntry> items;
 }
 
@@ -128,9 +120,7 @@ class EyeApiClient {
 
   /// `GET /deploy-metric` — 서버 기동 시 로드된 배포 eval_metrics (flat dict).
   Future<ReportMetrics?> fetchDeployMetrics() async {
-    final base =
-        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve('deploy-metric');
+    final uri = ApiConfig.baseUri.resolve('deploy-metric');
     debugPrint('[EyeApi] GET $uri');
     final response = await _client.get(uri);
     debugPrint('[EyeApi] deploy-metric ${response.statusCode}');
@@ -274,9 +264,7 @@ class EyeApiClient {
   }
 
   Future<AnalyzeJobStatus> _fetchAnalyzeJob(String jobId) async {
-    final base =
-        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve(
+    final uri = ApiConfig.baseUri.resolve(
       'analyze/jobs/${Uri.encodeComponent(jobId)}',
     );
     final response = await _client.get(uri);
@@ -320,8 +308,7 @@ class EyeApiClient {
     int limit = 50,
     int offset = 0,
   }) async {
-    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve('history').replace(
+    final uri = ApiConfig.baseUri.resolve('history').replace(
           queryParameters: <String, String>{
             'limit': '$limit',
             'offset': '$offset',
@@ -361,8 +348,6 @@ class EyeApiClient {
 
     return HistoryListPage(
       total: (map['total'] as num?)?.toInt() ?? parsed.length,
-      limit: (map['limit'] as num?)?.toInt() ?? limit,
-      offset: (map['offset'] as num?)?.toInt() ?? offset,
       items: parsed,
     );
   }
@@ -374,8 +359,6 @@ class EyeApiClient {
     String? level,
     String? jobId,
   }) async {
-    final base =
-        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
     final query = <String, String>{
       'limit': '$limit',
       'offset': '$offset',
@@ -383,7 +366,7 @@ class EyeApiClient {
     if (level != null && level.isNotEmpty) query['level'] = level;
     if (jobId != null && jobId.isNotEmpty) query['job_id'] = jobId;
 
-    final uri = Uri.parse(base).resolve('logs').replace(queryParameters: query);
+    final uri = ApiConfig.baseUri.resolve('logs').replace(queryParameters: query);
     debugPrint('[EyeApi] GET $uri');
     final response = await _client.get(uri);
     debugPrint('[EyeApi] logs ${response.statusCode}');
@@ -415,16 +398,14 @@ class EyeApiClient {
 
     return LogsListPage(
       total: (map['total'] as num?)?.toInt() ?? parsed.length,
-      limit: (map['limit'] as num?)?.toInt() ?? limit,
-      offset: (map['offset'] as num?)?.toInt() ?? offset,
       items: parsed,
     );
   }
 
   Future<void> deleteHistoryRecord(String recordId) async {
-    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri =
-        Uri.parse(base).resolve('history/${Uri.encodeComponent(recordId)}');
+    final uri = ApiConfig.baseUri.resolve(
+      'history/${Uri.encodeComponent(recordId)}',
+    );
     debugPrint('[EyeApi] DELETE $uri');
     final response = await _client.delete(uri);
     if (response.statusCode < 200 || response.statusCode >= 300) {

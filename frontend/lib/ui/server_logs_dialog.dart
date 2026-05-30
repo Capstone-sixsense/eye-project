@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/eye_api_client.dart';
 import '../models/server_log_entry.dart';
+import '../util/format.dart';
 import 'dialog_keyboard.dart';
 import 'medical_ui.dart';
 import 'notice_dialog.dart' show showErrorNotice;
@@ -366,7 +367,7 @@ class _LogRow extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  _formatTs(entry.ts),
+                  formatIsoTimestamp(entry.ts, includeSeconds: true),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: MedicalTokens.textSubtle,
                   ),
@@ -411,18 +412,5 @@ class _LogRow extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  static String _formatTs(String ts) {
-    final parsed = DateTime.tryParse(ts);
-    if (parsed == null) return ts;
-    final local = parsed.toLocal();
-    final y = local.year.toString().padLeft(4, '0');
-    final mo = local.month.toString().padLeft(2, '0');
-    final d = local.day.toString().padLeft(2, '0');
-    final h = local.hour.toString().padLeft(2, '0');
-    final mi = local.minute.toString().padLeft(2, '0');
-    final s = local.second.toString().padLeft(2, '0');
-    return '$y-$mo-$d $h:$mi:$s';
   }
 }
