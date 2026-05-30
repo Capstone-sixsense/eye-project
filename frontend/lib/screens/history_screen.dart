@@ -7,6 +7,7 @@ import '../api/eye_api_client.dart';
 import '../config/api_config.dart';
 import '../models/analysis_history_entry.dart';
 import '../models/result_screen_args.dart';
+import '../util/format.dart';
 import '../ui/medical_ui.dart';
 import '../ui/dialog_keyboard.dart';
 import '../ui/notice_dialog.dart' show showErrorNotice, showNoticeDialog;
@@ -1311,7 +1312,6 @@ class _HistoryViewModeToggle extends StatelessWidget {
     Widget button({
       required IconData icon,
       required HistoryViewMode mode,
-      required String tooltip,
     }) {
       final selected = value == mode;
       return InkWell(
@@ -1350,7 +1350,6 @@ class _HistoryViewModeToggle extends StatelessWidget {
               child: button(
                 icon: Icons.grid_view_rounded,
                 mode: HistoryViewMode.dashboard,
-                tooltip: '대시보드 보기',
               ),
             ),
             const SizedBox(width: 4),
@@ -1359,7 +1358,6 @@ class _HistoryViewModeToggle extends StatelessWidget {
               child: button(
                 icon: Icons.list_rounded,
                 mode: HistoryViewMode.list,
-                tooltip: '리스트 보기',
               ),
             ),
           ],
@@ -1437,7 +1435,7 @@ class _HistoryListView extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        _formatDateTime(item.createdAt),
+                        formatLocalDateTime(item.createdAt),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
@@ -1602,7 +1600,7 @@ class _HistoryDashboardView extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  _formatDateTime(item.createdAt),
+                                  formatLocalDateTime(item.createdAt),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1742,13 +1740,4 @@ class _HistoryThumbnail extends StatelessWidget {
     }
     return SizedBox.expand(child: child);
   }
-}
-
-String _formatDateTime(DateTime value) {
-  final y = value.year.toString().padLeft(4, '0');
-  final m = value.month.toString().padLeft(2, '0');
-  final d = value.day.toString().padLeft(2, '0');
-  final hh = value.hour.toString().padLeft(2, '0');
-  final mm = value.minute.toString().padLeft(2, '0');
-  return '$y-$m-$d $hh:$mm';
 }

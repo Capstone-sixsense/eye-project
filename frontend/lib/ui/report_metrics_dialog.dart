@@ -111,7 +111,7 @@ class ReportMetricsDialogBody extends StatelessWidget {
           _MetricIndentedGroup(
             children: [
               for (var i = 0; i < rows.length; i++)
-                _MetricRatioTile(
+                _MetricTile(
                   title: rows[i].title,
                   subtitle: rows[i].subtitle,
                   valueText: ReportMetrics.formatPercent(rows[i].ratio),
@@ -125,12 +125,14 @@ class ReportMetricsDialogBody extends StatelessWidget {
           _MetricIndentedGroup(
             children: [
               for (var i = 0; i < thresholds.length; i++)
-                _MetricThresholdTile(
+                _MetricTile(
                   title: thresholds[i].title,
                   subtitle: thresholds[i].subtitle,
                   valueText:
                       ReportMetrics.formatThreshold(thresholds[i].value),
                   topGap: i > 0,
+                  badgeBackgroundColor: const Color(0xFFF0F4F8),
+                  badgeForegroundColor: MedicalTokens.textMain,
                 ),
             ],
           ),
@@ -140,11 +142,13 @@ class ReportMetricsDialogBody extends StatelessWidget {
           _MetricIndentedGroup(
             children: [
               for (var i = 0; i < xaiMeta.length; i++)
-                _MetricTextTile(
+                _MetricTile(
                   title: xaiMeta[i].title,
                   subtitle: xaiMeta[i].subtitle,
                   valueText: xaiMeta[i].value,
                   topGap: i > 0,
+                  badgeBackgroundColor: const Color(0xFFF0F4F8),
+                  badgeForegroundColor: MedicalTokens.textMain,
                 ),
             ],
           ),
@@ -154,7 +158,7 @@ class ReportMetricsDialogBody extends StatelessWidget {
           _MetricIndentedGroup(
             children: [
               for (var i = 0; i < xaiRows.length; i++)
-                _MetricRatioTile(
+                _MetricTile(
                   title: xaiRows[i].title,
                   subtitle: xaiRows[i].subtitle,
                   valueText: ReportMetrics.formatPercent(xaiRows[i].ratio),
@@ -208,18 +212,22 @@ class _MetricIndentedGroup extends StatelessWidget {
   }
 }
 
-class _MetricTextTile extends StatelessWidget {
-  const _MetricTextTile({
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
     required this.title,
     required this.subtitle,
     required this.valueText,
     this.topGap = false,
+    this.badgeBackgroundColor,
+    this.badgeForegroundColor,
   });
 
   final String title;
   final String subtitle;
   final String valueText;
   final bool topGap;
+  final Color? badgeBackgroundColor;
+  final Color? badgeForegroundColor;
 
   @override
   Widget build(BuildContext context) {
@@ -241,104 +249,8 @@ class _MetricTextTile extends StatelessWidget {
             ),
             MedicalBadge(
               text: valueText,
-              backgroundColor: const Color(0xFFF0F4F8),
-              foregroundColor: MedicalTokens.textMain,
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MetricRatioTile extends StatelessWidget {
-  const _MetricRatioTile({
-    required this.title,
-    required this.subtitle,
-    required this.valueText,
-    this.topGap = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String valueText;
-  final bool topGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (topGap) const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: MedicalTokens.textMain,
-                ),
-              ),
-            ),
-            MedicalBadge(text: valueText),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MetricThresholdTile extends StatelessWidget {
-  const _MetricThresholdTile({
-    required this.title,
-    required this.subtitle,
-    required this.valueText,
-    this.topGap = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String valueText;
-  final bool topGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (topGap) const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: MedicalTokens.textMain,
-                ),
-              ),
-            ),
-            MedicalBadge(
-              text: valueText,
-              backgroundColor: const Color(0xFFF0F4F8),
-              foregroundColor: MedicalTokens.textMain,
+              backgroundColor: badgeBackgroundColor ?? MedicalTokens.primarySoft,
+              foregroundColor: badgeForegroundColor ?? MedicalTokens.textMain,
             ),
           ],
         ),
