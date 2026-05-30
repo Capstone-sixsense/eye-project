@@ -78,18 +78,6 @@ Future<void> showCodeNoticeDialog(
   );
 }
 
-/// HTTP `EyeApiException` — 상태 코드 + API 본문 파싱.
-Future<void> showApiErrorNotice(
-  BuildContext context,
-  EyeApiException error,
-) {
-  return showCodeNoticeDialog(
-    context,
-    code: '${error.statusCode}',
-    message: parseApiErrorMessage(error.body),
-  );
-}
-
 String? _errorCodeFor(Object error) {
   if (error is EyeApiException) return '${error.statusCode}';
   if (error is TimeoutException) return '408';

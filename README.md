@@ -99,7 +99,25 @@ eye-project/
 └── README.md           # 이 파일
 ```
 
----
+```text
+/upload (UploadScreen)
+  ├─ 이미지 선택·미리보기·10MB/확장자 검증
+  ├─ 업로드 및 분석 → 진행 다이얼로그
+  ├─ 서버 로그 (`GET /logs`, `server_logs_dialog.dart`)
+  └─ 성능 지표 (`GET /deploy-metric`)
+
+/result (ResultScreen)
+  ├─ 원본·설명(heatmap) 이미지, 판정·확률·품질
+  ├─ PDF 생성·공유 (printing)
+  ├─ 다시 업로드 → /upload (스택 제거)
+  └─ 이력 보기 → /history
+
+/history (HistoryScreen)
+  ├─ GET /history 목록·무한 스크롤
+  ├─ 대시보드 / 목록 뷰, 판정·기간 필터
+  ├─ 선택 삭제 (DELETE)
+  └─ 항목 탭 → /result (저장 메타 + 네트워크 이미지)
+```
 
 ## 데이터셋 출처
 
@@ -136,6 +154,8 @@ TJDR 인용:
 - 컴포넌트별 작업: 해당 브랜치에서 PR → `main` 머지.
 - `ai/configs/base.yaml` 변경 시 Docker 추론·백엔드 응답 필드와 **함께** 검증.
 - Cursor/에이전트 규칙: [`.cursor/rules/eye-project.mdc`](.cursor/rules/eye-project.mdc)
+
+- `test/widget_test.dart`는 업로드 화면 빌드 스모크 테스트입니다. AppBar 문구가 `망막 이미지 분석`으로 바뀐 경우 테스트 문자열을 맞춰 주세요.
 
 ---
 

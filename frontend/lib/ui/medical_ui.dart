@@ -186,6 +186,20 @@ class MedicalBadge extends StatelessWidget {
   }
 }
 
+Widget _medicalButtonChild(String label, Widget? leading) {
+  final labelWidget = Text(label);
+  if (leading == null) return labelWidget;
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      leading,
+      const SizedBox(width: 8),
+      labelWidget,
+    ],
+  );
+}
+
 class MedicalPrimaryButton extends StatelessWidget {
   const MedicalPrimaryButton({
     super.key,
@@ -200,20 +214,9 @@ class MedicalPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelWidget = Text(label);
     return FilledButton(
       onPressed: onPressed,
-      child: leading == null
-          ? labelWidget
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                leading!,
-                const SizedBox(width: 8),
-                labelWidget,
-              ],
-            ),
+      child: _medicalButtonChild(label, leading),
     );
   }
 }
@@ -232,20 +235,9 @@ class MedicalSecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelWidget = Text(label);
     return OutlinedButton(
       onPressed: onPressed,
-      child: leading == null
-          ? labelWidget
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                leading!,
-                const SizedBox(width: 8),
-                labelWidget,
-              ],
-            ),
+      child: _medicalButtonChild(label, leading),
     );
   }
 }

@@ -26,7 +26,6 @@ class AnalyzeJobStatus {
 
   bool get isDone => status == 'done';
   bool get isFailed => status == 'failed';
-  bool get isTerminal => isDone || isFailed;
 
   factory AnalyzeJobStatus.fromJson(Map<String, dynamic> json) {
     AnalyzeResponse? result;

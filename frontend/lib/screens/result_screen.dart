@@ -849,7 +849,7 @@ class _ZoomPanelState extends State<_ZoomPanel> {
   Widget build(BuildContext context) {
     final strokes = [
       ..._strokes,
-      if (_activeStroke != null) _activeStroke!,
+      ? _activeStroke,
     ];
 
     return Column(

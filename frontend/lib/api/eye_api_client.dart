@@ -9,6 +9,7 @@ import '../models/analysis_history_entry.dart';
 import '../models/analyze_job_status.dart';
 import '../models/analyze_response.dart';
 import '../models/report_metrics.dart';
+import '../models/server_log_entry.dart';
 
 /// `GET /analyze/jobs/{id}` 폴링 시 UI 진행 표시.
 typedef AnalyzeProgressCallback = void Function(AnalyzeJobStatus status);
@@ -31,7 +32,7 @@ String parseApiErrorMessage(String rawBody) {
 }
 
 String? _detailMessage(dynamic detail) {
-      if (detail is Map) {
+  if (detail is Map) {
     final message = detail['message'];
     if (message is String && message.isNotEmpty) return message;
     final code = detail['code'];
@@ -77,17 +78,23 @@ String? parseErrorCodeFromBody(String body) {
 class HistoryListPage {
   const HistoryListPage({
     required this.total,
-    required this.limit,
-    required this.offset,
     required this.items,
   });
 
   final int total;
-  final int limit;
-  final int offset;
 
   /// 이미 검증된 엔트리만 포함 (파싱 실패 행 제외).
   final List<AnalysisHistoryEntry> items;
+}
+
+class LogsListPage {
+  const LogsListPage({
+    required this.total,
+    required this.items,
+  });
+
+  final int total;
+  final List<ServerLogEntry> items;
 }
 
 class EyeApiException implements Exception {
@@ -113,9 +120,7 @@ class EyeApiClient {
 
   /// `GET /deploy-metric` — 서버 기동 시 로드된 배포 eval_metrics (flat dict).
   Future<ReportMetrics?> fetchDeployMetrics() async {
-    final base =
-        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve('deploy-metric');
+    final uri = ApiConfig.baseUri.resolve('deploy-metric');
     debugPrint('[EyeApi] GET $uri');
     final response = await _client.get(uri);
     debugPrint('[EyeApi] deploy-metric ${response.statusCode}');
@@ -259,9 +264,7 @@ class EyeApiClient {
   }
 
   Future<AnalyzeJobStatus> _fetchAnalyzeJob(String jobId) async {
-    final base =
-        ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve(
+    final uri = ApiConfig.baseUri.resolve(
       'analyze/jobs/${Uri.encodeComponent(jobId)}',
     );
     final response = await _client.get(uri);
@@ -305,8 +308,7 @@ class EyeApiClient {
     int limit = 50,
     int offset = 0,
   }) async {
-    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri = Uri.parse(base).resolve('history').replace(
+    final uri = ApiConfig.baseUri.resolve('history').replace(
           queryParameters: <String, String>{
             'limit': '$limit',
             'offset': '$offset',
@@ -346,16 +348,64 @@ class EyeApiClient {
 
     return HistoryListPage(
       total: (map['total'] as num?)?.toInt() ?? parsed.length,
-      limit: (map['limit'] as num?)?.toInt() ?? limit,
-      offset: (map['offset'] as num?)?.toInt() ?? offset,
+      items: parsed,
+    );
+  }
+
+  /// `GET /logs` — 서버 분석·동작 로그 (최신순).
+  Future<LogsListPage> fetchLogsPage({
+    int limit = 100,
+    int offset = 0,
+    String? level,
+    String? jobId,
+  }) async {
+    final query = <String, String>{
+      'limit': '$limit',
+      'offset': '$offset',
+    };
+    if (level != null && level.isNotEmpty) query['level'] = level;
+    if (jobId != null && jobId.isNotEmpty) query['job_id'] = jobId;
+
+    final uri = ApiConfig.baseUri.resolve('logs').replace(queryParameters: query);
+    debugPrint('[EyeApi] GET $uri');
+    final response = await _client.get(uri);
+    debugPrint('[EyeApi] logs ${response.statusCode}');
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw EyeApiException(response.statusCode, response.body);
+    }
+
+    Map<String, dynamic>? map;
+    try {
+      final d = jsonDecode(response.body);
+      if (d is Map<String, dynamic>) map = d;
+    } catch (_) {}
+
+    if (map == null) {
+      throw EyeApiException(response.statusCode, '로그 응답 JSON 파싱 실패');
+    }
+
+    final rawItems = map['items'];
+    final parsed = <ServerLogEntry>[];
+    if (rawItems is List) {
+      for (final e in rawItems) {
+        if (e is Map) {
+          final row = ServerLogEntry.tryParse(Map<String, dynamic>.from(e));
+          if (row != null) parsed.add(row);
+        }
+      }
+    }
+
+    return LogsListPage(
+      total: (map['total'] as num?)?.toInt() ?? parsed.length,
       items: parsed,
     );
   }
 
   Future<void> deleteHistoryRecord(String recordId) async {
-    final base = ApiConfig.baseUrl.endsWith('/') ? ApiConfig.baseUrl : '${ApiConfig.baseUrl}/';
-    final uri =
-        Uri.parse(base).resolve('history/${Uri.encodeComponent(recordId)}');
+    final uri = ApiConfig.baseUri.resolve(
+      'history/${Uri.encodeComponent(recordId)}',
+    );
     debugPrint('[EyeApi] DELETE $uri');
     final response = await _client.delete(uri);
     if (response.statusCode < 200 || response.statusCode >= 300) {
