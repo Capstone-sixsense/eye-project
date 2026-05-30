@@ -99,4 +99,5 @@ results/
 # OS
 .DS_Store
 Thumbs.db
-/.env
+packaging/macos/venv/
+packaging/macos/bundled.env
