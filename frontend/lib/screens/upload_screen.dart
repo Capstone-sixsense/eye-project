@@ -15,6 +15,7 @@ import '../ui/medical_ui.dart';
 import '../ui/notice_dialog.dart'
     show showCodeNoticeDialog, showErrorNotice, showNoticeDialog;
 import '../ui/report_metrics_dialog.dart';
+import '../ui/server_logs_dialog.dart';
 
 const int _kMaxUploadBytes = 10 * 1024 * 1024;
 const Set<String> _kAllowedImageExtensions = {'jpg', 'jpeg', 'png'};
@@ -207,11 +208,6 @@ class _UploadScreenState extends State<UploadScreen> {
     }
   }
 
-  String _deployMetricsLabel() {
-    if (_deployMetricsLoading) return '성능 지표 불러오는 중...';
-    return '성능 지표 보기';
-  }
-
   @override
   void dispose() {
     _api.close();
@@ -234,9 +230,62 @@ class _UploadScreenState extends State<UploadScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const MedicalSectionTitle(
-                    '이미지 업로드',
-                    subtitle: '선명한 안저 이미지를 선택한 뒤 분석을 진행하세요.',
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 92),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '이미지 업로드',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: MedicalTokens.textMain,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '선명한 안저 이미지를 선택한 뒤 분석을 진행하세요.',
+                              style:
+                                  Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: MedicalTokens.textSubtle,
+                                      ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _UploadHeaderIconButton(
+                              tooltip: '서버 로그',
+                              icon: Icons.list_rounded,
+                              onPressed: () => showServerLogsDialog(context),
+                            ),
+                            const SizedBox(width: 4),
+                            _UploadHeaderIconButton(
+                              tooltip: '성능 지표',
+                              onPressed: _deployMetricsLoading
+                                  ? null
+                                  : () => showReportMetricsInfoDialog(
+                                        context,
+                                        metrics: _deployMetrics,
+                                      ),
+                              icon: Icons.bar_chart_outlined,
+                              loading: _deployMetricsLoading,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: MedicalTokens.spaceMd),
                   const MedicalNoticeBanner(
@@ -293,29 +342,56 @@ class _UploadScreenState extends State<UploadScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: MedicalTokens.spaceMd),
-                  MedicalSecondaryButton(
-                    label: _deployMetricsLabel(),
-                    onPressed: _deployMetricsLoading
-                        ? null
-                        : () => showReportMetricsInfoDialog(
-                              context,
-                              metrics: _deployMetrics,
-                            ),
-                    leading: _deployMetricsLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.bar_chart_outlined, size: 18),
-                  ),
                 ],
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _UploadHeaderIconButton extends StatelessWidget {
+  const _UploadHeaderIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.iconColor = MedicalTokens.textMain,
+    this.loading = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color iconColor;
+  final VoidCallback? onPressed;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: loading ? null : onPressed,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(40, 40),
+        fixedSize: const Size(40, 40),
+        backgroundColor: MedicalTokens.surface,
+        side: const BorderSide(color: MedicalTokens.border),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(MedicalTokens.radiusMd),
+        ),
+      ),
+      icon: loading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              icon,
+              size: 22,
+              color: onPressed == null ? MedicalTokens.textSubtle : iconColor,
+            ),
     );
   }
 }
