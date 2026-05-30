@@ -50,6 +50,7 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  String? _levelFilter;
 
   bool get _hasMore => _items.length < _total;
 
@@ -83,7 +84,11 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
       _total = 0;
     });
     try {
-      final page = await _api.fetchLogsPage(limit: _pageLimit, offset: 0);
+      final page = await _api.fetchLogsPage(
+        limit: _pageLimit,
+        offset: 0,
+        level: _levelFilter,
+      );
       if (!mounted) return;
       setState(() {
         _items.addAll(page.items);
@@ -106,6 +111,7 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
       final page = await _api.fetchLogsPage(
         limit: _pageLimit,
         offset: _items.length,
+        level: _levelFilter,
       );
       if (!mounted) return;
       setState(() {
@@ -118,6 +124,16 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
       setState(() => _loadingMore = false);
       await showErrorNotice(context, e);
     }
+  }
+
+  void _toggleLevelFilter(String level) {
+    setState(() {
+      _levelFilter = _levelFilter == level ? null : level;
+    });
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    _loadInitial();
   }
 
   @override
@@ -162,6 +178,11 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
           const MedicalNoticeBanner(
             body: '로그는 1개월 뒤 자동으로 삭제됩니다.',
           ),
+          const SizedBox(height: 10),
+          _LogLevelFilterBar(
+            activeLevel: _levelFilter,
+            onToggle: _toggleLevelFilter,
+          ),
           const SizedBox(height: 12),
           Expanded(child: _buildLogList(theme)),
         ],
@@ -196,7 +217,7 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
     if (_items.isEmpty) {
       return Center(
         child: Text(
-          '저장된 로그가 없습니다.',
+          _levelFilter != null ? '해당 레벨의 로그가 없습니다.' : '저장된 로그가 없습니다.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: MedicalTokens.textSubtle,
           ),
@@ -231,6 +252,100 @@ class _ServerLogsDialogBodyState extends State<_ServerLogsDialogBody> {
   }
 }
 
+({Color background, Color foreground}) _logLevelStyle(String level) {
+  switch (level.toUpperCase()) {
+    case 'WARNING':
+      return (
+        background: MedicalTokens.primarySoft,
+        foreground: const Color(0xFF1F5F7A),
+      );
+    case 'ERROR':
+      return (
+        background: const Color(0xFFFDE8E8),
+        foreground: const Color(0xFFB42318),
+      );
+    default:
+      return (
+        background: const Color(0xFFF0F4F8),
+        foreground: MedicalTokens.textMain,
+      );
+  }
+}
+
+class _LogLevelFilterBar extends StatelessWidget {
+  const _LogLevelFilterBar({
+    required this.activeLevel,
+    required this.onToggle,
+  });
+
+  final String? activeLevel;
+  final ValueChanged<String> onToggle;
+
+  static const _levels = ['INFO', 'WARNING', 'ERROR'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < _levels.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          _LogLevelFilterChip(
+            level: _levels[i],
+            selected: activeLevel == _levels[i],
+            onTap: () => onToggle(_levels[i]),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _LogLevelFilterChip extends StatelessWidget {
+  const _LogLevelFilterChip({
+    required this.level,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String level;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _logLevelStyle(level);
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: style.background,
+            borderRadius: BorderRadius.circular(999),
+            border: selected
+                ? Border.all(color: style.foreground, width: 1.5)
+                : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Text(
+              level,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: style.foreground,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _LogRow extends StatelessWidget {
   const _LogRow({required this.entry});
 
@@ -239,7 +354,7 @@ class _LogRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final levelStyle = _levelStyle(entry.level);
+    final levelStyle = _logLevelStyle(entry.level);
 
     return MedicalCard(
       padding: const EdgeInsets.all(12),
@@ -309,25 +424,5 @@ class _LogRow extends StatelessWidget {
     final mi = local.minute.toString().padLeft(2, '0');
     final s = local.second.toString().padLeft(2, '0');
     return '$y-$mo-$d $h:$mi:$s';
-  }
-
-  static ({Color background, Color foreground}) _levelStyle(String level) {
-    switch (level.toUpperCase()) {
-      case 'WARNING':
-        return (
-          background: MedicalTokens.caution.withValues(alpha: 0.25),
-          foreground: const Color(0xFF8A5A12),
-        );
-      case 'ERROR':
-        return (
-          background: const Color(0xFFFDE8E8),
-          foreground: const Color(0xFFB42318),
-        );
-      default:
-        return (
-          background: const Color(0xFFF0F4F8),
-          foreground: MedicalTokens.textMain,
-        );
-    }
   }
 }
