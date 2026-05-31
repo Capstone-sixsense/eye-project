@@ -12,9 +12,8 @@ scipy
 joblib
 timm
 albumentations
-grad-cam
-captum
 cryptography>=42.0
+# grad-cam, captum: drscreen 코드에서 사용하지 않으므로 제거
 
 # CPU-only PyTorch (works on both GPU and non-GPU machines)
 --extra-index-url https://download.pytorch.org/whl/cpu

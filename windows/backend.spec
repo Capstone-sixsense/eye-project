@@ -35,8 +35,11 @@ a = Analysis(
         # QuickQual SVM 모델
         (str(ROOT / 'backend' / 'models' / 'quickqual_dn121_512.pkl'), 'models'),
         # AI 분류 모델 checkpoint (base.yaml: infer.checkpoint_path = artifacts/checkpoints/best.pt)
-        # project_root = sys._MEIPASS, 그 아래 artifacts/checkpoints/ 에 위치해야 함
         (str(ROOT / 'ai' / 'artifacts' / 'checkpoints' / 'best.pt'), 'artifacts/checkpoints'),
+        # DenseNet121 pretrained 가중치 (QuickQualWrapper: timm pretrained=True)
+        # TORCH_HOME 런타임 훅이 이 경로를 가리키도록 설정함
+        (str(ROOT / 'ai' / 'artifacts' / 'quickqual' / 'densenet121-a639ec97.pth'),
+         '.cache/torch/hub/checkpoints'),
     ],
 
     # PyInstaller 정적 분석으로 찾지 못하는 동적 import 목록.
@@ -100,18 +103,15 @@ a = Analysis(
         'cv2',
         'sklearn',
         'sklearn.svm',
-        'sklearn.utils._cython_blas',
-        'sklearn.neighbors._partition_nodes',
         'joblib',
         'albumentations',
-        'captum',
-        'captum.attr',
-        'pytorch_grad_cam',
+        # captum, pytorch_grad_cam: 코드에서 사용하지 않으므로 제거
+        # sklearn._cython_blas, _partition_nodes: scikit-learn 1.2.2에 존재하지 않으므로 제거
     ],
 
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(ROOT / 'windows' / 'hooks' / 'rthook_torch_home.py')],
 
     # 추론에 불필요한 대용량 패키지 제거 → 번들 크기 절감.
     excludes=[
