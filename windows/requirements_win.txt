@@ -16,7 +16,7 @@ grad-cam
 captum
 cryptography>=42.0
 
-# CPU 전용 PyTorch — GPU 없는 환경에서 안전하게 동작
+# CPU-only PyTorch (works on both GPU and non-GPU machines)
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.9.1+cpu
 torchvision==0.24.1+cpu
