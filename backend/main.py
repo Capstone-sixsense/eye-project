@@ -492,3 +492,10 @@ def history_delete(record_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="record not found")
     history.delete_record_files(record_id)
     return {"status": "deleted", "id": record_id}
+
+
+if __name__ == "__main__":
+    # PyInstaller로 패키징된 exe에서 직접 실행될 때 uvicorn 서버를 기동한다.
+    # Docker 환경에서는 'uvicorn main:app' 명령어로 외부에서 기동하므로 이 블록은 실행되지 않는다.
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
