@@ -103,6 +103,9 @@ a = Analysis(
         'cv2',
         'sklearn',
         'sklearn.svm',
+        'sklearn.pipeline',
+        'sklearn.preprocessing',
+        'sklearn.calibration',
         'joblib',
         'albumentations',
         'albumentations.pytorch',   # drscreen/data/transforms.py: from albumentations.pytorch import ToTensorV2
