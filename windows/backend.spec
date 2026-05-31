@@ -30,10 +30,13 @@ a = Analysis(
     # 소스 코드가 아닌 데이터 파일 (YAML, pkl 모델 등).
     # 형식: (원본 경로, 번들 내 상대 경로)
     datas=[
-        # AI YAML 설정 파일 전체 → exe 옆 configs/ 폴더에 복사
+        # AI YAML 설정 파일 전체
         (str(ROOT / 'ai' / 'configs'), 'configs'),
-        # QuickQual SVM 모델 → exe 옆 models/ 폴더에 복사
+        # QuickQual SVM 모델
         (str(ROOT / 'backend' / 'models' / 'quickqual_dn121_512.pkl'), 'models'),
+        # AI 분류 모델 checkpoint (base.yaml: infer.checkpoint_path = artifacts/checkpoints/best.pt)
+        # project_root = sys._MEIPASS, 그 아래 artifacts/checkpoints/ 에 위치해야 함
+        (str(ROOT / 'ai' / 'artifacts' / 'checkpoints' / 'best.pt'), 'artifacts/checkpoints'),
     ],
 
     # PyInstaller 정적 분석으로 찾지 못하는 동적 import 목록.
@@ -134,9 +137,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,                # UPX 압축 (없으면 False로)
+    upx=False,               # PyTorch DLL은 UPX 압축 시 손상될 수 있어 비활성화
     console=True,            # 초기 배포 시 True → 오류 로그 콘솔에 표시
-    icon=None,               # 아이콘 파일 경로 (예: str(ROOT / 'windows' / 'icon.ico'))
+    icon=None,
 )
 
 coll = COLLECT(
@@ -144,7 +147,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,               # 동일한 이유로 비활성화
     upx_exclude=[],
     name='eye_backend',      # 결과: windows/dist/eye_backend/ 폴더
 )

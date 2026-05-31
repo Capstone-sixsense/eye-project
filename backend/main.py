@@ -24,8 +24,9 @@ import io
 
 def _get_bundle_dir() -> Path:
     if getattr(sys, "frozen", False):
-        # PyInstaller one-dir: exe 파일이 있는 폴더
-        return Path(sys.executable).parent
+        # sys._MEIPASS: PyInstaller 5.x/6.x 모두 bundled 파일의 실제 경로를 가리킴
+        # 6.x one-dir → _internal/ , 5.x one-dir → exe 옆 폴더
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     # 개발 환경: backend/ 기준으로 ../ai/
     return Path(__file__).parent.parent / "ai"
 
