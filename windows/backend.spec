@@ -36,10 +36,20 @@ a = Analysis(
         (str(ROOT / 'backend' / 'models' / 'quickqual_dn121_512.pkl'), 'models'),
         # AI 분류 모델 checkpoint (base.yaml: infer.checkpoint_path = artifacts/checkpoints/best.pt)
         (str(ROOT / 'ai' / 'artifacts' / 'checkpoints' / 'best.pt'), 'artifacts/checkpoints'),
-        # DenseNet121 pretrained 가중치 (QuickQualWrapper: timm pretrained=True)
-        # TORCH_HOME 런타임 훅이 이 경로를 가리키도록 설정함
-        (str(ROOT / 'ai' / 'artifacts' / 'quickqual' / 'densenet121-a639ec97.pth'),
-         '.cache/torch/hub/checkpoints'),
+        # DenseNet121 가중치 — timm은 HuggingFace Hub 포맷(.safetensors)을 사용함.
+        # HF 캐시 구조: blobs/(실제파일) + refs/main + snapshots/(해시)/model.safetensors
+        # Windows에서 심볼릭 링크가 동작하지 않으므로 blob을 snapshot 경로에도 복사.
+        (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
+             'models--timm--densenet121.tv_in1k' / 'blobs' /
+             'c894c6d9caa317a8ca1942986dee7a16a86c77734a4d691d2abe05389cfef358'),
+         '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/blobs'),
+        (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
+             'models--timm--densenet121.tv_in1k' / 'blobs' /
+             'c894c6d9caa317a8ca1942986dee7a16a86c77734a4d691d2abe05389cfef358'),
+         '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/snapshots/f0d0f2698a02cb133b09d48396db6e1e46fe9f3b'),
+        (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
+             'models--timm--densenet121.tv_in1k' / 'refs' / 'main'),
+         '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/refs'),
     ],
 
     # PyInstaller 정적 분석으로 찾지 못하는 동적 import 목록.
@@ -111,6 +121,17 @@ a = Analysis(
         'albumentations.pytorch',   # drscreen/data/transforms.py: from albumentations.pytorch import ToTensorV2
         # captum, pytorch_grad_cam: 코드에서 사용하지 않으므로 제거
         # sklearn._cython_blas, _partition_nodes: scikit-learn 1.2.2에 존재하지 않으므로 제거
+        # uvicorn: main.py의 if __name__ == "__main__" 블록에서 import
+        'uvicorn',
+        'uvicorn.lifespan',
+        'uvicorn.lifespan.on',
+        'uvicorn.protocols',
+        'uvicorn.protocols.http',
+        'uvicorn.protocols.http.auto',
+        'uvicorn.protocols.websockets',
+        'uvicorn.protocols.websockets.auto',
+        'uvicorn.loops',
+        'uvicorn.loops.auto',
     ],
 
     hookspath=[],
