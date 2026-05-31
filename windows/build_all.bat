@@ -11,6 +11,10 @@ SET DOWNLOADS=%USERPROFILE%\Downloads
 SET ARTIFACT_ZIP=%DOWNLOADS%\eye-frontend-windows.zip
 SET ARTIFACT_DIR=%DOWNLOADS%\eye-frontend-windows
 
+REM VERSION 파일에서 버전 읽기
+SET /P APP_VERSION=<"%WINDOWS_DIR%\VERSION"
+SET APP_VERSION=%APP_VERSION: =%
+
 echo.
 echo ============================================
 echo   Eye Project Windows Build Script
@@ -131,7 +135,7 @@ if not exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
 )
 
 cd "%WINDOWS_DIR%"
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=%APP_VERSION% installer.iss
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Inno Setup compile failed.
     exit /b 1
@@ -140,8 +144,8 @@ echo [6/6] Installer build complete.
 echo.
 
 echo ============================================
-echo   Done.
-echo   Output: windows\installer_output\eye_project_setup_v1.0.0.exe
+echo   Done.  (version: %APP_VERSION%)
+echo   Output: windows\installer_output\eye_project_setup_v%APP_VERSION%.exe
 echo ============================================
 
 ENDLOCAL

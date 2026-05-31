@@ -1,11 +1,17 @@
+; 버전은 build_all.bat이 VERSION 파일에서 읽어 /DAppVersion=x.x.x 로 전달한다.
+; 직접 실행할 경우: ISCC.exe /DAppVersion=1.0.0 installer.iss
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
+
 [Setup]
 AppName=Eye Project
-AppVersion=1.0.0
+AppVersion={#AppVersion}
 AppPublisher=Capstone-sixsense
 AppPublisherURL=https://github.com/Capstone-sixsense/eye-project
 DefaultDirName={autopf}\EyeProject
 DefaultGroupName=Eye Project
-OutputBaseFilename=eye_project_setup_v1.0.0
+OutputBaseFilename=eye_project_setup_v{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 OutputDir=installer_output
