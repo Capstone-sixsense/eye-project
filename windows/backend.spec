@@ -105,6 +105,7 @@ a = Analysis(
         'sklearn.svm',
         'joblib',
         'albumentations',
+        'albumentations.pytorch',   # drscreen/data/transforms.py: from albumentations.pytorch import ToTensorV2
         # captum, pytorch_grad_cam: 코드에서 사용하지 않으므로 제거
         # sklearn._cython_blas, _partition_nodes: scikit-learn 1.2.2에 존재하지 않으므로 제거
     ],
