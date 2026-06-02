@@ -1,0 +1,48 @@
+project:
+  version: v31_v8b_late_fusion_quickqual_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_tjdr_ddrseg_quickqual_preprocessed.csv
+  image_root: data/raw
+  batch_size: 16
+  num_workers: 0
+  train_split: train
+  threshold_split: external_calibration
+  primary_eval_split: external_holdout
+  eval_splits: [train, val, test, external_calibration, external_holdout]
+  calibration_split:
+    source_split: external_test
+    calibration_split: external_calibration
+    holdout_split: external_holdout
+    fraction: 0.2
+    seed: 43
+
+classifier:
+  config_path: configs/v31_no_se_gated_quickqual_v1.yaml
+  checkpoint_path: artifacts/runs/99_misc/v31_no_se_gated_quickqual_v1/checkpoints/best.pt
+
+segmentation:
+  config_path: configs/seg_evidence_v8b_quickqual_v1.yaml
+  checkpoint_path: artifacts/runs/99_misc/seg_evidence_v8b_quickqual_v1/checkpoints/best.pt
+
+fusion:
+  seed: 43
+  sensitivity_guard: 0.7982736572890026
+  threshold_policy: sensitivity_guard
+  c_values: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+  class_weight: balanced
+  train_variants:
+    all_train:
+      train_domains: null
+    classification_domains:
+      train_domains: [APTOS, IDRiD, Messidor]
+    aptos_only:
+      train_domains: [APTOS]
+  feature_sets:
+    - v31_score_only
+    - v8b_evidence_only
+    - late_fusion
+  thresholds:
+    min: 0.01
+    max: 0.99
+    steps: 99

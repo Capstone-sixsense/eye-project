@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
+import shutil
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from drscreen.data.datasets import (
@@ -23,13 +26,14 @@ from drscreen.data.mask_providers import (
 from drscreen.data.transforms import (
     build_segmentation_eval_transform,
     build_segmentation_train_transform,
+    preprocess_kwargs_from_config,
 )
 from drscreen.models.profiles import get_model_profile
 from drscreen.models.seg_evidence import LesionSegEvidence
 from drscreen.settings import get_run_checkpoint_dir, resolve_project_path
 from drscreen.train.loss import DiceBCELoss, FocalTverskyBCELoss
 from drscreen.utils.checkpoint import load_state_from_checkpoint
-from drscreen.utils.seed import set_seed
+from drscreen.utils.seed import configure_determinism, environment_snapshot, set_seed
 from drscreen.xai.seg_metrics import dice_iou_from_logits
 
 
@@ -90,6 +94,7 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
     profile = get_model_profile(encoder)
     image_size = int(data_cfg.get("image_size", profile.crop_size))
     resize_size = int(data_cfg.get("resize_size", image_size))
+    preprocess_kwargs = preprocess_kwargs_from_config(data_cfg)
     train_transform = build_segmentation_train_transform(
         crop_size=image_size,
         resize_size=resize_size,
@@ -98,6 +103,8 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
         std=profile.std,
         use_preprocessing=bool(data_cfg.get("use_preprocessing", False)),
         use_random_resized_crop=bool(data_cfg.get("use_random_resized_crop", True)),
+        preprocess_kwargs=preprocess_kwargs,
+        gin_config=data_cfg.get("gin"),
     )
     eval_transform = build_segmentation_eval_transform(
         crop_size=image_size,
@@ -106,6 +113,7 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
         mean=profile.mean,
         std=profile.std,
         use_preprocessing=bool(data_cfg.get("use_preprocessing", False)),
+        preprocess_kwargs=preprocess_kwargs,
     )
     return train_transform, eval_transform
 
@@ -122,10 +130,14 @@ def _make_dataset(
     dataset_cls = SegmentationFDAManifestDataset if use_fda else SegmentationManifestDataset
     kwargs: dict[str, Any] = {}
     if use_fda:
+        ampmix_cfg = data_cfg.get("ampmix") or {}
         kwargs.update(
             {
                 "fda_alpha": float(data_cfg.get("fda_alpha", 0.05)),
                 "fda_probability": float(data_cfg.get("fda_probability", 1.0)),
+                "ampmix_mode": bool(ampmix_cfg.get("enable", False)),
+                "ampmix_alpha_low": float(ampmix_cfg.get("alpha_low", 0.0)),
+                "ampmix_alpha_high": float(ampmix_cfg.get("alpha_high", 0.5)),
                 "fda_target_domain": data_cfg.get("fda_target_domain"),
                 "fda_apply_to_target_domain": bool(
                     data_cfg.get("fda_apply_to_target_domain", False)
@@ -145,13 +157,17 @@ def _make_dataset(
 
 def _valid_mask_indices(dataset: ManifestDataset) -> list[int]:
     valid: list[int] = []
+    has_valid_mask = getattr(dataset._mask_provider, "has_valid_mask", None)  # noqa: SLF001
     for idx, row in dataset.frame.iterrows():
         domain = str(row["domain"]) if "domain" in dataset.frame.columns else ""
-        _mask, is_valid = dataset._mask_provider.load(  # noqa: SLF001 - internal runner
-            str(row["image_path"]),
-            domain,
-            dataset._seg_mask_size,  # noqa: SLF001 - internal runner
-        )
+        if callable(has_valid_mask):
+            is_valid = bool(has_valid_mask(str(row["image_path"]), domain))
+        else:
+            _mask, is_valid = dataset._mask_provider.load(  # noqa: SLF001 - internal runner
+                str(row["image_path"]),
+                domain,
+                dataset._seg_mask_size,  # noqa: SLF001 - internal runner
+            )
         if is_valid:
             valid.append(int(idx))
     return valid
@@ -311,6 +327,94 @@ def _build_criterion(config: dict[str, Any]) -> torch.nn.Module:
     )
 
 
+def _adverin_enabled(config: dict[str, Any]) -> bool:
+    cfg = config.get("train", {}).get("adverin", {})
+    return bool(isinstance(cfg, dict) and cfg.get("enable", False))
+
+
+def _apply_adverin_mapping(
+    images: torch.Tensor,
+    *,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    scale_param: torch.Tensor,
+    bias_param: torch.Tensor,
+    gamma_param: torch.Tensor,
+    max_scale_delta: float,
+    max_bias_delta: float,
+    max_gamma_log_delta: float,
+) -> torch.Tensor:
+    x = (images * std + mean).clamp(0.0, 1.0)
+    scale = 1.0 + float(max_scale_delta) * torch.tanh(scale_param)
+    bias = float(max_bias_delta) * torch.tanh(bias_param)
+    gamma = torch.exp(float(max_gamma_log_delta) * torch.tanh(gamma_param))
+    x = (x * scale + bias).clamp(1.0e-4, 1.0)
+    x = torch.pow(x, gamma).clamp(0.0, 1.0)
+    return (x - mean) / std
+
+
+def _adverin_batch(
+    model: torch.nn.Module,
+    images: torch.Tensor,
+    targets: torch.Tensor,
+    criterion: torch.nn.Module,
+    *,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    amp_enabled: bool,
+    config: dict[str, Any],
+) -> torch.Tensor:
+    steps = int(config.get("inner_steps", 1))
+    if steps <= 0:
+        return images
+    inner_lr = float(config.get("inner_lr", 0.1))
+    max_scale_delta = float(config.get("max_scale_delta", 0.3))
+    max_bias_delta = float(config.get("max_bias_delta", 0.12))
+    max_gamma_log_delta = float(config.get("max_gamma_log_delta", 0.5))
+    grad_mode = str(config.get("grad_mode", "sign")).strip().lower()
+
+    shape = (images.shape[0], images.shape[1], 1, 1)
+    scale_param = torch.zeros(shape, device=images.device, requires_grad=True)
+    bias_param = torch.zeros(shape, device=images.device, requires_grad=True)
+    gamma_param = torch.zeros(shape, device=images.device, requires_grad=True)
+    params = (scale_param, bias_param, gamma_param)
+
+    for _ in range(steps):
+        adv_images = _apply_adverin_mapping(
+            images,
+            mean=mean,
+            std=std,
+            scale_param=scale_param,
+            bias_param=bias_param,
+            gamma_param=gamma_param,
+            max_scale_delta=max_scale_delta,
+            max_bias_delta=max_bias_delta,
+            max_gamma_log_delta=max_gamma_log_delta,
+        )
+        with torch.autocast(device_type=images.device.type, dtype=_amp_dtype(images.device), enabled=amp_enabled):
+            adv_loss = criterion(model(adv_images), targets)
+        grads = torch.autograd.grad(adv_loss, params, only_inputs=True)
+        with torch.no_grad():
+            for param, grad in zip(params, grads, strict=True):
+                update = grad.sign() if grad_mode == "sign" else grad
+                param.add_(inner_lr * update)
+                param.clamp_(-1.0, 1.0)
+        for param in params:
+            param.requires_grad_(True)
+
+    return _apply_adverin_mapping(
+        images,
+        mean=mean,
+        std=std,
+        scale_param=scale_param.detach(),
+        bias_param=bias_param.detach(),
+        gamma_param=gamma_param.detach(),
+        max_scale_delta=max_scale_delta,
+        max_bias_delta=max_bias_delta,
+        max_gamma_log_delta=max_gamma_log_delta,
+    ).detach()
+
+
 def describe_segmentation_setup(
     config: dict[str, Any],
     *,
@@ -330,6 +434,13 @@ def describe_segmentation_setup(
         "mask_valid_domain_counts": domain_counts,
         "encoder": str(config["model"].get("encoder", "resnet50")),
         "out_channels": int(config["model"].get("out_channels", 4)),
+        "reproducibility_requested": {
+            "seed": int(config["train"].get("seed", 42)),
+            "deterministic": bool(config["train"].get("deterministic", False)),
+            "deterministic_warn_only": bool(config["train"].get("deterministic_warn_only", True)),
+            "cudnn_benchmark": bool(config["train"].get("cudnn_benchmark", False)),
+        },
+        "environment": environment_snapshot(project_root),
     }
 
 
@@ -343,6 +454,9 @@ def _run_epoch(
     amp_enabled: bool = False,
     scaler: torch.amp.GradScaler | None = None,
     threshold: float = 0.5,
+    adverin_config: dict[str, Any] | None = None,
+    norm_mean: torch.Tensor | None = None,
+    norm_std: torch.Tensor | None = None,
 ) -> dict[str, float | int | None]:
     training = optimizer is not None
     model.train(training)
@@ -360,6 +474,17 @@ def _run_epoch(
         targets = targets[valid]
         if training:
             optimizer.zero_grad(set_to_none=True)
+            if adverin_config and norm_mean is not None and norm_std is not None:
+                images = _adverin_batch(
+                    model,
+                    images,
+                    targets,
+                    criterion,
+                    mean=norm_mean,
+                    std=norm_std,
+                    amp_enabled=amp_enabled,
+                    config=adverin_config,
+                )
 
         with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
             logits = model(images)
@@ -394,14 +519,83 @@ def _run_epoch(
     }
 
 
+def _reset_and_update_bn_for_dict_loader(
+    loader: DataLoader,
+    model: torch.nn.Module,
+    device: torch.device,
+) -> None:
+    bn_modules = [
+        module for module in model.modules()
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+    ]
+    if not bn_modules:
+        return
+
+    momenta = {module: module.momentum for module in bn_modules}
+    for module in bn_modules:
+        module.running_mean.zero_()
+        module.running_var.fill_(1)
+        module.num_batches_tracked.zero_()
+
+    was_training = model.training
+    model.train()
+    examples_seen = 0
+    with torch.no_grad():
+        for batch in loader:
+            images = batch["image"].to(device)
+            valid = batch["seg_mask_valid"].to(device).bool()
+            if not valid.any():
+                continue
+            images = images[valid]
+            batch_size = int(images.shape[0])
+            momentum = batch_size / float(examples_seen + batch_size)
+            for module in bn_modules:
+                module.momentum = momentum
+            model(images)
+            examples_seen += batch_size
+
+    for module, momentum in momenta.items():
+        module.momentum = momentum
+    model.train(was_training)
+
+
+def _segmentation_checkpoint_payload(
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    config: dict[str, Any],
+    epoch: int,
+    train_metrics: dict[str, float | int | None],
+    val_metrics: dict[str, float | int | None],
+    initial_checkpoint_path: Path | None,
+    swa: bool = False,
+) -> dict[str, Any]:
+    state_source = model.module if isinstance(model, AveragedModel) else model
+    return {
+        "epoch": epoch,
+        "architecture": "lesion_seg_evidence",
+        "encoder": str(config["model"].get("encoder", "resnet50")),
+        "out_channels": int(config["model"].get("out_channels", 4)),
+        "model_state_dict": state_source.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "config": config,
+        "metrics": {"train": train_metrics, "val": val_metrics},
+        "initial_checkpoint_path": str(initial_checkpoint_path) if initial_checkpoint_path else None,
+        "swa": swa,
+    }
+
+
 def run_segmentation_training(
     config: dict[str, Any],
     *,
     config_path: Path,
     project_root: Path,
 ) -> dict[str, Any]:
-    set_seed(int(config["train"].get("seed", 42)))
-    device = torch.device(str(config["train"].get("device", "cuda")))
+    train_cfg = config["train"]
+    determinism = configure_determinism(train_cfg)
+    set_seed(int(train_cfg.get("seed", 42)))
+    environment = environment_snapshot(project_root)
+    device = torch.device(str(train_cfg.get("device", "cuda")))
     if device.type == "cuda" and not torch.cuda.is_available():
         device = torch.device("cpu")
 
@@ -436,6 +630,9 @@ def run_segmentation_training(
         )
 
     criterion = _build_criterion(config).to(device)
+    profile = get_model_profile(str(config["model"].get("encoder", "resnet50")))
+    norm_mean = torch.tensor(profile.mean, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+    norm_std = torch.tensor(profile.std, dtype=torch.float32, device=device).view(1, 3, 1, 1)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(config["train"].get("learning_rate", 1e-4)),
@@ -447,17 +644,29 @@ def run_segmentation_training(
         enabled=amp_enabled and not torch.cuda.is_bf16_supported(),
     )
     threshold = float(config.get("infer", {}).get("lesion_threshold", 0.5))
+    adverin_config = config["train"].get("adverin", {}) if _adverin_enabled(config) else None
 
     version = str(config["project"].get("version", "")).strip()
     checkpoint_dir = get_run_checkpoint_dir(project_root, version)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     best_path = checkpoint_dir / "best.pt"
     last_path = checkpoint_dir / "last.pt"
+    pre_swa_best_path = checkpoint_dir / "best_pre_swa.pt"
+    swa_path = checkpoint_dir / "swa.pt"
 
     best_val_mdice = -1.0
     best_epoch = 0
     history: list[dict[str, Any]] = []
     epochs = int(config["train"].get("epochs", 40))
+    swa_enable = bool(config["train"].get("swa_enable", False))
+    swa_start_fraction = float(config["train"].get("swa_start_fraction", 0.8))
+    swa_start_epoch = max(1, min(epochs, int(math.ceil(epochs * swa_start_fraction))))
+    swa_lr = float(config["train"].get("swa_lr", config["train"].get("learning_rate", 1e-4)))
+    swa_model = AveragedModel(model) if swa_enable else None
+    swa_scheduler = SWALR(optimizer, swa_lr=swa_lr) if swa_enable else None
+    swa_updates = 0
+    swa_val_metrics: dict[str, float | int | None] | None = None
+    swa_selected_as_best = False
     es_patience = int(config["train"].get("early_stopping_patience", 0))
     es_min_delta = float(config["train"].get("early_stopping_min_delta", 0.0))
     es_best_score = -1.0
@@ -474,6 +683,9 @@ def run_segmentation_training(
             amp_enabled=amp_enabled,
             scaler=scaler,
             threshold=threshold,
+            adverin_config=adverin_config,
+            norm_mean=norm_mean,
+            norm_std=norm_std,
         )
         with torch.no_grad():
             val_metrics = _run_epoch(
@@ -501,17 +713,15 @@ def run_segmentation_training(
             flush=True,
         )
 
-        payload = {
-            "epoch": epoch,
-            "architecture": "lesion_seg_evidence",
-            "encoder": str(config["model"].get("encoder", "resnet50")),
-            "out_channels": int(config["model"].get("out_channels", 4)),
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "config": config,
-            "metrics": {"train": train_metrics, "val": val_metrics},
-            "initial_checkpoint_path": str(initial_checkpoint_path) if initial_checkpoint_path else None,
-        }
+        payload = _segmentation_checkpoint_payload(
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            epoch=epoch,
+            train_metrics=train_metrics,
+            val_metrics=val_metrics,
+            initial_checkpoint_path=initial_checkpoint_path,
+        )
         torch.save(payload, last_path)
         val_mdice = val_metrics.get("mdice")
         score = float(val_mdice) if val_mdice is not None else -1.0
@@ -519,6 +729,12 @@ def run_segmentation_training(
             best_val_mdice = score
             best_epoch = epoch
             torch.save(payload, best_path)
+
+        if swa_model is not None and epoch >= swa_start_epoch:
+            swa_model.update_parameters(model)
+            swa_updates += 1
+            if swa_scheduler is not None:
+                swa_scheduler.step()
 
         if es_patience > 0:
             if score > es_best_score + es_min_delta:
@@ -537,6 +753,39 @@ def run_segmentation_training(
                     )
                     break
 
+    if swa_model is not None and swa_updates > 0:
+        if best_path.exists():
+            shutil.copy2(best_path, pre_swa_best_path)
+        _reset_and_update_bn_for_dict_loader(train_loader, swa_model, device)
+        with torch.no_grad():
+            swa_val_metrics = _run_epoch(
+                swa_model,
+                val_loader,
+                criterion,
+                device,
+                optimizer=None,
+                amp_enabled=amp_enabled,
+                threshold=threshold,
+            )
+        swa_payload = _segmentation_checkpoint_payload(
+            model=swa_model,
+            optimizer=optimizer,
+            config=config,
+            epoch=early_stop_epoch or epoch,
+            train_metrics={},
+            val_metrics=swa_val_metrics,
+            initial_checkpoint_path=initial_checkpoint_path,
+            swa=True,
+        )
+        torch.save(swa_payload, swa_path)
+        swa_score_value = swa_val_metrics.get("mdice")
+        swa_score = float(swa_score_value) if swa_score_value is not None else -1.0
+        if swa_score > best_val_mdice:
+            best_val_mdice = swa_score
+            best_epoch = int(swa_payload["epoch"])
+            swa_selected_as_best = True
+            torch.save(swa_payload, best_path)
+
     summary = {
         "project_root": str(project_root),
         "config_path": str(config_path),
@@ -546,16 +795,29 @@ def run_segmentation_training(
         "mask_valid_domain_counts": domain_counts,
         "device": str(device),
         "amp_enabled": amp_enabled,
+        "reproducibility": {
+            "seed": int(train_cfg.get("seed", 42)),
+            "determinism": determinism,
+            "environment": environment,
+        },
         "initial_checkpoint_path": str(initial_checkpoint_path) if initial_checkpoint_path else None,
         "initial_checkpoint_missing": initial_missing,
         "initial_checkpoint_unexpected": initial_unexpected,
         "seg_loss_type": str(config["train"].get("seg_loss_type", "dice_bce")),
+        "adverin": adverin_config,
         "best_epoch": best_epoch,
         "best_val_mdice": best_val_mdice if best_val_mdice >= 0 else None,
         "stopped_early": stopped_early,
         "early_stop_epoch": early_stop_epoch,
         "early_stopping_patience": es_patience,
         "early_stopping_min_delta": es_min_delta,
+        "swa_enable": swa_enable,
+        "swa_start_epoch": swa_start_epoch if swa_enable else None,
+        "swa_updates": swa_updates,
+        "swa_checkpoint_path": str(swa_path) if swa_updates > 0 else None,
+        "pre_swa_best_checkpoint_path": str(pre_swa_best_path) if pre_swa_best_path.exists() else None,
+        "swa_val_metrics": swa_val_metrics,
+        "swa_selected_as_best": swa_selected_as_best,
         "best_checkpoint_path": str(best_path),
         "last_checkpoint_path": str(last_path),
         "history": history,

@@ -38,12 +38,16 @@ class V31V8bFusion(nn.Module):
         return self.classifier(x)
 
     @torch.no_grad()
-    def predict_seg(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.segmenter(x))
+    def predict_seg(self, x: torch.Tensor, *, amp_enabled: bool = False) -> torch.Tensor:
+        with _bf16_autocast(x, enabled=amp_enabled):
+            logits = self.segmenter(x)
+        return torch.sigmoid(logits.float())
 
     @torch.no_grad()
-    def predict_fusion_score(self, x: torch.Tensor) -> dict[str, Any]:
-        logits = self.classifier(x)
+    def predict_fusion_score(self, x: torch.Tensor, *, amp_enabled: bool = False) -> dict[str, Any]:
+        with _bf16_autocast(x, enabled=amp_enabled):
+            logits = self.classifier(x)
+            seg_logits = self.segmenter(x)
         if isinstance(logits, tuple):
             logits = logits[0]
         logits = logits.reshape(logits.shape[0], -1)
@@ -58,7 +62,23 @@ class V31V8bFusion(nn.Module):
             clipped = float(np.clip(v31_probability, 1e-6, 1.0 - 1e-6))
             v31_logit = float(np.log(clipped / (1.0 - clipped)))
 
-        seg_prob = self.predict_seg(x)
+        seg_prob = torch.sigmoid(seg_logits.float())
+        output = self.predict_fusion_from_components(
+            v31_probability=v31_probability,
+            v31_logit=v31_logit,
+            seg_prob=seg_prob[0],
+        )
+        output["seg_prob"] = seg_prob
+        return output
+
+    @torch.no_grad()
+    def predict_fusion_from_components(
+        self,
+        *,
+        v31_probability: float,
+        v31_logit: float,
+        seg_prob: torch.Tensor,
+    ) -> dict[str, Any]:
         schema = self.feature_schema
         if not schema:
             raise ValueError("Fusion feature_schema is empty.")
@@ -67,7 +87,7 @@ class V31V8bFusion(nn.Module):
         features = extract_late_fusion_features(
             v31_probability=v31_probability,
             v31_logit=v31_logit,
-            seg_prob=seg_prob[0],
+            seg_prob=seg_prob,
             schema=schema,
             area_thresholds=area_thresholds,
             topk_fracs=topk_fracs,
@@ -82,7 +102,6 @@ class V31V8bFusion(nn.Module):
         return {
             "v31_probability": v31_probability,
             "v31_logit": v31_logit,
-            "seg_prob": seg_prob,
             "features": features,
             "meta_logit": meta_logit,
             "meta_probability": meta_probability,
@@ -116,3 +135,14 @@ def _stable_sigmoid(value: float) -> float:
         return 1.0 / (1.0 + z)
     z = math.exp(value)
     return z / (1.0 + z)
+
+
+def _bf16_autocast(x: torch.Tensor, *, enabled: bool):
+    amp_active = bool(
+        enabled
+        and x.is_cuda
+        and torch.cuda.is_available()
+        and torch.cuda.is_bf16_supported()
+    )
+    device_type = "cuda" if x.is_cuda else "cpu"
+    return torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=amp_active)

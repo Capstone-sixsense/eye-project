@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+from collections.abc import Mapping
 
 import yaml
 
@@ -34,6 +35,8 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v19_swad_focal_g2": "02_domain_generalization",
     "v20_coral": "02_domain_generalization",
     "v7_512_messidor_train": "03_resolution_layercam",
+    "v7_512_messidor_train_contentcrop_v1": "03_resolution_layercam",
+    "v7_512_messidor_train_safezoom_v1": "03_resolution_layercam",
     "v17_512_focal_g2": "03_resolution_layercam",
     "v21_512_focal_g2": "03_resolution_layercam",
     "v21_512_layercam": "03_resolution_layercam",
@@ -45,6 +48,10 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v29_with_attention": "05_xai_attention_ablation",
     "v30_gated_pooling": "06_xai_classifier_routing",
     "v31_no_se_gated": "07_lesion_evidence",
+    "v31_no_se_gated_contentcrop_v1": "07_lesion_evidence",
+    "v31_no_se_gated_contentcrop_bbretrain_v1": "07_lesion_evidence",
+    "v31_no_se_gated_safezoom_v1": "07_lesion_evidence",
+    "v31_no_se_gated_safezoom_bbretrain_v1": "07_lesion_evidence",
     "v31_syncfix_rerun": "07_lesion_evidence",
     "v31_syncfix_seed43": "07_lesion_evidence",
     "v31_syncfix_seed44": "07_lesion_evidence",
@@ -71,6 +78,11 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "seg_evidence_v7_maples_only": "09_evidence_segmentation",
     "seg_evidence_v8_ddrseg_tjdr": "09_evidence_segmentation",
     "seg_evidence_v8b_ddrseg_tjdr_maplesfix": "09_evidence_segmentation",
+    "seg_evidence_v8b_swa": "09_evidence_segmentation",
+    "seg_evidence_v9_gin": "09_evidence_segmentation",
+    "seg_evidence_v10_adverin": "09_evidence_segmentation",
+    "seg_evidence_v8b_contentcrop_v1": "09_evidence_segmentation",
+    "seg_evidence_v8b_safezoom_v1": "09_evidence_segmentation",
     "seg_evidence_v5b_maples_fda_tjdr_maplesfix": "09_evidence_segmentation",
     "v31_dfr_v1": "10_grounded_classifier",
     "bagnet_v1_p33_r256": "10_grounded_classifier",
@@ -83,6 +95,19 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
     "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
     "v31_v8b_fusion_v2": "10_grounded_classifier",
+    "v31_v8b_late_fusion_features_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_hflip_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_hflip_recalc_v2": "10_grounded_classifier",
+    "v31_v8b_late_fusion_contentcrop_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_contentcrop_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_safezoom_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_safezoom_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_safezoom_bbretrain_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_safezoom_bbretrain_v1": "10_grounded_classifier",
+    "v41_ampmix": "10_grounded_classifier",
+    "v42_coral_baseline": "10_grounded_classifier",
+    "v42_rsc_coral": "10_grounded_classifier",
 }
 
 

@@ -1,0 +1,28 @@
+{
+  "version": "v31_v8b_fusion_features_hflip_recalc_v2",
+  "evidence_model": "seg_evidence_v8b_ddrseg_tjdr_maplesfix",
+  "evidence_type": "lesion_segmentation",
+  "split": "test",
+  "dataset": "IDRiD",
+  "target_block": "v8b_lesion_segmentation",
+  "n_images": 27,
+  "metrics": {
+    "xai_evidence_type": "lesion_segmentation",
+    "xai_eval_dataset": "IDRiD",
+    "xai_eval_model": "seg_evidence_v8b_ddrseg_tjdr_maplesfix",
+    "xai_eval_split": "test",
+    "xai_eval_target_block": "v8b_lesion_segmentation",
+    "xai_eval_n": 27,
+    "xai_auc_iou": 0.3851984615565282,
+    "xai_seg_threshold": 0.5,
+    "xai_seg_mdice": 0.4144559983973663,
+    "xai_seg_miou": 0.28275069664928365,
+    "xai_seg_union_dice": 0.55346511523273,
+    "xai_seg_union_iou": 0.38934970128420354,
+    "xai_seg_best_mdice": 0.4151087505243669,
+    "xai_seg_best_mdice_threshold": 0.4,
+    "xai_seg_best_union_iou": 0.39029742866321543,
+    "xai_seg_best_union_iou_threshold": 0.4
+  },
+  "note": "Same v8b lesion segmenter and original-view lesion overlay as v31_v8b_fusion_features_hflip_v2; hflip feature recalculation affects only fusion score computation."
+}

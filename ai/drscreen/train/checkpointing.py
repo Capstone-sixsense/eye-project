@@ -9,11 +9,11 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 
+from drscreen.settings import resolve_project_path
 from drscreen.train.engine import SWADBuffer, evaluate_one_epoch
 from drscreen.train.model_setup import _DEFAULT_MIN_SENSITIVITY
 from drscreen.utils.checkpoint import read_checkpoint_auroc
 from drscreen.utils.logging import get_logger
-from drscreen.settings import resolve_project_path
 
 LOGGER = get_logger(__name__)
 

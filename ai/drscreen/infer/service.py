@@ -13,12 +13,15 @@ import numpy as np
 import torch
 from PIL import Image
 
-from drscreen.data.transforms import FundusPreprocess, build_eval_transform
+from drscreen.data.transforms import (
+    FundusPreprocess,
+    build_eval_transform,
+    preprocess_kwargs_from_config,
+)
 from drscreen.infer.payload import InferencePayload
 from drscreen.infer.pipeline import InferenceResult, run_single_image_inference
 from drscreen.models.build import build_model
 from drscreen.models.profiles import get_model_profile
-from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.settings import (
     build_effective_checkpoint_config,
     ensure_runtime_directories,
@@ -29,6 +32,7 @@ from drscreen.settings import (
     resolve_project_path,
 )
 from drscreen.train.model_setup import resolve_device
+from drscreen.utils.checkpoint import load_state_from_checkpoint
 from drscreen.xai.gradcam import generate_gradcam
 from drscreen.xai.iou import LESION_CODES
 
@@ -287,9 +291,7 @@ def _load_compact_xai_eval_metrics(
     for key, value in metric_source.items():
         if not key.startswith("xai_") or key in metrics or value is None:
             continue
-        if isinstance(value, bool):
-            metrics[key] = value
-        elif isinstance(value, int):
+        if isinstance(value, bool) or isinstance(value, int):
             metrics[key] = value
         elif isinstance(value, float):
             metrics[key] = float(value)
@@ -620,7 +622,16 @@ class InferenceSession:
         )
         preprocess_size = int(data_cfg.get("preprocess_size", 0)) or None
         use_align = bool(infer_cfg.get("use_align", data_cfg.get("use_align", False)))
-        preprocessor = FundusPreprocess(output_size=preprocess_size, align=use_align) if use_preprocessing else None
+        preprocess_options = preprocess_kwargs_from_config(data_cfg, infer_cfg)
+        preprocessor = (
+            FundusPreprocess(
+                output_size=preprocess_size,
+                align=use_align,
+                **preprocess_options,
+            )
+            if use_preprocessing
+            else None
+        )
         prediction_dir = resolve_project_path(project_root, effective_config["infer"]["prediction_dir"])
         heatmap_dir = resolve_project_path(project_root, effective_config["infer"]["heatmap_dir"])
         prediction_dir.mkdir(parents=True, exist_ok=True)
@@ -733,11 +744,49 @@ class InferenceSession:
         if bool(infer_cfg.get("use_meta_classifier", False)):
             if not hasattr(self.model, "predict_fusion_score"):
                 raise RuntimeError("use_meta_classifier=True requires predict_fusion_score().")
-            fusion_output = self.model.predict_fusion_score(image_tensor.unsqueeze(0))
+            amp_enabled = bool(infer_cfg.get("amp", False))
+            tta_mode = str(infer_cfg.get("tta_mode", "none")).strip().lower()
+            if tta_mode in {"", "none", "off", "false"}:
+                tta_mode = "none"
+            if tta_mode not in {"none", "hflip", "hflip_feature_recalc"}:
+                raise ValueError(f"Unsupported infer.tta_mode: {tta_mode}")
+
+            fusion_output = self.model.predict_fusion_score(
+                image_tensor.unsqueeze(0),
+                amp_enabled=amp_enabled,
+            )
             meta_prob = fusion_output.get("meta_probability")
             if meta_prob is None:
                 raise RuntimeError("Fusion model did not produce meta_probability.")
-            abnormal_probability = float(meta_prob)
+            if tta_mode in {"hflip", "hflip_feature_recalc"}:
+                flipped_tensor = torch.flip(image_tensor, dims=[2])
+                flipped_output = self.model.predict_fusion_score(
+                    flipped_tensor.unsqueeze(0),
+                    amp_enabled=amp_enabled,
+                )
+                flipped_meta_prob = flipped_output.get("meta_probability")
+                if flipped_meta_prob is None:
+                    raise RuntimeError("Fusion hflip view did not produce meta_probability.")
+                if tta_mode == "hflip_feature_recalc":
+                    cached_seg = fusion_output.get("seg_prob")
+                    flipped_seg = flipped_output.get("seg_prob")
+                    if not isinstance(cached_seg, torch.Tensor) or not isinstance(flipped_seg, torch.Tensor):
+                        raise RuntimeError("Fusion feature-recalc TTA requires seg_prob tensors.")
+                    averaged_seg = (cached_seg[0] + torch.flip(flipped_seg[0], dims=[2])) * 0.5
+                    recalc_output = self.model.predict_fusion_from_components(
+                        v31_probability=float(fusion_output["v31_probability"]),
+                        v31_logit=float(fusion_output["v31_logit"]),
+                        seg_prob=averaged_seg,
+                    )
+                    recalc_meta_prob = recalc_output.get("meta_probability")
+                    if recalc_meta_prob is None:
+                        raise RuntimeError("Fusion feature-recalc TTA did not produce meta_probability.")
+                    abnormal_probability = float(recalc_meta_prob)
+                    fusion_output = {**fusion_output, **recalc_output}
+                else:
+                    abnormal_probability = (float(meta_prob) + float(flipped_meta_prob)) / 2.0
+            else:
+                abnormal_probability = float(meta_prob)
             predicted_index = int(abnormal_probability >= self.decision_threshold)
             predicted_label = self.label_names[predicted_index]
             result = InferenceResult(
@@ -746,7 +795,7 @@ class InferenceSession:
                 abnormal_probability=abnormal_probability,
             )
             cached_seg = fusion_output.get("seg_prob")
-            if isinstance(cached_seg, torch.Tensor):
+            if cached_lesion_prob is None and isinstance(cached_seg, torch.Tensor):
                 cached_lesion_prob = cached_seg[0]
             feature_extraction = getattr(self.model, "feature_extraction", {}) or {}
             fusion_summary = {

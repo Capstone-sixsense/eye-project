@@ -1,6 +1,6 @@
 # eye-project
 
-안저(眼底) 이미지 기반 당뇨병성 망막병증 보조 판별 AI 시스템. 이미지를 업로드하면 AI가 이상 여부를 분류하고, GradCAM 히트맵과 의료 리포트를 함께 제공한다. 본 시스템의 결과는 의료 전문가의 판단을 보조하는 용도로만 사용되어야 한다.
+안저(眼底) 이미지 기반 당뇨병성 망막병증 보조 판별 AI 시스템. 이미지를 업로드하면 AI가 이상 여부를 분류하고, 병변 후보 영역 overlay와 의료 리포트를 함께 제공한다. 본 시스템의 결과는 의료 전문가의 판단을 보조하는 용도로만 사용되어야 한다.
 
 ---
 
@@ -22,7 +22,7 @@ main
 | 항목 | 내용 |
 |---|---|
 | 목적 | 안저 이미지 기반 당뇨병성 망막병증 자동 스크리닝 |
-| 출력 | 이상 여부 분류, 이상 확률, GradCAM 히트맵, 의료 리포트 |
+| 출력 | 이상 여부 분류, 이상 확률, 병변 후보 영역 overlay, 의료 리포트 |
 | 배포 | Docker Compose 기반 로컬 실행형 클라이언트 |
 | 설계 원칙 | 의료 시스템 특성상 속도보다 신뢰성과 정확성을 우선한다 |
 
@@ -49,8 +49,9 @@ main
        ▼
 [drscreen AI 패키지]
   - 이미지 전처리
-  - EfficientNet-B5 추론
-  - GradCAM 히트맵 생성
+  - v31 classifier + v8b lesion segmenter 추론
+  - numeric meta-classifier score fusion
+  - 병변 후보 영역 overlay 생성
   - 의료 리포트 생성
 ```
 
@@ -60,8 +61,8 @@ main
 
 | 컴포넌트 | 기술 |
 |---|---|
-| AI | PyTorch, EfficientNet-B5, FDA, SWAD, albumentations |
-| Backend | FastAPI, Uvicorn, OpenCV, GradCAM, cleanvision |
+| AI | PyTorch, EfficientNet-B5, ResNet50 U-Net lesion segmenter, numeric LogReg fusion, albumentations |
+| Backend | FastAPI, Uvicorn, OpenCV, cleanvision |
 | Frontend | Flutter (Dart) |
 | 인프라 | Docker Compose |
 
@@ -91,7 +92,7 @@ docker compose up -d
 |---|---|---|
 | `GET` | `/health` | 모델 로드 상태 확인 |
 | `POST` | `/predict` | 빠른 추론 (분류 결과만 반환) |
-| `POST` | `/analyze` | 전체 분석 (품질 검사 + GradCAM + 리포트) |
+| `POST` | `/analyze` | 전체 분석 (품질 검사 + 병변 evidence overlay + 리포트) |
 | `GET` | `/storage/<path>` | 업로드 이미지 조회 |
 | `GET` | `/results/<path>` | 생성된 리포트 조회 |
 

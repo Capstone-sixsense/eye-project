@@ -2,11 +2,54 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import cv2
+import numpy as np
 import torch
 
 LESION_CHANNELS = ("MA", "HE", "EX", "SE")
 FUSION_AREA_THRESHOLDS = (0.05, 0.1, 0.2, 0.3, 0.5)
 FUSION_TOPK_FRACS = (0.001, 0.01, 0.05)
+FUSION_CC_THRESHOLDS = (0.1, 0.3, 0.5)
+FUSION_EXTENDED_ACTIVE_THRESHOLD = 0.3
+
+
+def base_lesion_feature_names(
+    *,
+    area_thresholds: Sequence[float] = FUSION_AREA_THRESHOLDS,
+    topk_fracs: Sequence[float] = FUSION_TOPK_FRACS,
+) -> list[str]:
+    labels = [*LESION_CHANNELS, "union"]
+    names = [f"{label}_mean" for label in labels]
+    names.extend(f"{label}_max" for label in labels)
+    names.extend(f"{label}_std" for label in labels)
+    for threshold in area_thresholds:
+        names.extend(f"{label}_area_ge_{float(threshold):g}" for label in labels)
+    for frac in topk_fracs:
+        names.extend(f"{label}_top_{float(frac):g}_mean" for label in labels)
+    return names
+
+
+def extended_lesion_feature_names() -> list[str]:
+    labels = [*LESION_CHANNELS, "union"]
+    names: list[str] = []
+    for threshold in FUSION_CC_THRESHOLDS:
+        names.extend(f"{label}_cc_count_ge_{float(threshold):g}" for label in labels)
+    names.extend(
+        f"{label}_cc_mean_area_ge_{FUSION_EXTENDED_ACTIVE_THRESHOLD:g}"
+        for label in labels
+    )
+    names.extend(
+        f"{label}_center_outer_area_ratio_ge_{FUSION_EXTENDED_ACTIVE_THRESHOLD:g}"
+        for label in labels
+    )
+    names.extend(f"{label}_entropy_norm" for label in labels)
+    names.extend(
+        [
+            f"HE_EX_overlap_ge_{FUSION_EXTENDED_ACTIVE_THRESHOLD:g}",
+            f"MA_HE_overlap_ge_{FUSION_EXTENDED_ACTIVE_THRESHOLD:g}",
+        ]
+    )
+    return names
 
 
 def extract_late_fusion_features(
@@ -65,5 +108,101 @@ def extract_late_fusion_features(
 
     missing = [name for name in schema if name not in features]
     if missing:
+        features.update(extract_extended_lesion_feature_dict(seg_prob))
+        missing = [name for name in schema if name not in features]
+    if missing:
         raise ValueError(f"Late-fusion feature extractor missing schema keys: {missing}")
     return [features[name] for name in schema]
+
+
+def extract_extended_lesion_feature_dict(seg_prob: torch.Tensor) -> dict[str, float]:
+    if seg_prob.ndim != 3:
+        raise ValueError(f"Expected seg_prob [C,H,W], got {tuple(seg_prob.shape)}")
+    if seg_prob.shape[0] != len(LESION_CHANNELS):
+        raise ValueError(
+            f"Expected {len(LESION_CHANNELS)} lesion channels, got {seg_prob.shape[0]}"
+        )
+
+    seg_prob = seg_prob.detach().float().cpu()
+    union = seg_prob.amax(dim=0, keepdim=True)
+    maps = torch.cat([seg_prob, union], dim=0)
+    labels = (*LESION_CHANNELS, "union")
+    h, w = int(maps.shape[1]), int(maps.shape[2])
+    n_pixels = max(1, h * w)
+    features: dict[str, float] = {}
+
+    for threshold in FUSION_CC_THRESHOLDS:
+        threshold_text = f"{float(threshold):g}"
+        for idx, label in enumerate(labels):
+            count, _ = _connected_component_stats(maps[idx], float(threshold), n_pixels)
+            features[f"{label}_cc_count_ge_{threshold_text}"] = float(count)
+
+    threshold = float(FUSION_EXTENDED_ACTIVE_THRESHOLD)
+    threshold_text = f"{threshold:g}"
+    center_mask = _center_radius_mask(h, w)
+    outer_mask = ~center_mask
+    for idx, label in enumerate(labels):
+        _, mean_area = _connected_component_stats(maps[idx], threshold, n_pixels)
+        features[f"{label}_cc_mean_area_ge_{threshold_text}"] = float(mean_area)
+        active = (maps[idx].numpy() >= threshold)
+        center_rate = active[center_mask].mean() if center_mask.any() else 0.0
+        outer_rate = active[outer_mask].mean() if outer_mask.any() else 0.0
+        features[f"{label}_center_outer_area_ratio_ge_{threshold_text}"] = float(
+            center_rate / (outer_rate + 1e-8)
+        )
+        flat = maps[idx].flatten().numpy().astype(np.float64)
+        total = float(flat.sum())
+        if total <= 1e-12:
+            features[f"{label}_entropy_norm"] = 0.0
+        else:
+            p = flat / total
+            entropy = -float(np.sum(p * np.log(p + 1e-12)))
+            features[f"{label}_entropy_norm"] = float(entropy / np.log(n_pixels))
+
+    channel_maps = {label: maps[idx].numpy() for idx, label in enumerate(LESION_CHANNELS)}
+    features[f"HE_EX_overlap_ge_{threshold_text}"] = float(
+        np.logical_and(
+            channel_maps["HE"] >= threshold,
+            channel_maps["EX"] >= threshold,
+        ).mean()
+    )
+    features[f"MA_HE_overlap_ge_{threshold_text}"] = float(
+        np.logical_and(
+            channel_maps["MA"] >= threshold,
+            channel_maps["HE"] >= threshold,
+        ).mean()
+    )
+    return features
+
+
+def extract_extended_lesion_feature_values(
+    seg_prob: torch.Tensor,
+    schema: Sequence[str],
+) -> list[float]:
+    features = extract_extended_lesion_feature_dict(seg_prob)
+    missing = [name for name in schema if name not in features]
+    if missing:
+        raise ValueError(f"Extended lesion feature extractor missing schema keys: {missing}")
+    return [features[name] for name in schema]
+
+
+def _connected_component_stats(
+    prob_map: torch.Tensor,
+    threshold: float,
+    n_pixels: int,
+) -> tuple[int, float]:
+    binary = (prob_map.numpy() >= threshold).astype(np.uint8)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    count = max(0, int(num_labels) - 1)
+    if count == 0:
+        return 0, 0.0
+    areas = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+    return count, float(areas.mean() / max(1, n_pixels))
+
+
+def _center_radius_mask(h: int, w: int) -> np.ndarray:
+    y, x = np.ogrid[:h, :w]
+    cy = (h - 1) / 2.0
+    cx = (w - 1) / 2.0
+    radius = 0.25 * min(h, w)
+    return (y - cy) ** 2 + (x - cx) ** 2 <= radius ** 2

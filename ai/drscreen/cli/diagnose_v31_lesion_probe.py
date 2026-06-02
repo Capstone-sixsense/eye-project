@@ -269,7 +269,6 @@ def _write_concept_labels(
     manifest_rows: list[dict[str, str]],
     output_path: Path,
 ) -> dict:
-    data_root = project_root / "data/raw"
     rows: list[dict[str, str | int | float]] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -329,7 +328,7 @@ def _write_concept_labels(
         label = str(row.get("label", "")).strip()
         image_path = Path(row["_resolved_image_path"])
         if label == "0":
-            concepts: dict[str, str | int | float] = {code: 0 for code in LESION_CODES}
+            concepts: dict[str, str | int | float] = dict.fromkeys(LESION_CODES, 0)
             _append(
                 {
                     "image_id": str(row.get("image_id", image_path.stem)),
@@ -353,7 +352,7 @@ def _write_concept_labels(
                     "domain": str(row.get("domain", "")),
                     "split": str(row.get("split", "")),
                     "label": label,
-                    **{code: "" for code in LESION_CODES},
+                    **dict.fromkeys(LESION_CODES, ""),
                     "lesion_present": "",
                     "mask_valid": 0,
                     "weak_label_valid": 0,

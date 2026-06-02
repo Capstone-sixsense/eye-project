@@ -1,0 +1,55 @@
+project:
+  version: seg_evidence_v8b_quickqual_v1
+
+data:
+  manifest_path: data/processed/manifest_with_maples_tjdr_ddrseg_quickqual_preprocessed.csv
+  image_root: data/raw
+  resize_size: 512
+  image_size: 512
+  num_workers: 4
+  persistent_workers: false
+  batch_size: 4
+  drop_last: false
+  use_preprocessing: false
+  preprocess_mode: quickqual
+  use_random_resized_crop: false
+  train_split: train
+  seg_val_fraction: 0.15
+  seg_mask_mode: composite
+  seg_mask_channels: 4
+  tjdr_root: data/raw/TJDR
+  ddr_seg_root: data/raw/ddr/lesion_segmentation
+  domain_sampling: balanced
+  domain_sample_weights:
+    IDRiD: 1.0
+    MAPLES: 2.0
+    TJDR: 1.0
+    DDR_SEG: 1.0
+
+model:
+  architecture: lesion_seg_evidence
+  encoder: resnet50
+  pretrained: true
+  out_channels: 4
+  decoder_channels: [256, 128, 64, 32]
+
+train:
+  seed: 43
+  device: cuda
+  epochs: 40
+  early_stopping_patience: 8
+  early_stopping_min_delta: 0.001
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  seg_loss_type: focal_tversky_bce
+  tversky_alpha: 0.7
+  tversky_beta: 0.3
+  tversky_gamma: 1.3333333333
+  bce_weight: 0.2
+  amp: true
+  checkpoint_dir: artifacts/runs
+
+infer:
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5
+  preprocess_mode: none

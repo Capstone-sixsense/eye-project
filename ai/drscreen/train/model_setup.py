@@ -7,9 +7,18 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.optim import AdamW, Optimizer
-from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import (
+    CosineAnnealingLR,
+    LinearLR,
+    LRScheduler,
+    SequentialLR,
+)
 
-from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
+from drscreen.models.build import (
+    build_model,
+    get_classifier_module,
+    split_model_parameters,
+)
 from drscreen.settings import resolve_checkpoint_path
 from drscreen.utils.checkpoint import (
     load_state_dict_with_shape_filter,
@@ -111,7 +120,7 @@ def prepare_model_for_decoder_only_training(model: nn.Module) -> None:
     if lesion_weights is not None:
         lesion_weights.requires_grad = True
 
-    setattr(model, "_decoder_only", True)
+    model._decoder_only = True
 
 
 def build_optimizer(

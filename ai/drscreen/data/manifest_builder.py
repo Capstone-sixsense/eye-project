@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ class ManifestSummary:
     test_rows: int
     external_test_rows: int
     domains: dict[str, int]
+    splits: dict[str, int]
 
 
 def binary_label_from_grade(grade: int) -> int:
@@ -484,6 +485,133 @@ def build_manifest_frame(
     return frame
 
 
+def _stratified_sample_indices(
+    frame: pd.DataFrame,
+    candidate_indices: list[int],
+    *,
+    n_select: int,
+    seed: int,
+) -> list[int]:
+    if n_select <= 0 or not candidate_indices:
+        return []
+    if n_select >= len(candidate_indices):
+        return sorted(candidate_indices)
+
+    rng = np.random.default_rng(seed)
+    labels = frame.loc[candidate_indices, "label"].astype(int)
+    by_label: dict[int, list[int]] = {}
+    for idx, label in zip(candidate_indices, labels, strict=True):
+        by_label.setdefault(int(label), []).append(int(idx))
+
+    allocations: dict[int, int] = {}
+    fractions: list[tuple[float, int]] = []
+    total = len(candidate_indices)
+    remaining = int(n_select)
+    for label, indices in sorted(by_label.items()):
+        exact = n_select * (len(indices) / total)
+        count = int(np.floor(exact))
+        if n_select >= len(by_label) and indices:
+            count = max(1, count)
+        count = min(count, len(indices))
+        allocations[label] = count
+        remaining -= count
+        fractions.append((exact - np.floor(exact), label))
+
+    for _fraction, label in sorted(fractions, reverse=True):
+        if remaining <= 0:
+            break
+        available = len(by_label[label]) - allocations[label]
+        if available <= 0:
+            continue
+        allocations[label] += 1
+        remaining -= 1
+
+    while remaining > 0:
+        changed = False
+        for label, indices in sorted(by_label.items()):
+            if allocations[label] >= len(indices):
+                continue
+            allocations[label] += 1
+            remaining -= 1
+            changed = True
+            if remaining <= 0:
+                break
+        if not changed:
+            break
+
+    selected: list[int] = []
+    for label, count in allocations.items():
+        if count <= 0:
+            continue
+        ordered = sorted(by_label[label], key=lambda idx: str(frame.at[idx, "image_id"]))
+        chosen = rng.choice(np.asarray(ordered, dtype=np.int64), size=count, replace=False)
+        selected.extend(int(idx) for idx in chosen.tolist())
+    return sorted(selected)
+
+
+def split_external_into_calibration_holdout(
+    frame: pd.DataFrame,
+    *,
+    seed: int,
+    calibration_fraction: float = 0.2,
+    source_split: str = "external_test",
+    calibration_split: str = "external_calibration",
+    holdout_split: str = "external_holdout",
+) -> pd.DataFrame:
+    if not 0.0 < calibration_fraction < 1.0:
+        raise ValueError("calibration_fraction must be between 0 and 1.")
+    updated = frame.copy()
+    source_indices = updated.index[updated["split"].astype(str) == source_split].tolist()
+    if not source_indices:
+        raise ValueError(f"No rows found for calibration source split: {source_split}")
+
+    selected = set(
+        _stratified_sample_indices(
+            updated,
+            [int(idx) for idx in source_indices],
+            n_select=int(round(len(source_indices) * calibration_fraction)),
+            seed=seed,
+        )
+    )
+    updated.loc[source_indices, "split"] = holdout_split
+    if selected:
+        updated.loc[sorted(selected), "split"] = calibration_split
+    return updated
+
+
+def rebalance_val_split(
+    frame: pd.DataFrame,
+    *,
+    seed: int,
+    per_domain_quota: Mapping[str, int] | None = None,
+    target_split: str = "val_mixed",
+) -> pd.DataFrame:
+    quotas = dict(per_domain_quota or {"APTOS": 150, "IDRiD": 150, "Messidor": 150})
+    source_splits = {"APTOS": "val", "IDRiD": "train", "Messidor": "train"}
+    updated = frame.copy()
+    for offset, (domain, quota) in enumerate(quotas.items()):
+        if quota <= 0:
+            continue
+        source_split = source_splits.get(domain, "train")
+        candidates = updated.index[
+            (updated["domain"].astype(str) == domain)
+            & (updated["split"].astype(str) == source_split)
+        ].tolist()
+        if len(candidates) < quota:
+            raise ValueError(
+                f"Not enough rows to build {target_split} for domain={domain!r}: "
+                f"need {quota}, found {len(candidates)} in split={source_split!r}"
+            )
+        selected = _stratified_sample_indices(
+            updated,
+            [int(idx) for idx in candidates],
+            n_select=int(quota),
+            seed=seed + offset,
+        )
+        updated.loc[selected, "split"] = target_split
+    return updated
+
+
 def summarize_manifest(frame: pd.DataFrame) -> ManifestSummary:
     split_counts = frame["split"].value_counts().to_dict()
     return ManifestSummary(
@@ -493,6 +621,7 @@ def summarize_manifest(frame: pd.DataFrame) -> ManifestSummary:
         test_rows=int(split_counts.get("test", 0)),
         external_test_rows=int(split_counts.get("external_test", 0)),
         domains={str(key): int(value) for key, value in frame["domain"].value_counts().items()},
+        splits={str(key): int(value) for key, value in split_counts.items()},
     )
 
 
@@ -508,6 +637,11 @@ def write_manifest(
     include_maples: bool = False,
     include_tjdr: bool = False,
     include_tjdr_test: bool = False,
+    split_external_calibration: bool = False,
+    external_calibration_fraction: float = 0.2,
+    rebalance_val: bool = False,
+    split_seed: int = 20260524,
+    val_mixed_quota: Mapping[str, int] | None = None,
 ) -> ManifestSummary:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -522,5 +656,18 @@ def write_manifest(
         include_tjdr=include_tjdr,
         include_tjdr_test=include_tjdr_test,
     )
+    if split_external_calibration:
+        frame = split_external_into_calibration_holdout(
+            frame,
+            seed=split_seed,
+            calibration_fraction=external_calibration_fraction,
+        )
+    if rebalance_val:
+        frame = rebalance_val_split(
+            frame,
+            seed=split_seed,
+            per_domain_quota=val_mixed_quota,
+        )
+    frame = frame.sort_values(["split", "domain", "image_id"], kind="stable").reset_index(drop=True)
     frame.to_csv(output_path, index=False)
     return summarize_manifest(frame)

@@ -392,8 +392,8 @@ def split_model_parameters(
     model_name: str,
     model: nn.Module,
 ) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
-    from drscreen.models.mil_attention import MILAttentionModel
     from drscreen.models.concept_bottleneck import ConceptBottleneckModel
+    from drscreen.models.mil_attention import MILAttentionModel
     from drscreen.models.sparse_bagnet import SparseBagNet
 
     if isinstance(model, MILAttentionModel):

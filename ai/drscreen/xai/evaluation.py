@@ -10,12 +10,12 @@ from PIL import Image
 
 from drscreen.infer.service import InferenceSession
 from drscreen.settings import get_run_evaluation_dir
+from drscreen.xai.faithfulness import faithfulness_auc
 from drscreen.xai.gradcam import (
     generate_gradcam,
     generate_multiblock_cam,
     resolve_default_target_layer,
 )
-from drscreen.xai.faithfulness import faithfulness_auc
 from drscreen.xai.iou import (
     LESION_CODES,
     binarize_cam,

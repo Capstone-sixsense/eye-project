@@ -24,7 +24,11 @@ from sklearn.preprocessing import StandardScaler
 
 from drscreen.infer.service import InferenceSession
 from drscreen.models.build import get_classifier_module
-from drscreen.settings import get_run_artifact_dir, get_run_checkpoint_dir, resolve_project_path
+from drscreen.settings import (
+    get_run_artifact_dir,
+    get_run_checkpoint_dir,
+    resolve_project_path,
+)
 from drscreen.xai.iou import load_lesion_masks, load_maples_masks, union_mask
 
 

@@ -8,7 +8,10 @@ from typing import Any
 
 import torch
 
-from drscreen.infer.late_fusion_features import FUSION_AREA_THRESHOLDS, FUSION_TOPK_FRACS
+from drscreen.infer.late_fusion_features import (
+    FUSION_AREA_THRESHOLDS,
+    FUSION_TOPK_FRACS,
+)
 
 
 def _extract_state_dict(checkpoint: Any) -> dict[str, torch.Tensor]:
@@ -20,6 +23,17 @@ def _extract_state_dict(checkpoint: Any) -> dict[str, torch.Tensor]:
         if checkpoint and all(torch.is_tensor(v) for v in checkpoint.values()):
             return checkpoint
     raise ValueError("Unsupported checkpoint format; expected a state_dict payload.")
+
+
+def _extract_submodule_state_dict(checkpoint: Any, prefix: str) -> dict[str, torch.Tensor]:
+    state = _extract_state_dict(checkpoint)
+    prefix_with_dot = f"{prefix}."
+    stripped = {
+        key[len(prefix_with_dot) :]: value
+        for key, value in state.items()
+        if key.startswith(prefix_with_dot)
+    }
+    return stripped or state
 
 
 def _best_result(metrics: dict[str, Any], key: str | None) -> tuple[str, dict[str, Any]]:
@@ -84,8 +98,8 @@ def build(args: argparse.Namespace) -> Path:
         "num_outputs": 1,
         "label_names": ["normal", "abnormal"],
         "model_state_dict": {},
-        "classifier_state_dict": _extract_state_dict(classifier_ckpt),
-        "segmenter_state_dict": _extract_state_dict(segmenter_ckpt),
+        "classifier_state_dict": _extract_submodule_state_dict(classifier_ckpt, "classifier"),
+        "segmenter_state_dict": _extract_submodule_state_dict(segmenter_ckpt, "segmenter"),
         "meta_classifier": meta_classifier,
         "feature_schema": feature_schema,
         "feature_extraction": {

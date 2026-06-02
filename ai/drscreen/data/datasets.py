@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -9,8 +10,12 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from drscreen.data.mask_providers import IDRiDMaskProvider, LesionMaskProvider, NullMaskProvider
-from drscreen.data.transforms import fda_mix
+from drscreen.data.mask_providers import (
+    IDRiDMaskProvider,
+    LesionMaskProvider,
+    NullMaskProvider,
+)
+from drscreen.data.transforms import ampmix, fda_mix
 
 _CONCEPT_CODES = ("MA", "HE", "EX", "SE")
 
@@ -209,6 +214,9 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
         transform: Callable[[Image.Image, torch.Tensor], tuple[Any, torch.Tensor]] | None = None,
         fda_alpha: float = 0.05,
         fda_probability: float = 1.0,
+        ampmix_mode: bool = False,
+        ampmix_alpha_low: float = 0.0,
+        ampmix_alpha_high: float = 0.5,
         fda_target_domain: str | None = None,
         fda_apply_to_target_domain: bool = False,
         domain_column: str = "domain",
@@ -229,6 +237,9 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
         )
         self._alpha = fda_alpha
         self._probability = fda_probability
+        self._ampmix_mode = ampmix_mode
+        self._ampmix_alpha_low = ampmix_alpha_low
+        self._ampmix_alpha_high = ampmix_alpha_high
         self._target_domain = fda_target_domain
         self._apply_to_target_domain = fda_apply_to_target_domain
         self._domain_column = domain_column
@@ -287,7 +298,18 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
             image = img.convert("RGB")
             if self._should_mix(domain):
                 ref_arr = self._load_raw_array(self._sample_ref_index(index, domain))
-                image = Image.fromarray(fda_mix(np.asarray(image), ref_arr, self._alpha))
+                source_arr = np.asarray(image)
+                if self._ampmix_mode:
+                    mixed = ampmix(
+                        source_arr,
+                        ref_arr,
+                        alpha_low=self._ampmix_alpha_low,
+                        alpha_high=self._ampmix_alpha_high,
+                        rng=self._rng,
+                    )
+                else:
+                    mixed = fda_mix(source_arr, ref_arr, self._alpha)
+                image = Image.fromarray(mixed)
 
         seg_mask, seg_mask_valid = self._mask_provider.load(
             str(row["image_path"]), domain, self._seg_mask_size
@@ -336,6 +358,10 @@ class FDAManifestDataset(ManifestDataset):
         split: str | None = None,
         transform: Callable[[Image.Image], Any] | None = None,
         fda_alpha: float = 0.05,
+        fda_probability: float = 1.0,
+        ampmix_mode: bool = False,
+        ampmix_alpha_low: float = 0.0,
+        ampmix_alpha_high: float = 0.5,
         domain_column: str = "domain",
         seg_mask_dir: str | Path | None = None,
         seg_mask_size: int = 512,
@@ -348,6 +374,10 @@ class FDAManifestDataset(ManifestDataset):
             mask_provider=mask_provider, concept_label_path=concept_label_path,
         )
         self._alpha = fda_alpha
+        self._probability = fda_probability
+        self._ampmix_mode = ampmix_mode
+        self._ampmix_alpha_low = ampmix_alpha_low
+        self._ampmix_alpha_high = ampmix_alpha_high
         self._domain_column = domain_column
         self._rng = np.random.default_rng()
         self._domain_indices: dict[str, list[int]] = {}
@@ -391,10 +421,21 @@ class FDAManifestDataset(ManifestDataset):
     def __getitem__(self, index: int) -> dict[str, Any]:
         row = self.frame.iloc[index]
         src_arr = self._load_raw_array(index)
-        ref_arr = self._load_raw_array(self._sample_ref_index(index))
-
-        mixed = fda_mix(src_arr, ref_arr, self._alpha)
-        image = Image.fromarray(mixed)
+        if self._probability > 0.0 and self._rng.random() <= self._probability:
+            ref_arr = self._load_raw_array(self._sample_ref_index(index))
+            if self._ampmix_mode:
+                mixed = ampmix(
+                    src_arr,
+                    ref_arr,
+                    alpha_low=self._ampmix_alpha_low,
+                    alpha_high=self._ampmix_alpha_high,
+                    rng=self._rng,
+                )
+            else:
+                mixed = fda_mix(src_arr, ref_arr, self._alpha)
+            image = Image.fromarray(mixed)
+        else:
+            image = Image.fromarray(src_arr)
 
         if self.transform is not None:
             image = self.transform(image)

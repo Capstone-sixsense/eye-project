@@ -1,0 +1,25 @@
+{
+  "split": "external_test",
+  "source_split": "external_test",
+  "evaluation_split": "external_holdout",
+  "threshold_policy": "DDR external_test stratified 20% calibration / 80% holdout, sensitivity guard >= active v31_v8b_fusion_v2 sensitivity 0.8117882118; hflip Option A meta_probability mean",
+  "rows": 10018,
+  "metrics": {
+    "auroc": 0.9431159704050188
+  },
+  "optimal_threshold": 0.3930909090909091,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.8677380714713515,
+    "sensitivity": 0.8123876123876124,
+    "specificity": 0.9230001994813485,
+    "precision": 0.9132973944294699,
+    "f1": 0.8598921433858517,
+    "threshold": 0.3930909090909091,
+    "true_negative": 4627,
+    "false_positive": 386,
+    "false_negative": 939,
+    "true_positive": 4066
+  },
+  "source_option_eval_json": ".omc\\research\\v31_v8b_fusion_improvement\\phase2_feature_meta_hflip_sensguard_full_2026-05-23.json",
+  "guard": 0.811788211788212
+}

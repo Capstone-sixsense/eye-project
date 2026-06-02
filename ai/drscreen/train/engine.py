@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import asdict, dataclass
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
@@ -105,6 +105,21 @@ def _compute_coral_loss(
     return torch.stack(losses).mean() if losses else pooled.new_tensor(0.0)
 
 
+def _rsc_feature_mask(
+    pooled: torch.Tensor,
+    grad: torch.Tensor,
+    *,
+    p_feature: float,
+) -> torch.Tensor:
+    if not 0.0 < p_feature < 1.0:
+        raise ValueError(f"rsc p_feature must be between 0 and 1, got {p_feature}")
+    scores = (pooled.detach() * grad.detach()).abs()
+    n_features = scores.shape[1]
+    k = max(1, min(n_features - 1, int(round(n_features * p_feature))))
+    threshold = torch.topk(scores, k, dim=1).values[:, -1].unsqueeze(1)
+    return (scores < threshold).to(dtype=pooled.dtype)
+
+
 def _amp_dtype(device: torch.device) -> torch.dtype:
     """Return BF16 on Ampere/Blackwell (SM >= 8.0) where BF16 is hardware-supported
     and avoids FP16 overflow. Fall back to FP16 for older GPUs."""
@@ -180,14 +195,22 @@ def train_one_epoch(
     coral_block: int | None = None,
     lambda_patch_l1: float = 0.0,
     lambda_concept: float = 0.0,
+    rsc_p_feature: float = 0.0,
+    rsc_p_batch: float = 0.0,
 ) -> EpochMetrics:
     model.train()
     if model_train_setup is not None:
         model_train_setup(model)
 
-    use_coral = coral_criterion is not None and lambda_coral > 0.0 and _has_timm_feature_api(model)
+    use_coral = coral_criterion is not None and lambda_coral > 0.0
     use_aux_seg = lambda_aux_seg > 0.0
     use_cam_align = lambda_cam_align > 0.0
+    use_rsc = (
+        rsc_p_feature > 0.0
+        and rsc_p_batch > 0.0
+        and hasattr(model, "forward_with_gated_features")
+        and hasattr(model, "classify_pooled_features")
+    )
 
     _seg_criterion: torch.nn.Module | None = None
     if use_aux_seg:
@@ -219,7 +242,7 @@ def train_one_epoch(
                 and coral_block is not None
                 and domains is not None
             )
-            if use_coral and not use_intermediate_coral and not use_aux_seg:
+            if use_coral and not use_intermediate_coral and not use_aux_seg and _has_timm_feature_api(model):
                 # Legacy CORAL-only path: pool the final pre-classifier feature.
                 pooled, logits = _forward_with_features(model, images)
                 seg_logits = None
@@ -227,12 +250,35 @@ def train_one_epoch(
                 coral_loss = _compute_coral_loss(coral_criterion, pooled, domains)
                 loss = loss + lambda_coral * coral_loss
             else:
-                output = model(images)
-                if isinstance(output, tuple):
-                    logits, seg_logits = output
+                if use_rsc:
+                    logits, seg_logits, pooled = model.forward_with_gated_features(images)
+                    cls_loss = criterion(logits, targets)
+                    apply_rsc = bool(
+                        torch.rand((), device=device).item() < min(1.0, rsc_p_batch)
+                    )
+                    if apply_rsc:
+                        pooled_grad = torch.autograd.grad(
+                            cls_loss,
+                            pooled,
+                            retain_graph=True,
+                            create_graph=False,
+                        )[0]
+                        rsc_mask = _rsc_feature_mask(
+                            pooled,
+                            pooled_grad,
+                            p_feature=min(0.999, rsc_p_feature),
+                        )
+                        logits = model.classify_pooled_features(pooled * rsc_mask)
+                        loss = criterion(logits, targets)
+                    else:
+                        loss = cls_loss
                 else:
-                    logits, seg_logits = output, None
-                loss = criterion(logits, targets)
+                    output = model(images)
+                    if isinstance(output, tuple):
+                        logits, seg_logits = output
+                    else:
+                        logits, seg_logits = output, None
+                    loss = criterion(logits, targets)
 
                 if lambda_patch_l1 > 0.0 and hasattr(model, "latest_patch_logits"):
                     patch_logits = model.latest_patch_logits()

@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 from pprint import pprint
 
-
 _REQUIRED_TRAINING_PYTHON = (3, 14)
 
 

@@ -22,7 +22,11 @@ from drscreen.cli.lesion_evidence_classifier import (
     _read_items,
 )
 from drscreen.infer.service import InferenceSession
-from drscreen.settings import get_run_evaluation_dir, load_app_config, resolve_project_path
+from drscreen.settings import (
+    get_run_evaluation_dir,
+    load_app_config,
+    resolve_project_path,
+)
 
 
 class _ImageDataset(Dataset):
@@ -55,9 +59,9 @@ def _extract_v31_scores(
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, str | int]]]:
     """Extract v31 probabilities on already-preprocessed manifest images.
 
-    The manifest used here points to ``processed/images/...``. Therefore this
-    diagnostic intentionally uses ``session.eval_transform`` directly and does
-    not apply the inference-time raw-image preprocessor a second time.
+    The manifest used here points to offline-preprocessed images. Therefore
+    this diagnostic intentionally uses ``session.eval_transform`` directly and
+    does not apply the inference-time raw-image preprocessor a second time.
     """
     dataset = _ImageDataset(items, session.eval_transform)
     loader = DataLoader(

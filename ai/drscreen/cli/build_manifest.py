@@ -3,7 +3,32 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from drscreen.data.manifest_builder import write_manifest
+import pandas as pd
+
+from drscreen.data.manifest_builder import (
+    rebalance_val_split,
+    split_external_into_calibration_holdout,
+    summarize_manifest,
+    write_manifest,
+)
+
+
+def _parse_domain_quota(value: str | None) -> dict[str, int] | None:
+    if not value:
+        return None
+    quotas: dict[str, int] = {}
+    for token in value.split(","):
+        item = token.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(
+                "Domain quotas must use DOMAIN=N entries, for example: "
+                "APTOS=150,IDRiD=150,Messidor=150"
+            )
+        domain, raw_count = item.split("=", 1)
+        quotas[domain.strip()] = int(raw_count.strip())
+    return quotas
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,6 +47,13 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="data/processed/manifest.csv",
         help="Output manifest path relative to project root.",
+    )
+    parser.add_argument(
+        "--input-manifest",
+        help=(
+            "Existing manifest to post-process instead of rebuilding from raw data. "
+            "Useful for preserving offline-preprocessed image paths."
+        ),
     )
     parser.add_argument(
         "--include-messidor",
@@ -103,6 +135,38 @@ def parse_args() -> argparse.Namespace:
             "Requires --include-tjdr."
         ),
     )
+    parser.add_argument(
+        "--split-external-calibration",
+        action="store_true",
+        default=False,
+        help=(
+            "Split rows with split='external_test' into deterministic "
+            "external_calibration/external_holdout rows."
+        ),
+    )
+    parser.add_argument(
+        "--external-calibration-fraction",
+        type=float,
+        default=0.2,
+        help="Fraction of external_test rows assigned to external_calibration.",
+    )
+    parser.add_argument(
+        "--rebalance-val",
+        action="store_true",
+        default=False,
+        help="Create split='val_mixed' from APTOS val plus IDRiD/Messidor train quotas.",
+    )
+    parser.add_argument(
+        "--val-mixed-quota",
+        default="APTOS=150,IDRiD=150,Messidor=150",
+        help="Comma-separated DOMAIN=N quotas for --rebalance-val.",
+    )
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=20260524,
+        help="Seed used for deterministic calibration/holdout and val_mixed sampling.",
+    )
     return parser.parse_args()
 
 
@@ -116,18 +180,43 @@ def main() -> None:
     raw_root = project_root / args.raw_root
     output_path = project_root / args.output
 
-    summary = write_manifest(
-        raw_root=raw_root,
-        output_path=output_path,
-        include_messidor=args.include_messidor,
-        messidor_as_train=args.messidor_as_train,
-        include_ddr=args.include_ddr,
-        include_ddr_seg=args.include_ddr_seg,
-        include_ddr_seg_test=args.include_ddr_seg_test,
-        include_maples=args.include_maples,
-        include_tjdr=args.include_tjdr,
-        include_tjdr_test=args.include_tjdr_test,
-    )
+    if args.input_manifest:
+        input_path = project_root / args.input_manifest
+        frame = pd.read_csv(input_path)
+        if args.split_external_calibration:
+            frame = split_external_into_calibration_holdout(
+                frame,
+                seed=args.split_seed,
+                calibration_fraction=args.external_calibration_fraction,
+            )
+        if args.rebalance_val:
+            frame = rebalance_val_split(
+                frame,
+                seed=args.split_seed,
+                per_domain_quota=_parse_domain_quota(args.val_mixed_quota),
+            )
+        frame = frame.sort_values(["split", "domain", "image_id"], kind="stable").reset_index(drop=True)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(output_path, index=False)
+        summary = summarize_manifest(frame)
+    else:
+        summary = write_manifest(
+            raw_root=raw_root,
+            output_path=output_path,
+            include_messidor=args.include_messidor,
+            messidor_as_train=args.messidor_as_train,
+            include_ddr=args.include_ddr,
+            include_ddr_seg=args.include_ddr_seg,
+            include_ddr_seg_test=args.include_ddr_seg_test,
+            include_maples=args.include_maples,
+            include_tjdr=args.include_tjdr,
+            include_tjdr_test=args.include_tjdr_test,
+            split_external_calibration=args.split_external_calibration,
+            external_calibration_fraction=args.external_calibration_fraction,
+            rebalance_val=args.rebalance_val,
+            split_seed=args.split_seed,
+            val_mixed_quota=_parse_domain_quota(args.val_mixed_quota),
+        )
 
     print("Manifest created")
     print(f"project_root:       {project_root}")
@@ -138,6 +227,8 @@ def main() -> None:
     print(f"val_rows:           {summary.val_rows}")
     print(f"test_rows:          {summary.test_rows}")
     print(f"external_test_rows: {summary.external_test_rows}")
+    for split, count in sorted(summary.splits.items()):
+        print(f"split[{split}]: {count}")
     for domain, count in summary.domains.items():
         print(f"domain[{domain}]: {count}")
 

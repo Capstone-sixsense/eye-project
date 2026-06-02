@@ -3,8 +3,238 @@
 > **IMPORTANT**: This document is for **historical reference only**. 
 > For the current project state, architecture, and configuration, please refer to [AI_HANDOFF.md](./AI_HANDOFF.md).
 > If this history conflicts with `AI_HANDOFF.md`, trust `AI_HANDOFF.md`.
+> Older entries may use terms such as "current", "active", or "deployment"; those terms refer to the timestamp of that entry, not the present deployment unless the entry is the latest one.
 
 프로그램 설계, 변경 이력, 수정 대기 항목, 개선 계획을 단일 문서로 관리한다.
+
+---
+
+## 2026-05-27~29 전처리 정합성(QuickQual) 실험 시리즈
+
+`ai/.omc/plans/preprocessing_color_canonicalization_plan.md` 기반. **동기**: 학습은 circular 전처리(`processed/images`), serve는 backend QuickQual square-pad(1024) → AI circular crop으로 train-serve 전처리가 불일치. backend QuickQual은 고정(수정 불가)이고 frontend는 이미지 URL 소비라, **AI단만 수정**해 정합을 추구. backend/frontend 코드 변경 0 확인(backend가 이미 1024 공급, AI overlay는 입력 크기 자동 추종, payload에 width/height 없음, Flutter는 URL+자동 스케일).
+
+### 1. 색 canonicalization 사전 스크리닝 (재학습 0) — 전부 기각
+신규 `drscreen/cli/diagnose_color_canonicalization.py`로 색-모멘트 도메인 probe(DDR/IDRiD/MAPLES 각 120, seed 42) macro-OVR AUROC 측정. 게이트 P1-G2: baseline 대비 −0.05 이상 분리성 감소.
+
+| 후보 | 색-모멘트 domain AUROC | vs baseline 0.8747 | 병변색보존 | 판정 |
+|---|---:|---:|---:|---|
+| baseline | 0.8747 | — | — | — |
+| shades_of_gray (안1) | 0.9253 | **+0.0505** (분리성 증가) | 1.227 | FAIL |
+| clahe_l (안3) | 0.8625 | −0.0122 (미달) | 0.906 | FAIL |
+| ben_graham_channel_std (안2) | 0.8550 | −0.0197 (미달) | 1.433 | FAIL |
+
+결론: 색 정규화로 도메인 분리성을 못 낮춤. color_norm 경로 폐기.
+
+### 2. resize/geometry skew 검증 — 분류 AUROC-neutral
+신규 `drscreen/cli/diagnose_resize_path_skew.py`.
+- Check1 pixeldiff(train vs serve 512 입력): ground-truth baseline 기준 overall MAE **21.1/255**, PSNR 18.7dB. QuickQual prepend 단독 효과는 MAE ~6.8, 나머지는 학습 이미지가 serve geometry와 다름.
+- Check2 reeval(DDR external_test n=240, 같은 이미지 두 전처리): AUROC offline 0.9171 vs serve 0.9201, **delta +0.0031**. → 분류기는 skew에 강건. 0.9356(raw-live) vs 0.9403(offline holdout) gap은 전처리가 아니라 표본 차이.
+
+### 3. v8b serve skew + geometry 시각 검사
+- `diagnose_v8b_serve_skew.py`: 고정 v8b를 serve-geometry 입력으로 평가 → IDRiD mDice 0.4145→0.3936(**−0.021**), MAPLES −0.005. (train-path가 공표 baseline 0.4151 재현 → 하네스 검증됨.)
+- geometry 패널(`panels/`): **circular이 wide 안저(IDRiD)의 상·하 주변부를 클리핑**, QuickQual square는 시야 보존 확인. → 시각적 정합성 근거로 QuickQual 채택 결정. (metric은 안전 신호로 강등 — 분류 robust.)
+
+### 4. QuickQual 512 재학습
+신규 geometry mode `quickqual`(backend replica: RGB-mean>15, +20px buffer, square-pad)·`none`(passthrough) 추가. `_PROCESSED_PREFIXES`에 `processed_quickqual` 등록. P-A bbox 등가 100/100, P-B offline-vs-serve MAE 0.81/PSNR 43dB(실용상 정합).
+
+분류 v31 base (DDR external_holdout):
+
+| 버전 | holdout AUROC |
+|---|---:|
+| circular (당시 active 계열) | 0.9160 |
+| 512 quickqual | 0.9096 |
+
+v8b 분할 4도메인 test mDice:
+
+| v8b | IDRiD | MAPLES | TJDR | DDR_SEG | val |
+|---|---:|---:|---:|---:|---:|
+| circular baseline | 0.4151* | 0.2928 | 0.3788 | 0.3945 | 0.3388 |
+| 512 v1 (IDRiD w1.0) | 0.1318 | 0.2492 | 0.3493 | 0.3536 | 0.343 |
+| 512 v2 (IDRiD w4.0) | 0.2201 | 0.2514 | 0.3738 | 0.3537 | 0.328 |
+| 512 v3 (w4.0 + scale_jitter) | 0.0988 | 0.2392 | 0.3325 | 0.3253 | 0.312 |
+
+scale_jitter(v3)는 미수렴 + 작은 병변 축소로 전 도메인 회귀 → 폐기. 512 fusion best: v8b_v1 **0.9341**, v8b_v2 0.9269 (classification_domains:late_fusion).
+
+### 5. QuickQual 1024 재학습
+backend가 이미 1024 공급 → AI image_size/resize_size/preprocess_size 1024로. `processed_quickqual_1024` prefix 등록. (grad_checkpointing은 aux_seg block probe와 비호환 `KeyError:4` → false 유지.)
+
+분류 v31 1024:
+
+| 버전 | 학습 설정 | holdout AUROC |
+|---|---|---:|
+| 1024 v1 | 512-backbone, head 0 + ft 15 | 0.8978 |
+| 1024 v2 | head warmup 3 + ft 25 (1024 적응) | **0.9132** |
+
+→ v1의 분류 손해는 1024 본질이 아니라 **512-backbone 부족 적응** 탓(통찰 확인). 제대로 적응 시 512(0.9096) 초과, circular(0.9160) 근접.
+
+v8b 1024 (IDRiD w4.0) 4도메인 mDice: IDRiD **0.1012** / MAPLES **0.3601** / TJDR **0.3931** / DDR_SEG 0.3436, val 0.3586. → MAPLES/TJDR 역대 최고지만 IDRiD는 최악. 1024 fusion best **0.9256**(v8b_evidence_only 0.866 < 512의 0.891 — 공간 mDice는 최고지만 DDR 분류 evidence는 더 약함).
+
+### 6. IDRiD 평가 기준 신뢰성 결론
+IDRiD가 4번(512 w1/w4, jitter, 1024) 일관 붕괴(0.10~0.22), baseline 0.4151 근처도 못 감. fill ratio로 설명 불가(IDRiD qq_fill 0.705 > MAPLES 0.500인데 mDice는 IDRiD 0.10 << MAPLES 0.36). + AI_HANDOFF §7 IDRiD seg/grading **patient-level contamination**. → **circular의 0.4151은 거품(circular-특이 적합 또는 contamination 기억) 강한 의심. IDRiD overlay는 신뢰 불가 평가 기준으로 의사결정에서 제외.**
+
+### 7. 최종 결정 — Option B 채택
+4-way fusion best (external_holdout, classification_domains:late_fusion):
+
+| 후보 | 분류 v31 | **fusion best** | MAPLES ov | TJDR ov |
+|---|---:|---:|---:|---:|
+| circular (당시 active → 현 rollback) | 0.9160 | **0.9431** | 0.293 | 0.379 |
+| **512 qq + v8b_v1 (선택 → 현 active)** | 0.9096 | **0.9341** | 0.249 | 0.349 |
+| 512 qq + v8b_v2 | 0.9096 | 0.9269 | 0.251 | 0.374 |
+| 1024 qq | 0.9132 | 0.9256 | 0.360 | 0.393 |
+
+1024는 분류 회복·공간 overlay 최고에도 fusion(0.9256)이 512 v1(0.9341) 미달(v8b DDR evidence 약화로 상쇄) → 폐기. **결정: 512 quickqual + v8b_v1을 정합 배포(Option B).** train-serve 전처리 완전 정합 + 시야 보존을 위해 fusion AUROC **−0.009**(0.9431→0.9341) 수용. IDRiD는 신뢰 불가 지표라 판단에서 제외.
+
+**코드 변경(AI단 한정)**: `transforms.py`(quickqual/none mode + `_scale_jitter_from_config`), `mask_providers.py`(processed_quickqual[_1024] 등록), `eval_seg_evidence.py`(prefix 인식), 신규 진단 CLI 3종, configs(quickqual 512/1024 v31·v8b·fusion). `tests/regression/test_preprocess_geometry.py` 확장(quickqual/none mode 7/7 PASS). backend/frontend 무변경. 배포 교체 시 `test_preprocess_geometry.py`의 active-deployment 핀 테스트를 circular→quickqual-serve 계약으로 갱신.
+
+### 코드 정리 (2026-05-29)
+
+위 작업으로 추가된 코드를 ruff 기준 안전 리팩토링(동작 보존). 미사용 import/변수 제거(F401/F841 2건), import 정렬(I001 22건), 구식 문법·comprehension·getattr-상수·동일분기 정리(UP035/C420/B009/B010/SIM114 16건), 미참조 `*_run.log` 16개 삭제. **동작 보존 검증**: 매 단계 ruff F clean + regression 9/9 PASS + 활성 quickqual_v1 추론 smoke가 리팩토링 전과 비트 동일(abnormal 0.1643). 보류: quickqual replica 4곳 통합(일회성 진단 스크립트 + 미세 동작 변화 위험)과 구조 리팩토링(drscreen이 이미 F-rule clean)은 surgical 원칙·회귀 위험으로 미실행. `diagnose_shortcut_audit.py:206` B023(forward-hook closure)은 같은 iteration 내 등록·발화·제거라 false positive로 판정.
+
+---
+
+## 2026-05-25 domain overfit mitigation plan 실행
+
+`ai/.omc/plans/domain_overfit_mitigation_plan.md` v2-2를 Phase 0 -> Track A/B 순서로 실행했다. backend 코드는 변경하지 않았고, active `v31_v8b_fusion_v2` alias도 변경하지 않았다.
+
+Phase 0:
+- `data/processed/manifest_with_val_mixed.csv` 생성: `val_mixed`는 APTOS/IDRiD/Messidor 각 150장, DDR은 `external_calibration` 2,504장 / `external_holdout` 10,018장으로 분리.
+- 배포 기준선 재현 PASS: `v31_v8b_fusion_v2` DDR holdout AUROC **0.9402549575**, threshold **0.38**, Sens **0.8118**, Spec **0.9238**.
+- selection sanity: `external_calibration` vs `external_holdout` Spearman **1.0**, `val_mixed` vs `external_holdout` Spearman **0.6**. 이후 classifier 선택 metric은 내부 validation AUROC가 아니라 `external_calibration_auroc`로 사용했다.
+
+Track A classifier 결과:
+
+| Run | 핵심 변경 | external_holdout AUROC | Opt threshold | Sens@Opt | Spec@Opt | D5 domain AUROC | XAI top20 | 판정 |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `v42_coral_baseline` | CORAL | 0.9202605892 | 0.25 | 0.7940 | 0.8949 | 0.9855 | 0.0708 | not promoted |
+| `v42_rsc_coral` | RSC + CORAL | 0.9200808766 | 0.44 | 0.7920 | 0.9021 | 0.9957 | 0.0693 | not promoted |
+| `v41_ampmix` | AmpMix | 0.9027159555 | 0.40 | 0.7882 | 0.8496 | 0.9886 | 0.0743 | not promoted |
+
+판단:
+- `v42_coral_baseline`과 `v42_rsc_coral`은 v31 base classifier DDR AUROC 0.9160 대비 약 +0.004 개선이지만, active fusion `v31_v8b_fusion_v2` AUROC 0.9403에는 크게 못 미친다.
+- 세 classifier 모두 D5 domain probe AUROC가 0.98 이상이라 domain/style shortcut 문제를 해소하지 못했다.
+- XAI gate는 AUROC-focused 과적합 완화 목적에서는 hard blocker로 쓰기 어렵지만, XAI gate를 완화해도 D5/domain shortcut gate와 active fusion 대비 성능 gate를 통과하지 못한다.
+- A1 pseudo-lesion augmentation은 pre-audit에서 차단했다. v8b mask quality audit은 전체 87장 중 67장 fail, fail ratio **0.7701**로 plan의 hold 기준 0.3을 넘었다.
+
+Track B segmentation evidence 결과:
+
+| Run | 핵심 변경 | best val mDice | IDRiD mDice | MAPLES mDice | TJDR mDice | DDR_SEG mDice | 판정 |
+|---|---|---:|---:|---:|---:|---:|---|
+| baseline `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | current evidence baseline | 0.3388 | 0.4151 | 0.2928 | 0.3788 | 0.3945 | active evidence |
+| `seg_evidence_v8b_swa` | SWA | 0.2476 | 0.3536 | 0.1753 | 0.3541 | 0.3169 | not promoted |
+| `seg_evidence_v9_gin` | GIN | 0.2252 | 0.3197 | 0.1705 | 0.3471 | 0.3073 | not promoted |
+| `seg_evidence_v10_adverin` | AdverIN | 0.2205 | 0.3501 | 0.1875 | 0.3370 | 0.3122 | not promoted |
+
+판단:
+- B2/B1/B3 모두 baseline v8b 대비 IDRiD/MAPLES/TJDR/DDR_SEG mDice가 하락했다.
+- B4 CBMT는 plan 요구 조건인 `data/raw/MESSIDOR/` MESSIDOR-2 unlabeled subset과 source-free adaptation CLI가 없어 실행하지 않았다.
+- Track A all-gate 통과 후보와 Track B 통과 후보가 모두 없어서 `fusion_v3`는 만들지 않았다.
+
+근거:
+- `.omc/research/domain_overfit_mitigation_execution_summary.json`
+- `.omc/research/phase0_baseline_holdout_repro.json`
+- `.omc/research/v42_coral_baseline_selection_sanity.json`
+- `.omc/research/a1_v8b_mask_quality_audit.json`
+- `.omc/research/v42_coral_baseline_shortcut_audit.json`
+- `.omc/research/v42_rsc_coral_shortcut_audit.json`
+- `.omc/research/v41_ampmix_shortcut_audit.json`
+- `.omc/research/v10_adverin_seg_gate_summary.json`
+- `artifacts/runs/10_grounded_classifier/v42_coral_baseline/evaluations/external_holdout_v42_coral_baseline_best_metrics.json`
+- `artifacts/runs/10_grounded_classifier/v42_rsc_coral/evaluations/external_holdout_v42_rsc_coral_best_metrics.json`
+- `artifacts/runs/10_grounded_classifier/v41_ampmix/evaluations/external_holdout_v41_ampmix_best_metrics.json`
+
+---
+
+## 2026-05-24 safezoom/contentcrop preprocessing experiment 실행
+
+`ai/.omc/plans/preprocessing_safezoom_plan.md` 기반으로 contentcrop과 safezoom 계열 전처리 데이터를 분리 생성하고, classifier/segmenter/late-fusion 조합을 진단했다. active `v31_v8b_fusion_v2`, `configs/base.yaml`, `artifacts/checkpoints/best.pt`, backend/frontend는 변경하지 않았다.
+
+전처리/형상 진단:
+- `safezoom_aspect_stats.json` 기준 전체 17,900장을 aspect bin으로 확인했다.
+- `<1.2` bin은 content height median 505 -> safe height median 512, safe foreground loss median 2.00%.
+- `1.2-1.5` bin은 content height median 406 -> safe height median 443, safe foreground loss median 2.28%, p90 6.41%, 10% 초과 loss 0건.
+- `1.5-1.8` bin은 content height median 496 -> safe height median 512, safe foreground loss median 2.12%, p90 3.40%, 10% 초과 loss 0건.
+- 샘플 `1ae8c165fd53.png`: content height 396 -> safe height 442, foreground loss 3.27%.
+- 샘플 `4dd71fc7f22b.png`: content height 384 -> safe height 422, foreground loss 7.85%.
+
+Classifier / fusion 결과:
+
+| Run | 핵심 변경 | DDR AUROC | Threshold | Sens | Spec | 판정 |
+|---|---|---:|---:|---:|---:|---|
+| active `v31_v8b_fusion_v2` | current deployment baseline | 0.9402549575 | 0.38 | 0.8118 | 0.9238 | active 유지 |
+| `v31_v8b_late_fusion_contentcrop_v1` | contentcrop classifier + contentcrop segmenter late fusion | 0.9279980343 | 0.23 | 0.8152 | 0.9106 | active 미달 |
+| `v31_v8b_late_fusion_safezoom_v1` | safezoom classifier + safezoom segmenter late fusion | 0.9294630365 | 0.05 | 0.8166 | 0.8999 | active 미달 |
+| `v31_v8b_late_fusion_safezoom_bbretrain_v1` | safezoom backbone-retrained classifier + safezoom segmenter late fusion | 0.9204398633 | 0.18 | 0.8288 | 0.8921 | active/contentcrop 미달 |
+
+보조 classifier 결과:
+
+| Run | 전처리/학습 | DDR AUROC | Opt threshold | Sens@Opt | Spec@Opt |
+|---|---|---:|---:|---:|---:|
+| `v31_no_se_gated_contentcrop_v1` | contentcrop | 0.9090802609 | 0.34 | 0.7791 | 0.9098 |
+| `v31_no_se_gated_contentcrop_bbretrain_v1` | contentcrop + backbone retrain | 0.8939320582 | 0.34 | 0.7780 | 0.8768 |
+| `v31_no_se_gated_safezoom_v1` | safezoom | 0.8836726956 | 0.17 | 0.7591 | 0.8383 |
+| `v31_no_se_gated_safezoom_bbretrain_v1` | safezoom + backbone retrain | 0.8911139529 | 0.37 | 0.7522 | 0.9181 |
+
+Segmenter 결과:
+
+| Run | best val mDice | IDRiD best mDice | MAPLES mDice | TJDR best mDice | DDR_SEG best mDice |
+|---|---:|---:|---:|---:|---:|
+| active evidence `seg_evidence_v8b_ddrseg_tjdr_maplesfix` | 0.3388 | 0.4151 | 0.2928 | 0.3788 | 0.3945 |
+| `seg_evidence_v8b_contentcrop_v1` | 0.3287500057 | 0.2410 | 0.3694 | 0.3775 | 0.3362 |
+| `seg_evidence_v8b_safezoom_v1` | 0.3514188992 | 0.3085 | 0.3655 | not evaluated | not evaluated |
+
+판단:
+- safezoom은 aspect/foreground 보존 지표에서는 contentcrop보다 낫고 MAPLES mDice도 active evidence보다 높았지만, IDRiD 및 DDR_SEG segmentation이 낮고 최종 late fusion AUROC가 active 대비 **-0.0107919210** 낮았다.
+- safezoom late fusion은 contentcrop late fusion보다 AUROC **+0.0014650022** 높았지만, active `v31_v8b_fusion_v2`를 넘지 못했다.
+- backbone을 safezoom/contentcrop 기준으로 다시 학습해도 최종 AUROC가 회복되지 않았다.
+- 따라서 safezoom/contentcrop preprocessing 계열은 diagnostic-only로 기록하고 active deployment/preprocessing 경로에는 반영하지 않는다.
+
+근거:
+- `.omc/research/preprocessing_safezoom/final_comparison_safezoom_v1.json`
+- `.omc/research/preprocessing_safezoom/safezoom_aspect_stats.json`
+- `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_contentcrop_v1/evaluations/v31_v8b_late_fusion_contentcrop_v1_metrics.json`
+- `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_safezoom_v1/evaluations/v31_v8b_late_fusion_safezoom_v1_metrics.json`
+- `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_safezoom_bbretrain_v1/evaluations/v31_v8b_late_fusion_safezoom_bbretrain_v1_metrics.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_contentcrop_v1/checkpoints/training_summary.json`
+- `artifacts/runs/09_evidence_segmentation/seg_evidence_v8b_safezoom_v1/checkpoints/training_summary.json`
+
+---
+
+## 2026-05-23 v31+v8b fusion improvement plan 실행
+
+`v31_v8b_fusion_v2` active alias는 변경하지 않고, 배포 후보 개선 plan을 staging 기준으로 실행했다.
+
+변경:
+- `drscreen.cli.eval_fusion_full` 평가 하네스 추가.
+- payload contract / fusion segmenter forward regression test 추가.
+- `infer.amp`, `infer.tta_mode` 옵션 추가. 기본값은 `amp: false`, `tta_mode: none`.
+- late-fusion lesion feature를 append-only로 확장했다: connected component count, component mean area, center/outer active ratio, entropy, HE-EX/MA-HE overlap.
+- `v31_v8b_late_fusion_features_v2` meta-classifier를 재학습하고, staging checkpoint `artifacts/checkpoints/staging/v31_v8b_fusion_features_v2.pt`를 생성했다.
+- `v31_v8b_fusion_features_hflip_v2` staging config는 같은 checkpoint에 hflip Option A(meta probability 평균)를 적용한다. lesion overlay는 원본 view를 유지한다.
+- hflip Option B(`v31_v8b_fusion_features_hflip_recalc_v2`)는 원본 v31 score와 hflip 평균 segmentation map으로 fusion feature를 재계산하는 방식으로 평가했다. no-TTA 대비는 개선됐지만 Option A보다 낮아 승격하지 않는다.
+
+결과:
+
+| Candidate | AUROC | Threshold | Sens | Spec | XAI |
+|---|---:|---:|---:|---:|---|
+| active `v31_v8b_fusion_v2` | 0.9403 | 0.38 | 0.8118 | 0.9238 | IDRiD AUC-IoU 0.3852 / mDice 0.4145 |
+| `v31_v8b_fusion_features_v2` | 0.9413 | 0.40 | 0.8078 | 0.9232 | unchanged |
+| `v31_v8b_fusion_features_hflip_v2` | 0.9431 | 0.3931 | 0.8124 | 0.9230 | unchanged |
+| `v31_v8b_fusion_features_hflip_recalc_v2` | 0.9424 | 0.3852 | 0.8122 | 0.9230 | unchanged |
+
+판단:
+- AMP/BF16은 64장 probe에서 AUROC 변화는 없었지만 probability drift max 0.0169로 drift gate(0.0005)를 넘었다. 기본값은 false 유지.
+- `v31_v8b_fusion_features_hflip_v2`는 active sensitivity 0.8118 이상을 먼저 만족하도록 threshold를 0.3931로 재보정했다. Sensitivity는 active보다 +0.0006, AUROC는 +0.0029이며, specificity는 -0.0008로 소폭 낮다.
+- `v31_v8b_fusion_features_hflip_recalc_v2`는 no-TTA 대비 AUROC +0.0011이지만, Option A 대비 -0.0007이라 best staging 후보는 아니다.
+- 따라서 의료 AI 관점의 sensitivity non-regression 기준도 통과한 staging 후보지만, active alias는 아직 변경하지 않았다.
+- v31 기존 학습 산출물에는 epoch별 validation raw logit/probability와 epoch checkpoint가 없어 retrospective threshold-selection audit은 불가하다.
+
+근거:
+- `.omc/research/v31_v8b_fusion_improvement/baseline_2026-05-23.json`
+- `.omc/research/v31_v8b_fusion_improvement/phase2_feature_meta_hflip_sensguard_gate_2026-05-23.json`
+- `.omc/research/v31_v8b_fusion_improvement/phase2_feature_meta_hflip_feature_recalc_full_2026-05-23.json`
+- `artifacts/evaluations/external_test_v31_v8b_fusion_features_hflip_v2_best_metrics.json`
+- `artifacts/evaluations/external_test_v31_v8b_fusion_features_hflip_recalc_v2_best_metrics.json`
+- `artifacts/evaluations/xai_v31_v8b_fusion_features_hflip_v2_lesion_segmentation_test_best_metrics.json`
 
 ---
 
@@ -87,7 +317,7 @@ DDR external_test 결과:
 
 | Model | AUROC | Threshold policy | Accuracy | Sens | Spec | F1 |
 |---|---:|---|---:|---:|---:|---:|
-| active v31 reference | 0.9160 | recorded opt 0.35 | 0.8330 | 0.7983 | 0.8677 | 0.8269 |
+| then-active v31 reference | 0.9160 | recorded opt 0.35 | 0.8330 | 0.7983 | 0.8677 | 0.8269 |
 | v8b evidence-only best | 0.8942 | external balanced 0.49 | 0.8191 | 0.8061 | 0.8321 | 0.8166 |
 | v31+v8b late fusion | **0.9379** | external balanced 0.28 | **0.8665** | **0.8314** | **0.9015** | **0.8615** |
 | v31+v8b late fusion | **0.9379** | sensitivity guard 0.38 | **0.8617** | **0.7999** | **0.9234** | **0.8525** |
@@ -96,7 +326,7 @@ DDR external_test 결과:
 - late fusion은 AUROC 기준 v31 대비 +0.0219이며, external balanced threshold 기준 Accuracy/Sensitivity/Specificity/F1이 모두 개선된다.
 - sensitivity guard threshold에서도 v31 sensitivity를 유지하면서 specificity와 F1을 개선한다.
 - 단, val-selected threshold는 0.86으로 과도하게 보수적이어서 sensitivity가 0.6541까지 떨어졌다. 이 문제는 아래 DDR 20/80 calibration split 정책으로 후속 정정했다.
-- 이 시점에는 `v31_v8b_late_fusion_sweep_v1`이 가장 강한 분류 후보였고, latency/backend contract 검증 전까지 active deployment는 v31로 유지했다. 이후 검증과 패키징을 거쳐 `v31_v8b_fusion_v2`로 승격했다.
+- 이 시점에는 `v31_v8b_late_fusion_sweep_v1`이 가장 강한 분류 후보였고, latency/backend contract 검증 전까지 당시 deployment는 v31로 유지했다. 이후 검증과 패키징을 거쳐 `v31_v8b_fusion_v2`로 승격했다.
 
 근거:
 - `artifacts/runs/10_grounded_classifier/v31_v8b_late_fusion_sweep_v1/evaluations/v31_v8b_late_fusion_sweep_v1_metrics.json`
@@ -218,7 +448,7 @@ FGADR 없이 진행하기 위해 DDR lesion segmentation subset을 추가했다.
 판단:
 - DDR segmentation 추가는 IDRiD/TJDR/DDR_SEG lesion evidence를 크게 개선했다.
 - 그러나 MAPLES는 best mDice 0.0103으로 여전히 gate 0.05에 크게 미달한다.
-- 따라서 v8은 product evidence로 승격하지 않고, 배포는 v31을 유지한다.
+- 따라서 v8은 product evidence로 승격하지 않고, 당시에는 v31을 배포 상태로 유지했다.
 
 근거:
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v8_ddrseg_tjdr/checkpoints/training_summary.json`
@@ -466,7 +696,7 @@ Threshold sweep:
 MAPLES best mDice는 v5의 0.0141에서 0.0165로 소폭 올랐지만, gate 0.05에는 여전히 크게 못 미친다.
 IDRiD와 TJDR best union IoU도 v5 대비 각각 0.3068 → 0.3033, 0.2962 → 0.2933으로 소폭 낮아졌다.
 따라서 fine-tune과 target-domain upweighting만으로는 MAPLES cross-domain lesion evidence gap을 해결하지 못했다.
-배포는 v31로 유지한다.
+당시에는 v31을 배포 상태로 유지했다.
 
 근거:
 - `configs/seg_evidence_v6_maples_finetune_tjdr.yaml`
@@ -519,7 +749,7 @@ Threshold sweep:
 
 DeepLabV3는 IDRiD를 v3보다 개선했지만, TJDR은 v3보다 낮고 MAPLES는 여전히 mDice 0.05 gate에 크게 못 미친다.
 따라서 v4는 promotion 대상이 아니며, MAPLES failure는 threshold 문제가 아니라 domain/representation 문제라는 기존 결론을 유지한다.
-배포는 v31로 유지한다.
+당시에는 v31을 배포 상태로 유지했다.
 
 근거:
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v4_deeplab_tjdr/checkpoints/training_summary.json`
@@ -572,7 +802,7 @@ MAPLES-target FDA는 IDRiD union IoU를 v3/v4보다 개선했고, TJDR은 v4보�
 그러나 MAPLES best mDice는 0.0141로 gate 0.05에 크게 못 미친다.
 따라서 FDA 단독은 MAPLES cross-domain lesion evidence gap 해결책이 아니다.
 다음 단계는 추가 lesion-mask 데이터 또는 research-only fundus/SAM/MedSAM/RETFound encoder probe가 필요하다.
-배포는 v31로 유지한다.
+당시에는 v31을 배포 상태로 유지했다.
 
 근거:
 - `artifacts/runs/09_evidence_segmentation/seg_evidence_v5_maples_fda_tjdr/checkpoints/training_summary.json`
@@ -758,7 +988,7 @@ provider/manifest integration도 진행했다.
 5. `configs/seg_evidence_v3_tjdr.yaml` 추가 및 preprocessed manifest로 연결.
 6. dry-run 기준 mask-valid train rows: IDRiD 54, MAPLES 122, TJDR 448.
 
-배포는 계속 v31 유지. `configs/base.yaml`와 `artifacts/checkpoints/best.pt`는 변경하지 않았다.
+당시 배포는 계속 v31 유지. `configs/base.yaml`와 `artifacts/checkpoints/best.pt`는 변경하지 않았다.
 
 근거:
 - 로컬 파일 구조: `data/raw/TJDR`
@@ -797,7 +1027,7 @@ G-0에서는 실제로 다음 학습을 시작할 수 있는 lesion-mask 데이�
 Phase 4-G는 `BLOCKED_PENDING_LOCAL_DATA_OR_WEIGHTS`로 시작한다.
 지금 provider 구현이나 학습을 시작하지 않는다. 실제 폴더 구조가 없는 상태에서 TJDR/FGADR parser를 만들면 class mapping과 mask layout을 가정하게 되므로 오히려 위험하다.
 
-배포는 v31 유지. `configs/base.yaml`와 `artifacts/checkpoints/best.pt`는 변경하지 않았다.
+당시에는 v31을 배포 상태로 유지했다. `configs/base.yaml`와 `artifacts/checkpoints/best.pt`는 변경하지 않았다.
 
 근거 파일:
 - `.omc/research/phase4g_data_access_gate.json`
@@ -1064,7 +1294,7 @@ Threshold sweep 기준:
 ### 목적
 
 Track 1의 Occlusion 결과를 바탕으로, v31 classifier가 병변 위치가 아니라 domain/style shortcut을 주로 사용하는지 직접 검증했다.
-평가 대상은 active deployment alias(`configs/base.yaml`, `artifacts/checkpoints/best.pt`)로 로드한 `v31_no_se_gated`이며, block4 feature를 사용했다.
+평가 대상은 당시 배포 alias(`configs/base.yaml`, `artifacts/checkpoints/best.pt`)로 로드한 `v31_no_se_gated`이며, block4 feature를 사용했다.
 
 ### 구현 및 실행
 
@@ -1179,7 +1409,7 @@ Occlusion은 Layer-CAM보다 deletion AUC가 낮고 insertion-minus-deletion이 
 v37b(`lambda_cam_align=0`)를 기준으로 auxiliary segmentation loss를 높이면 IDRiD/MAPLES XAI가 회복되는지 확인했다.
 sweep에서 MAPLES 회복이 없으면 frozen classifier two-stage decoder(v39)로 넘어가는 계획이었다.
 
-배포 alias는 변경하지 않았다. 현재 배포는 계속 `v31_no_se_gated`이며, `configs/base.yaml`과 `artifacts/checkpoints/best.pt`는 v31 기준으로 유지한다.
+이 실험 당시에는 배포 alias를 변경하지 않았다. 당시 배포는 계속 `v31_no_se_gated`였으며, `configs/base.yaml`과 `artifacts/checkpoints/best.pt`는 v31 기준으로 유지했다.
 
 ### 구현 및 실행
 
@@ -4001,7 +4231,7 @@ v25는 현재 internal `test`와 XAI artifact만 있고 DDR `external_test` arti
 
 **2026-05-06 재분류 후 정정**: v24/v28 matched block sweep 결과, 문제는 "모든 backbone block이 병변 위치를 못 배우는 것"이 아니라 attention-enabled feature path에서 shortcut-driven XAI mislocalization이 발생하는 쪽으로 해석된다. v28_no_attention은 IDRiD test block4에서 Pointing Game 0.4444, IoU top-20 0.0741을 기록해 center Gaussian baseline 0.0436을 초과했다.
 
-**현재 active 모델**: v28_no_attention — internal test AUROC 0.9923, DDR external_test AUROC 0.8924, DDR optimal threshold 0.45, XAI block4 Layer-CAM IoU top-20 0.0741. v24_multitask는 lesion-supervision 실험 기록으로 유지하되 배포 대상에서는 제외한다.
+**당시 active 모델**: v28_no_attention — internal test AUROC 0.9923, DDR external_test AUROC 0.8924, DDR optimal threshold 0.45, XAI block4 Layer-CAM IoU top-20 0.0741. v24_multitask는 lesion-supervision 실험 기록으로 유지하되 배포 대상에서는 제외한다.
 
 **향후 XAI 개선 가능성 (미실험)**:
 - `aux_seg_block=4` (blocks[4], 더 깊은 semantic feature)로 seg head 재훈련

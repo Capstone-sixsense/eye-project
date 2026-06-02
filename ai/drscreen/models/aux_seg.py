@@ -249,7 +249,7 @@ class MultiTaskModel(nn.Module):
             return seg_logits
         return seg_logits.amax(dim=1, keepdim=True)
 
-    def _forward_gated_classifier(self, x: torch.Tensor) -> torch.Tensor:
+    def _gated_pooled_features(self, x: torch.Tensor) -> torch.Tensor:
         if not all(
             hasattr(self.backbone, attr)
             for attr in ("forward_features", "forward_head", "classifier")
@@ -264,8 +264,22 @@ class MultiTaskModel(nn.Module):
         else:
             gate = torch.sigmoid(seg_logits)
         gate = gate / gate.mean(dim=(2, 3), keepdim=True).clamp_min(1e-6)
-        pooled = self.backbone.forward_head(feat_map * gate, pre_logits=True)
+        return self.backbone.forward_head(feat_map * gate, pre_logits=True)
+
+    def classify_pooled_features(self, pooled: torch.Tensor) -> torch.Tensor:
         return self.backbone.classifier(pooled)
+
+    def forward_with_gated_features(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        pooled = self._gated_pooled_features(x)
+        logits = self.classify_pooled_features(pooled)
+        seg_logits = self._seg_forward() if self.training else None
+        return logits, seg_logits, pooled
+
+    def _forward_gated_classifier(self, x: torch.Tensor) -> torch.Tensor:
+        pooled = self._gated_pooled_features(x)
+        return self.classify_pooled_features(pooled)
 
     def forward(
         self, x: torch.Tensor

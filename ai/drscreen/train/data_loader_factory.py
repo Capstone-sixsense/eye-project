@@ -6,6 +6,12 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
+from drscreen.data.datasets import (
+    FDAManifestDataset,
+    ManifestDataset,
+    SegmentationFDAManifestDataset,
+    SegmentationManifestDataset,
+)
 from drscreen.data.mask_providers import (
     CompositeMaskProvider,
     DDRSegMaskProvider,
@@ -16,16 +22,11 @@ from drscreen.data.mask_providers import (
     NullMaskProvider,
     TJDRMaskProvider,
 )
-from drscreen.data.datasets import (
-    FDAManifestDataset,
-    ManifestDataset,
-    SegmentationFDAManifestDataset,
-    SegmentationManifestDataset,
-)
 from drscreen.data.transforms import (
     build_eval_transform,
     build_segmentation_train_transform,
     build_train_transform,
+    preprocess_kwargs_from_config,
 )
 from drscreen.models.profiles import get_model_profile
 from drscreen.settings import resolve_project_path
@@ -44,22 +45,28 @@ def _build_transforms(config: dict[str, Any]) -> tuple[Any, Any]:
     resize_size = int(data_cfg["resize_size"])
     use_preprocessing = bool(data_cfg.get("use_preprocessing", False))
     use_random_resized_crop = bool(data_cfg.get("use_random_resized_crop", True))
+    preprocess_kwargs = preprocess_kwargs_from_config(data_cfg)
     if _uses_mask_supervision(config):
         train_transform = build_segmentation_train_transform(
             crop_size=image_size, resize_size=resize_size,
             interpolation=profile.interpolation,
             mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
             use_random_resized_crop=use_random_resized_crop,
+            preprocess_kwargs=preprocess_kwargs,
+            gin_config=data_cfg.get("gin"),
+            scale_jitter_config=data_cfg.get("scale_jitter"),
         )
     else:
         train_transform = build_train_transform(
             crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
             mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
             use_random_resized_crop=use_random_resized_crop,
+            preprocess_kwargs=preprocess_kwargs,
         )
     eval_transform = build_eval_transform(
         crop_size=image_size, resize_size=resize_size, interpolation=profile.interpolation,
         mean=profile.mean, std=profile.std, use_preprocessing=use_preprocessing,
+        preprocess_kwargs=preprocess_kwargs,
     )
     return train_transform, eval_transform
 
@@ -170,12 +177,17 @@ def _build_datasets(
     use_sync_mask_transform = _uses_mask_supervision(config)
     if use_fda:
         fda_alpha = float(data_cfg.get("fda_alpha", 0.05))
+        ampmix_cfg = data_cfg.get("ampmix") or {}
+        ampmix_enabled = bool(ampmix_cfg.get("enable", False))
         if use_sync_mask_transform:
             train_dataset: ManifestDataset = SegmentationFDAManifestDataset(
                 manifest_path=manifest_path, image_root=image_root,
                 split=data_cfg["train_split"], transform=train_transform,
                 fda_alpha=fda_alpha,
                 fda_probability=float(data_cfg.get("fda_probability", 1.0)),
+                ampmix_mode=ampmix_enabled,
+                ampmix_alpha_low=float(ampmix_cfg.get("alpha_low", 0.0)),
+                ampmix_alpha_high=float(ampmix_cfg.get("alpha_high", 0.5)),
                 fda_target_domain=data_cfg.get("fda_target_domain"),
                 fda_apply_to_target_domain=bool(data_cfg.get("fda_apply_to_target_domain", False)),
                 seg_mask_size=seg_mask_size, mask_provider=mask_provider,
@@ -185,6 +197,10 @@ def _build_datasets(
             train_dataset = FDAManifestDataset(
                 manifest_path=manifest_path, image_root=image_root,
                 split=data_cfg["train_split"], transform=train_transform, fda_alpha=fda_alpha,
+                fda_probability=float(data_cfg.get("fda_probability", 1.0)),
+                ampmix_mode=ampmix_enabled,
+                ampmix_alpha_low=float(ampmix_cfg.get("alpha_low", 0.0)),
+                ampmix_alpha_high=float(ampmix_cfg.get("alpha_high", 0.5)),
                 seg_mask_size=seg_mask_size, mask_provider=mask_provider,
                 concept_label_path=concept_label_path,
             )
@@ -244,10 +260,17 @@ def build_eval_dataset(
     data_cfg = config["data"]
     manifest_path = resolve_project_path(project_root, data_cfg["manifest_path"])
     image_root = resolve_project_path(project_root, data_cfg["image_root"])
+    concept_label_path_cfg = data_cfg.get("concept_label_path")
+    concept_label_path = (
+        resolve_project_path(project_root, concept_label_path_cfg)
+        if concept_label_path_cfg
+        else None
+    )
     _, eval_transform = _build_transforms(config)
     dataset = ManifestDataset(
         manifest_path=manifest_path, image_root=image_root,
         split=split_name, transform=eval_transform,
+        concept_label_path=concept_label_path,
     )
     if len(dataset) == 0:
         raise ValueError(f"Evaluation split is empty: {split_name}")
@@ -258,7 +281,9 @@ def build_dataloaders(
     config: dict[str, Any],
     project_root: Path,
     device: torch.device,
-) -> tuple[DataLoader, DataLoader, Path]:
+    *,
+    build_calibration_loader: bool = False,
+) -> tuple[DataLoader, DataLoader, Path] | tuple[DataLoader, DataLoader, DataLoader, Path]:
     train_dataset, val_dataset, manifest_path = _build_datasets(config, project_root)
     data_cfg = config["data"]
     batch_size = int(data_cfg["batch_size"])
@@ -275,4 +300,13 @@ def build_dataloaders(
         num_workers=num_workers, pin_memory=device.type == "cuda",
         persistent_workers=persistent_workers,
     )
+    if build_calibration_loader:
+        cal_split = str(data_cfg.get("external_calibration_split", "external_calibration"))
+        cal_dataset, _ = build_eval_dataset(config, project_root, cal_split)
+        cal_loader = DataLoader(
+            cal_dataset, batch_size=batch_size, shuffle=False,
+            num_workers=num_workers, pin_memory=device.type == "cuda",
+            persistent_workers=persistent_workers,
+        )
+        return train_loader, val_loader, cal_loader, manifest_path
     return train_loader, val_loader, manifest_path

@@ -6,7 +6,7 @@
 - **기간**: SPRINT 3 주요 실험 이력 (2026.04.27 ~ 2026.05.06, v29 기준 마감)
 - **대상 범위**: 전처리 파이프라인 재기준, v15_fda_a10 ~ v20_coral 도메인 일반화 후속 실험, v21_512_layercam 해상도 전환, v24~v27 병변 지도/XAI 개선 실험, v28~v29 attention ablation, artifact migration
 
-> 주의: 이 문서는 Sprint 3 AI 파트의 v29 기준 요약이다. Sprint 3 후반 실험에서 `v28_no_attention`이 DDR 외부 성능과 XAI 위치 정렬 모두에서 더 강한 후보로 확인됐고, 이후 active config도 `v28_no_attention`으로 변경됐다. 다만 현재 코드 taxonomy 기준으로 v28은 true no-attention이 아니라 `attention_mode: eca`(ECA 유지, CBAM spatial 제거)다. 배포 checkpoint path는 `artifacts/checkpoints/best.pt`로 고정하며, threshold는 각 배포 artifact의 DDR external_test optimal threshold를 기준으로 한다.
+> 주의: 이 문서는 Sprint 3 AI 파트의 v29 기준 요약이다. Sprint 3 후반 실험에서 `v28_no_attention`이 DDR 외부 성능과 XAI 위치 정렬 모두에서 더 강한 후보로 확인됐고, Sprint 3 당시 active config도 `v28_no_attention`으로 변경됐다. 현재 전체 배포 버전은 이후 Sprint 5에서 `v31_v8b_fusion_v2`로 변경되었다. 다만 현재 코드 taxonomy 기준으로 v28은 true no-attention이 아니라 `attention_mode: eca`(ECA 유지, CBAM spatial 제거)다. 배포 checkpoint path는 `artifacts/checkpoints/best.pt`로 고정하며, threshold는 각 배포 artifact의 DDR external_test optimal threshold를 기준으로 한다.
 
 ## 2. 주요 개발 및 성과 (Milestones)
 
@@ -96,8 +96,8 @@
   - v24 계열의 XAI는 center Gaussian baseline을 넘지 못해, 주요 관심 영역 강조 기능을 완료 처리하기 어렵다.
   - legacy attention ablation 모델인 `v28_no_attention`은 DDR AUROC와 XAI block4 위치 정렬에서 가장 강한 개선 후보로 확인됐다.
   - 버전 번호만으로 실험을 관리하기에는 한계가 있어, primary group 기반 artifact 관리가 필요하다.
-- **남은 과제**:
-  - `v28_no_attention` active config 기준으로 추론 파이프라인과 backend 연동을 검증해야 한다.
+- **Sprint 3 종료 당시 남은 과제**:
+  - 당시에는 `v28_no_attention` active config 기준으로 추론 파이프라인과 backend 연동 검증이 필요했다. 이후 Sprint 4/5에서 v31 계열과 `v31_v8b_fusion_v2`로 배포 경로가 대체됐다.
   - 주요 관심 영역 강조 기능은 XAI 신뢰성 문제가 해소된 뒤 제품 기능으로 확정해야 한다.
   - block4 CAM, lesion-aware classifier, segmentation supervision 재설계 등 병변 위치 정렬을 직접 강화하는 구조를 추가 검토해야 한다.
   - 새 실험 시작 전 run_id, primary group, config, checkpoint, evaluation artifact 위치를 먼저 등록하는 절차를 고정해야 한다.
@@ -105,8 +105,8 @@
 ## 5. 근거 파일
 - `ai/docs/DEVLOG.md`: Sprint 3 상세 변경 이력. v15~v29, XAI 정량 검증, attention ablation, artifact migration 기록.
 - `ai/docs/EXPERIMENT_REGISTRY.md`: primary group 기준 artifact 분류, v24/v28/v29 상태, DDR external_test 및 XAI 지표 요약.
-- `ai/docs/AI_HANDOFF.md`: 현재 active config, active checkpoint 기준, QuickQual/backend 분리, v28 배포 상태 기록.
-- `ai/configs/base.yaml`: `project.version: v28_no_attention`, `infer.checkpoint_path`, `train.checkpoint_dir`, `global_best_checkpoint_path`.
+- `ai/docs/AI_HANDOFF.md`: 현재 전체 배포 상태의 source of truth. Sprint 3 당시의 active config와 checkpoint 기준은 이 문서의 역사 기록으로만 참조한다.
+- `ai/configs/base.yaml`: Sprint 3 당시에는 `project.version: v28_no_attention` 기준이었으나, 현재 파일은 최신 active deployment 기준으로 변경되어 있다.
 - `ai/artifacts/runs/02_domain_generalization/v17_focal_g2/evaluations/external_test_v17_focal_g2_best_metrics.json`
 - `ai/artifacts/runs/03_resolution_layercam/v21_512_layercam/evaluations/external_test_v21_512_layercam_best_metrics.json`
 - `ai/artifacts/runs/04_lesion_supervision/v24_multitask/evaluations/external_test_v24_multitask_best_metrics.json`

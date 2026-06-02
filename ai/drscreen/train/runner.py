@@ -16,7 +16,11 @@ from drscreen.train.checkpointing import (
     checkpoint_payload,
     prefixed_metric_fields,
 )
-from drscreen.train.data_loader_factory import _build_datasets, build_dataloaders
+from drscreen.train.data_loader_factory import (
+    _build_datasets,
+    build_dataloaders,
+    build_eval_dataset,
+)
 from drscreen.train.engine import SWADBuffer, evaluate_one_epoch, train_one_epoch
 from drscreen.train.model_setup import (
     _DEFAULT_MIN_SENSITIVITY,
@@ -33,9 +37,30 @@ from drscreen.train.model_setup import (
     validate_training_scope,
 )
 from drscreen.utils.logging import get_logger
-from drscreen.utils.seed import set_seed
+from drscreen.utils.seed import configure_determinism, environment_snapshot, set_seed
 
 LOGGER = get_logger(__name__)
+
+
+def _save_recent_epoch_checkpoint(
+    *,
+    ckpt: dict[str, Any],
+    checkpoint_dir: Path,
+    epoch: int,
+    keep_last_n: int,
+) -> list[str]:
+    if keep_last_n <= 0:
+        return []
+    checkpoint_path = checkpoint_dir / f"epoch_{epoch:03d}.pt"
+    torch.save(ckpt, checkpoint_path)
+    epoch_checkpoints = sorted(
+        checkpoint_dir.glob("epoch_*.pt"),
+        key=lambda path: path.stat().st_mtime,
+    )
+    stale_checkpoints = epoch_checkpoints[:-keep_last_n]
+    for stale_path in stale_checkpoints:
+        stale_path.unlink(missing_ok=True)
+    return [str(path) for path in epoch_checkpoints[-keep_last_n:]]
 
 
 def describe_training_setup(
@@ -46,6 +71,12 @@ def describe_training_setup(
 ) -> dict[str, Any]:
     validate_training_scope(config)
     train_dataset, val_dataset, manifest_path = _build_datasets(config, project_root)
+    selection_metric = str(config["train"].get("selection_metric", "val_auroc")).strip().lower()
+    calibration_rows = 0
+    if selection_metric == "external_calibration_auroc":
+        cal_split = str(config["data"].get("external_calibration_split", "external_calibration"))
+        cal_dataset, _ = build_eval_dataset(config, project_root, cal_split)
+        calibration_rows = len(cal_dataset)
     profile = get_model_profile(str(config["model"]["architecture"]))
     phases = build_training_phases(config)
     training_mode = str(config["train"].get("training_mode", "standard")).lower()
@@ -56,9 +87,11 @@ def describe_training_setup(
         "manifest_exists": manifest_path.exists(),
         "train_rows": len(train_dataset),
         "val_rows": len(val_dataset),
+        "external_calibration_rows": calibration_rows,
         "train_dataset_type": train_dataset.__class__.__name__,
         "architecture": profile.architecture,
         "training_mode": training_mode,
+        "selection_metric": selection_metric,
         "synchronized_mask_transform": bool(float(config["train"].get("lambda_aux_seg", 0.0) or 0.0) > 0.0),
         "recommended_profile": profile.to_dict(),
         "phases": [
@@ -75,11 +108,28 @@ def run_training(
     project_root: Path,
 ) -> dict[str, Any]:
     validate_training_scope(config)
-    set_seed(int(config["train"]["seed"]))
+    train_cfg = config["train"]
+    determinism = configure_determinism(train_cfg)
+    set_seed(int(train_cfg["seed"]))
+    environment = environment_snapshot(project_root)
 
-    device = resolve_device(str(config["train"]["device"]))
+    device = resolve_device(str(train_cfg["device"]))
     architecture = str(config["model"]["architecture"])
-    train_loader, val_loader, manifest_path = build_dataloaders(config, project_root, device)
+    selection_metric = str(config["train"].get("selection_metric", "val_auroc")).strip().lower()
+    if selection_metric not in {"val_auroc", "external_calibration_auroc"}:
+        raise ValueError(f"Unsupported train.selection_metric: {selection_metric!r}")
+    use_calibration_selection = selection_metric == "external_calibration_auroc"
+    loaders = build_dataloaders(
+        config,
+        project_root,
+        device,
+        build_calibration_loader=use_calibration_selection,
+    )
+    if use_calibration_selection:
+        train_loader, val_loader, cal_loader, manifest_path = loaders
+    else:
+        train_loader, val_loader, manifest_path = loaders
+        cal_loader = None
 
     model = build_model_for_training(config, device)
     load_pretrained_backbone(model, config, project_root)
@@ -102,6 +152,9 @@ def run_training(
     lambda_cam_align = float(config["train"].get("lambda_cam_align", 0.0))
     lambda_patch_l1 = float(config["train"].get("lambda_patch_l1", 0.0))
     lambda_concept = float(config["train"].get("lambda_concept", 0.0))
+    rsc_cfg = config.get("model", {}).get("rsc", {}) or {}
+    rsc_p_feature = float(rsc_cfg.get("p_feature", 0.0)) if bool(rsc_cfg.get("enable", False)) else 0.0
+    rsc_p_batch = float(rsc_cfg.get("p_batch", 0.0)) if bool(rsc_cfg.get("enable", False)) else 0.0
     coral_block_cfg = config["train"].get("coral_block")
     coral_block = int(coral_block_cfg) if coral_block_cfg is not None else None
     seg_loss_type = str(config["train"].get("seg_loss_type", "bce"))
@@ -116,6 +169,8 @@ def run_training(
         )
     if lambda_cam_align > 0.0:
         LOGGER.info("CAM alignment enabled: lambda=%.4f", lambda_cam_align)
+    if rsc_p_feature > 0.0 and rsc_p_batch > 0.0:
+        LOGGER.info("RSC enabled: p_feature=%.3f p_batch=%.3f", rsc_p_feature, rsc_p_batch)
 
     amp_enabled = bool(config["train"].get("amp", False)) and device.type == "cuda"
     # BF16 has the same exponent range as FP32, so GradScaler is not needed.
@@ -130,11 +185,15 @@ def run_training(
     best_epoch = 0
     best_checkpoint_path = checkpoint_dir / "best.pt"
     last_checkpoint_path = checkpoint_dir / "last.pt"
+    keep_last_n_checkpoints = int(config["train"].get("keep_last_n_checkpoints", 0))
+    recent_checkpoint_paths: list[str] = []
     history: list[dict[str, Any]] = []
     global_epoch = 0
     optimizer: Optimizer | None = None
     scheduler: LRScheduler | None = None
     swad_last_n = int(config["train"].get("swad_last_n_epochs", 0))
+    if swad_last_n > 0 and selection_metric != "val_auroc":
+        raise ValueError("SWAD selection is only supported with train.selection_metric='val_auroc'.")
     swad_buffer: SWADBuffer | None = SWADBuffer(swad_last_n) if swad_last_n > 0 else None
 
     es_patience = int(config["train"].get("early_stopping_patience", 0))
@@ -181,8 +240,15 @@ def run_training(
                 coral_block=coral_block,
                 lambda_patch_l1=lambda_patch_l1,
                 lambda_concept=lambda_concept,
+                rsc_p_feature=rsc_p_feature,
+                rsc_p_batch=rsc_p_batch,
             )
             val_metrics = evaluate_one_epoch(model, val_loader, criterion, device, amp_enabled=amp_enabled)
+            cal_metrics = (
+                evaluate_one_epoch(model, cal_loader, criterion, device, amp_enabled=amp_enabled)
+                if cal_loader is not None
+                else None
+            )
             if scheduler is not None:
                 scheduler.step()
 
@@ -192,6 +258,8 @@ def run_training(
             }
             epoch_record.update(prefixed_metric_fields("train", train_metrics))
             epoch_record.update(prefixed_metric_fields("val", val_metrics))
+            if cal_metrics is not None:
+                epoch_record.update(prefixed_metric_fields("external_calibration", cal_metrics))
             history.append(epoch_record)
 
             ckpt = checkpoint_payload(
@@ -200,12 +268,22 @@ def run_training(
                 train_metrics=train_metrics.to_dict(), val_metrics=val_metrics.to_dict(),
             )
             torch.save(ckpt, last_checkpoint_path)
+            recent_checkpoint_paths = _save_recent_epoch_checkpoint(
+                ckpt=ckpt,
+                checkpoint_dir=checkpoint_dir,
+                epoch=global_epoch,
+                keep_last_n=keep_last_n_checkpoints,
+            )
 
             val_sensitivity = val_metrics.sensitivity or 0.0
             val_auroc = val_metrics.auroc or 0.0
-            min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", _DEFAULT_MIN_SENSITIVITY))
-            if val_sensitivity >= min_sensitivity and val_auroc > best_val_auroc:
-                best_val_auroc = val_auroc
+            selection_metrics = cal_metrics if cal_metrics is not None else val_metrics
+            selection_sensitivity = selection_metrics.sensitivity or 0.0
+            selection_score = selection_metrics.auroc or 0.0
+            default_min_sensitivity = 0.0 if use_calibration_selection else _DEFAULT_MIN_SENSITIVITY
+            min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", default_min_sensitivity))
+            if selection_sensitivity >= min_sensitivity and selection_score > best_val_auroc:
+                best_val_auroc = selection_score
                 best_epoch = global_epoch
                 torch.save(ckpt, best_checkpoint_path)
 
@@ -213,23 +291,24 @@ def run_training(
                 swad_buffer.update(model)
 
             if es_patience > 0 and not phase.head_only:
-                if val_auroc > es_best_auroc + es_min_delta:
-                    es_best_auroc = val_auroc
+                if selection_score > es_best_auroc + es_min_delta:
+                    es_best_auroc = selection_score
                     es_no_improve = 0
                 else:
                     es_no_improve += 1
                     if es_no_improve >= es_patience:
                         LOGGER.info(
-                            "Early stopping at epoch %d — val AUROC did not improve by %.4f for %d epochs",
-                            global_epoch, es_min_delta, es_patience,
+                            "Early stopping at epoch %d — %s did not improve by %.4f for %d epochs",
+                            global_epoch, selection_metric, es_min_delta, es_patience,
                         )
                         should_stop = True
                         break
 
             LOGGER.info(
-                "phase=%s epoch=%s/%s train_loss=%.4f val_loss=%.4f val_sensitivity=%.4f val_auroc=%.4f",
+                "phase=%s epoch=%s/%s train_loss=%.4f val_loss=%.4f val_sensitivity=%.4f val_auroc=%.4f selection_metric=%s selection_score=%.4f",
                 phase.name, phase_epoch, phase.epochs,
                 train_metrics.loss, val_metrics.loss, val_sensitivity, val_auroc,
+                selection_metric, selection_score,
             )
 
     if swad_buffer is not None and len(swad_buffer) > 0:
@@ -240,10 +319,17 @@ def run_training(
             best_checkpoint_path=best_checkpoint_path, optimizer=optimizer, scheduler=scheduler,
         )
 
-    promotion_candidate, global_best_auroc_at_run = check_promotion_candidate(
-        version=version, best_val_auroc=best_val_auroc, best_epoch=best_epoch,
-        project_root=project_root, config=config, best_checkpoint_path=best_checkpoint_path,
-    )
+    if selection_metric == "val_auroc":
+        promotion_candidate, global_best_auroc_at_run = check_promotion_candidate(
+            version=version, best_val_auroc=best_val_auroc, best_epoch=best_epoch,
+            project_root=project_root, config=config, best_checkpoint_path=best_checkpoint_path,
+        )
+    else:
+        promotion_candidate, global_best_auroc_at_run = False, 0.0
+        LOGGER.info(
+            "Skipping global-best promotion check because selection_metric=%s is not comparable to legacy val_auroc.",
+            selection_metric,
+        )
 
     summary = {
         "project_root": str(project_root),
@@ -251,12 +337,21 @@ def run_training(
         "manifest_path": str(manifest_path),
         "train_rows": len(train_loader.dataset),
         "val_rows": len(val_loader.dataset),
+        "external_calibration_rows": len(cal_loader.dataset) if cal_loader is not None else 0,
         "device": str(device),
         "amp_enabled": amp_enabled,
+        "reproducibility": {
+            "seed": int(train_cfg["seed"]),
+            "determinism": determinism,
+            "environment": environment,
+        },
+        "selection_metric": selection_metric,
         "best_epoch": best_epoch,
         "best_val_auroc": best_val_auroc,
+        "best_selection_score": best_val_auroc,
         "best_checkpoint_path": str(best_checkpoint_path),
         "last_checkpoint_path": str(last_checkpoint_path),
+        "recent_checkpoint_paths": recent_checkpoint_paths,
         "promoted_to_global_best": False,
         "promotion_candidate": promotion_candidate,
         "global_best_auroc_at_run": global_best_auroc_at_run,
