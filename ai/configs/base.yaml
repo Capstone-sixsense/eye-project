@@ -1,5 +1,5 @@
 project:
-  version: v31_v8b_fusion_quickqual_v1
+  version: v31_v8b_fusion_quickqual_v2
   task: binary_dr_screening
   output_root: artifacts
 
@@ -67,7 +67,7 @@ infer:
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
   preprocess_mode: none
-  threshold: 0.06
+  threshold: 0.08563088401268978
   amp: false
   tta_mode: none
   use_meta_classifier: true

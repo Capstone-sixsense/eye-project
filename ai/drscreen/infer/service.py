@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
@@ -16,6 +17,7 @@ from PIL import Image
 from drscreen.data.transforms import (
     FundusPreprocess,
     build_eval_transform,
+    is_preprocessed_image_path,
     preprocess_kwargs_from_config,
 )
 from drscreen.infer.payload import InferencePayload
@@ -702,6 +704,19 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         resolved_image_path = Path(image_path).resolve()
+        if (
+            self.preprocessor is not None
+            and getattr(self.preprocessor, "_apply_ben_graham", False)
+            and is_preprocessed_image_path(resolved_image_path)
+        ):
+            warnings.warn(
+                f"Input {resolved_image_path} looks already offline-preprocessed "
+                "(geometry + Ben Graham), but the active config applies Ben Graham again "
+                "(infer.use_preprocessing: true). This double-applies Ben Graham and degrades "
+                "accuracy (meta AUROC ~0.93 -> ~0.80). For preprocessed inputs use a config "
+                "with infer.use_preprocessing: false (or data/infer apply_ben_graham: false).",
+                stacklevel=2,
+            )
         with Image.open(resolved_image_path) as image:
             prediction = self.predict_pil_image(
                 image,

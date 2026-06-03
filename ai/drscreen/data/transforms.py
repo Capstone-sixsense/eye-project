@@ -46,6 +46,7 @@ class FundusPreprocess:
         saliency_weight: float = 1.2,
         saliency_candidates: int = 5,
         safezoom_max_dim: int = 1024,
+        apply_ben_graham: bool = True,
     ) -> None:
         mode = str(preprocess_mode or "contentcrop").strip().lower()
         if mode not in {"contentcrop", "safezoom", "circular", "quickqual", "none"}:
@@ -64,6 +65,7 @@ class FundusPreprocess:
         self._saliency_weight = float(saliency_weight)
         self._saliency_candidates = max(3, int(saliency_candidates))
         self._safezoom_max_dim = max(0, int(safezoom_max_dim))
+        self._apply_ben_graham = bool(apply_ben_graham)
 
     def __call__(self, img: PILImage.Image) -> PILImage.Image:
         arr = np.asarray(img.convert("RGB")).copy()
@@ -74,7 +76,8 @@ class FundusPreprocess:
         if self._output_size is not None:
             result = result.resize((self._output_size, self._output_size), PILImage.BICUBIC)
             arr = np.asarray(result).copy()
-        arr = self._ben_graham(arr)
+        if self._apply_ben_graham:
+            arr = self._ben_graham(arr)
         result = PILImage.fromarray(arr)
         return result
 
@@ -920,6 +923,7 @@ _PREPROCESS_CONFIG_KEYS = (
     "saliency_weight",
     "saliency_candidates",
     "safezoom_max_dim",
+    "apply_ben_graham",
 )
 
 
@@ -932,6 +936,32 @@ def preprocess_kwargs_from_config(*configs: dict | None) -> dict:
             if key in config:
                 kwargs[key] = config[key]
     return kwargs
+
+
+_PREPROCESSED_PATH_PREFIXES = (
+    "processed",
+    "processed_quickqual",
+    "processed_quickqual_1024",
+    "processed_contentcrop",
+    "processed_safezoom",
+)
+
+
+def is_preprocessed_image_path(image_path: object) -> bool:
+    """True if the path lives under an offline-preprocessed image dir
+    (`<prefix>/images/...`), i.e. already geometry+Ben-Graham normalized.
+
+    Feeding such an image through a FundusPreprocess that applies Ben Graham
+    again double-applies it (meta AUROC ~0.93 -> ~0.80). Used by the serve-side
+    double-preprocess guard.
+    """
+    parts = str(image_path).replace("\\", "/").split("/")
+    return any(
+        parts[i] in _PREPROCESSED_PATH_PREFIXES
+        and i + 1 < len(parts)
+        and parts[i + 1] == "images"
+        for i in range(len(parts))
+    )
 
 
 def build_train_transform(

@@ -60,6 +60,8 @@ def extract_late_fusion_features(
     schema: Sequence[str],
     area_thresholds: Sequence[float] = FUSION_AREA_THRESHOLDS,
     topk_fracs: Sequence[float] = FUSION_TOPK_FRACS,
+    od_xy: tuple[float, float] | None = None,
+    od_diameter: float | None = None,
 ) -> list[float]:
     """Return the v31+v8b late-fusion feature vector in training order."""
 
@@ -109,6 +111,9 @@ def extract_late_fusion_features(
     missing = [name for name in schema if name not in features]
     if missing:
         features.update(extract_extended_lesion_feature_dict(seg_prob))
+        missing = [name for name in schema if name not in features]
+    if missing and od_xy is not None and od_diameter is not None:
+        features.update(extract_od_anchored_feature_dict(seg_prob, od_xy, od_diameter))
         missing = [name for name in schema if name not in features]
     if missing:
         raise ValueError(f"Late-fusion feature extractor missing schema keys: {missing}")
@@ -184,6 +189,67 @@ def extract_extended_lesion_feature_values(
     if missing:
         raise ValueError(f"Extended lesion feature extractor missing schema keys: {missing}")
     return [features[name] for name in schema]
+
+
+OD_PERIPAPILLARY_RADIUS_FACTOR = 2.0
+
+
+def od_anchored_feature_names() -> list[str]:
+    """OD-anchored (optic-disc-relative) lesion feature names (Problem 3, option A).
+
+    Anatomy-grounded spatial features replacing the fixed geometric center: how
+    lesion activity is distributed relative to the optic disc.
+    """
+    labels = [*LESION_CHANNELS, "union"]
+    t = f"{FUSION_EXTENDED_ACTIVE_THRESHOLD:g}"
+    names: list[str] = []
+    names.extend(f"{label}_peripapillary_ratio_ge_{t}" for label in labels)
+    names.extend(f"{label}_od_dist_mean_ge_{t}" for label in labels)
+    names.extend(f"{label}_od_dist_p90_ge_{t}" for label in labels)
+    return names
+
+
+def extract_od_anchored_feature_dict(
+    seg_prob: torch.Tensor,
+    od_xy: tuple[float, float],
+    od_diameter: float,
+) -> dict[str, float]:
+    """OD-anchored features in seg_prob pixel space.
+
+    od_xy = (x, y) optic-disc centre and od_diameter are expressed in the
+    seg_prob (H, W) coordinate system. Distances are normalized to OD-diameter
+    units so the features are resolution- and scale-invariant.
+    """
+    if seg_prob.ndim != 3 or seg_prob.shape[0] != len(LESION_CHANNELS):
+        raise ValueError(
+            f"Expected seg_prob [{len(LESION_CHANNELS)},H,W], got {tuple(seg_prob.shape)}"
+        )
+    seg = seg_prob.detach().float().cpu().numpy()
+    union = seg.max(axis=0, keepdims=True)
+    maps = np.concatenate([seg, union], axis=0)
+    labels = (*LESION_CHANNELS, "union")
+    h, w = int(maps.shape[1]), int(maps.shape[2])
+    od_x, od_y = float(od_xy[0]), float(od_xy[1])
+    diam = max(1e-6, float(od_diameter))
+    yy, xx = np.mgrid[0:h, 0:w]
+    dist = np.sqrt((xx - od_x) ** 2 + (yy - od_y) ** 2) / diam
+    thr = float(FUSION_EXTENDED_ACTIVE_THRESHOLD)
+    t = f"{thr:g}"
+    features: dict[str, float] = {}
+    for idx, label in enumerate(labels):
+        active = maps[idx] >= thr
+        if not active.any():
+            features[f"{label}_peripapillary_ratio_ge_{t}"] = 0.0
+            features[f"{label}_od_dist_mean_ge_{t}"] = 0.0
+            features[f"{label}_od_dist_p90_ge_{t}"] = 0.0
+            continue
+        d = dist[active]
+        features[f"{label}_peripapillary_ratio_ge_{t}"] = float(
+            (d <= OD_PERIPAPILLARY_RADIUS_FACTOR).mean()
+        )
+        features[f"{label}_od_dist_mean_ge_{t}"] = float(d.mean())
+        features[f"{label}_od_dist_p90_ge_{t}"] = float(np.percentile(d, 90))
+    return features
 
 
 def _connected_component_stats(

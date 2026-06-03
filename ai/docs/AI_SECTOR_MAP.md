@@ -25,12 +25,13 @@ Code/config:
 - `drscreen/settings.py`
 
 Current active evidence:
-- `configs/base.yaml`: `project.version: v31_v8b_fusion_quickqual_v1`
-- `artifacts/checkpoints/best.pt`: `architecture=v31_v8b_fusion`, `optimal_threshold=0.06`
+- `configs/base.yaml`: `project.version: v31_v8b_fusion_quickqual_v2`
+- `artifacts/checkpoints/best.pt`: `architecture=v31_v8b_fusion`, `optimal_threshold=0.08563088401268978`, `feature_schema[0]=v31_logit` (88 features; v31 collinearity refit)
 - source classifier: `artifacts/runs/99_misc/v31_no_se_gated_quickqual_v1/checkpoints/best.pt`
 - source segmenter: `artifacts/runs/99_misc/seg_evidence_v8b_quickqual_v1/checkpoints/best.pt`
-- source fusion metrics: `artifacts/runs/99_misc/v31_v8b_late_fusion_quickqual_v1/evaluations/v31_v8b_late_fusion_quickqual_v1_metrics.json`
-- runtime compact metrics: `artifacts/evaluations/external_test_v31_v8b_fusion_quickqual_v1_best_metrics.json`
+- source fusion metrics: `artifacts/runs/99_misc/v31_v8b_late_fusion_quickqual_v1_v31rep/evaluations/v31_v8b_late_fusion_quickqual_v1_v31rep_metrics.json` (key `classification_domains:late_fusion:v31_logit`)
+- runtime compact metrics: `artifacts/evaluations/external_test_v31_v8b_fusion_quickqual_v2_best_metrics.json`
+- rollback (previous active, two-feature v1): `artifacts/checkpoints/best_pre_collinearity_refit_20260603.pt.bak`
 
 Docs touched in this pass:
 - `docs/AI_HANDOFF.md`
