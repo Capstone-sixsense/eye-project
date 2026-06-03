@@ -37,8 +37,8 @@ The primary documentation has been consolidated into `AI_HANDOFF.md`.
    - Summarizes the v31 active decision, XAI/shortcut diagnostics, Phase 4-E/F results, and Sprint 5 carry-over items.
 
 9. **[SPRINT5_Devlog.md](./SPRINT5_Devlog.md)**
-   - Sprint 5 retrospective / running summary for the AI part.
-   - Tracks Phase 4-G, TJDR/DDR_SEG integration, MAPLES ROI correction, v8b evidence, v31+v8b late fusion diagnostics, `v31_v8b_fusion_v2` AI-side deployment packaging, safezoom/contentcrop preprocessing diagnostics, and the 2026-05-25 domain-overfit mitigation rerun.
+   - Sprint 5 retrospective / closing summary for the AI part (**CLOSED 2026-06-03**; active deployment `v31_v8b_fusion_quickqual_v2`).
+   - Tracks Phase 4-G, TJDR/DDR_SEG integration, MAPLES ROI correction, v8b evidence, v31+v8b late fusion diagnostics, QuickQual-line deployment packaging, safezoom/contentcrop preprocessing diagnostics, the 2026-05-25 domain-overfit mitigation rerun, and (§6 close-out) the v31 collinearity refit → v2 promotion, the Ben Graham serve-path verification + double-BG footgun guard, and the anatomy-aware evidence research with its meta-level counterfactual probe (evidence-based stop).
 
 ---
 

@@ -4240,3 +4240,14 @@ v25는 현재 internal `test`와 XAI artifact만 있고 DDR `external_test` arti
 - LAT-lite: multi lesion-filter head + diversity loss (CVPR 2021 근거)
 
 ---
+
+## Sprint 5 마감 (2026-06-03) — 상세는 SPRINT5_Devlog.md §6
+
+Sprint 5 최종 배치(2026-06-01~06-03)로 active 배포를 `v31_v8b_fusion_quickqual_v2`(v31 collinearity refit)로 교체하고 Sprint 5를 종료했다.
+
+- **Problem 1 (active 변경)**: meta-classifier의 near-collinear `v31_probability`+`v31_logit`를 `v31_logit` 단일 표현으로 축소(89→88 feature). calibration-matched threshold **0.08563**. Holdout AUROC **0.9360** / sens **0.8316** / spec **0.9070**, v1(0.9341/0.8234/0.9086) 대비 약하게 지배. `best.pt`/`base.yaml`/compact JSON 교체, 롤백 `best_pre_collinearity_refit_20260603.pt.bak`.
+- **Problem 2**: 전처리 double-Ben-Graham footgun 가드(`FundusPreprocess.apply_ben_graham` 플래그 + `is_preprocessed_image_path` + service 경고, 회귀 15개 통과). 백엔드 serve는 geometry-only→AI BG×1로 정합 확인(`backend_preprocess_contract.json`).
+- **Problem 3 (미승격, evidence-based stop)**: OD/fovea 탐지기 + OD-anchored 특징 코어 구현. 그러나 **meta-level counterfactual 프로브가 활성 base/fusion이 이미 lesion-grounded(matched_nonlesion/lesion 0.041/0.046, shortcut_signal false)**임을 보여, 인용돼 온 D7 1.48x(circular v31 proxy)와 달리 고칠 grounding 결함이 없음을 확인 → anatomy refit/배선 중단. meta-probe는 grounding 모니터링 도구로 보존.
+- **프론트 지표**: `/deploy-metric`이 활성 버전 compact JSON에서 자동 소싱(모델 버전 라벨 없음, metric만 표시). v2 지표는 백엔드 재시작 시 반영.
+
+**Sprint 5 CLOSED (2026-06-03). Active: v31_v8b_fusion_quickqual_v2.**

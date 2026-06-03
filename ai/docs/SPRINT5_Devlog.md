@@ -158,4 +158,47 @@
 - `ai/.omc/research/active_hflip_promotion_smoke_2026-05-27.json`
 
 ---
-**[SPRINT 5 진행 중 정리]**
+
+## 6. Sprint 5 마감 (2026-06-03)
+
+Sprint 5의 마지막 실험 배치(2026-06-01~06-03)를 기록하고 Sprint 5를 종료한다.
+
+### 6.1 Ben Graham serve-path 정합성 검증 (2026-06-02)
+- 진단 중 "serve가 Ben Graham을 이중 적용한다"는 가설은 **테스트 오류로 철회**됐다. 저장 `processed_quickqual` 이미지에 이미 BG가 포함(`preprocess_images.py`가 항상 BG 적용)돼 있어, 이미 처리된 이미지를 serve preprocessor에 다시 넣어 double-BG가 됐던 것이다.
+- 실제 serve(백엔드 geometry-only → AI BG×1)는 정합적이다. geometry-only 입력 재현에서 v31 AUROC **0.9106** / meta **0.9346**로 문서값을 재현했다. `backend/models/quickqual_wrapper.py:preprocess_fundus_image`는 bbox crop + square pad + 1024 resize만 하고 Ben Graham을 적용하지 않음을 코드로 확인했다. 계약은 `.omc/research/backend_preprocess_contract.json`.
+- 단 **double-BG footgun**(이미 전처리된 이미지에 serve config 적용 시 BG 재적용)은 실재 → Problem 2 가드로 대응했다.
+
+### 6.2 Problem 1 — v31 collinearity 제거 + v2 승격 (active 변경)
+- meta-classifier가 `v31_probability`+`v31_logit`(sigmoid 종속, near-collinear)을 둘 다 사용해 계수가 분할/불안정했다(표준화 |coef|의 49.8%가 2개 feature). 3-way ablation(prob/logit/both)에서 **`v31_logit` 단일 표현 채택**: 89→88 feature, holdout AUROC **0.9360**(both 0.9341 상회).
+- 배포 threshold는 calibration split에서 active 민감도(0.8234)를 타깃해 **0.08563** 선택(holdout leakage 방지). Holdout: AUROC **0.9360** / sens **0.8316** / spec **0.9070** / acc **0.8693** / F1 **0.8641** — v1 대비 sens +0.008 포함 약하게 지배(spec −0.0016).
+- **`v31_v8b_fusion_quickqual_v2`로 active 승격**. `best.pt` 교체, `base.yaml` version/threshold, `external_test_v31_v8b_fusion_quickqual_v2_best_metrics.json` 생성. 롤백 `artifacts/checkpoints/best_pre_collinearity_refit_20260603.pt.bak`. backend/frontend 코드 무변경(지표는 `/deploy-metric`으로 자동 전파, 백엔드 재시작 시 반영).
+
+### 6.3 Problem 2 — 전처리 footgun 가드
+- `FundusPreprocess`에 `apply_ben_graham` 플래그(기본 True, 동작 불변) + `is_preprocessed_image_path` 헬퍼 추가, `service.predict_image_path`가 이미 전처리된(`processed*`) 입력에 BG를 재적용할 상황에서 경고한다. 회귀 테스트 추가(전체 15개 통과).
+
+### 6.4 Problem 3 — anatomy-aware evidence (research, 미승격, evidence-based stop)
+- Phase A: OD/fovea 탐지기(`drscreen/data/anatomy.py`) 구현. raw IDRiD OD median **0.14 OD경**(신뢰), fovea는 실패 꼬리 있어 confidence fallback 필요.
+- Phase B: OD-anchored late-fusion 특징 코어 구현·테스트(`late_fusion_features.py`, 미배포).
+- Phase C 게이트: (1) BG 이미지에서 OD median **0.21**, 85% 사용 가능(15% fallback). (2) **meta-level counterfactual 프로브** 신규 구축 — fusion meta-probability의 병변/비병변 스왑 민감도 측정.
+- **핵심 음성 결과**: 활성 quickqual base/fusion은 matched 프로브에서 **이미 강하게 lesion-grounded**(matched_nonlesion/lesion: base **0.041**, meta **0.046**, shortcut_signal false). 인용돼 온 D7 1.48x는 **circular `v31_no_se_gated` proxy**였고 활성 quickqual에는 해당하지 않음이 확인됐다. 고칠 grounding 결함이 없어 **anatomy refit/serve 배선은 정당성이 없어 중단**. meta-probe는 향후 grounding 모니터링 도구로 보존한다.
+
+### 6.5 프론트엔드 지표 계약
+- `/deploy-metric`(`backend/main.py`)은 startup에 `_session.eval_metrics`(활성 버전 compact JSON) + decision_threshold만 캐싱해 내려보낸다. 프론트 `ReportMetrics`에는 **모델 버전 라벨이 없고** metric만 표시한다. v2 지표는 백엔드 재시작 시 자동 반영된다.
+
+### Sprint 5 종료 상태
+- **Active deployment: `v31_v8b_fusion_quickqual_v2`** (logit-only refit, threshold 0.08563, holdout AUROC 0.9360 / sens 0.8316 / spec 0.9070).
+- Evidence module: `seg_evidence_v8b_quickqual_v1` (불변).
+- 이월 항목: 없음. anatomy 트랙은 evidence-based로 종결.
+
+### 6.6 추가 근거 파일
+- `ai/.omc/research/backend_preprocess_contract.json`
+- `ai/.omc/research/quickqual_v2_logit_matched_sensitivity.json`
+- `ai/.omc/research/quickqual_v2_logit_deploy_threshold.json`
+- `ai/artifacts/runs/99_misc/v31_v8b_late_fusion_quickqual_v1_v31rep/evaluations/v31_v8b_late_fusion_quickqual_v1_v31rep_metrics.json`
+- `ai/artifacts/evaluations/external_test_v31_v8b_fusion_quickqual_v2_best_metrics.json`
+- `ai/.omc/research/anatomy_od_fovea_validation.json`
+- `ai/.omc/research/anatomy_od_on_bg_validation.json`
+- `ai/.omc/research/meta_counterfactual_probe_v2_baseline.json`
+
+---
+**[SPRINT 5 CLOSED — 2026-06-03. Active deployment: v31_v8b_fusion_quickqual_v2.]**
