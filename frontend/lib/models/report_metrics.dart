@@ -15,10 +15,7 @@ class ReportMetrics {
     this.xaiSegMdice,
     this.xaiAucIou,
     this.xaiEvalN,
-    this.isFromServer = false,
   });
-
-  final bool isFromServer;
 
   final double? accuracy;
   final double? precision;
@@ -172,9 +169,7 @@ class ReportMetrics {
       return null;
     }
     final parsed = _fromMap(m);
-    return parsed.hasDisplayableContent
-        ? parsed.copyWith(isFromServer: true)
-        : null;
+    return parsed.hasDisplayableContent ? parsed : null;
   }
 
   static ReportMetrics _fromMap(Map<String, dynamic> m) {
@@ -193,29 +188,6 @@ class ReportMetrics {
       xaiSegMdice: _readRatio(m['xai_seg_mdice']),
       xaiAucIou: _readRatio(m['xai_auc_iou']),
       xaiEvalN: _readInt(m['xai_eval_n']),
-    );
-  }
-
-  ReportMetrics copyWith({
-    double? decisionThreshold,
-    bool? isFromServer,
-  }) {
-    return ReportMetrics(
-      accuracy: accuracy,
-      precision: precision,
-      sensitivity: sensitivity,
-      specificity: specificity,
-      f1: f1,
-      auroc: auroc,
-      optimalThreshold: optimalThreshold,
-      decisionThreshold: decisionThreshold ?? this.decisionThreshold,
-      xaiEvalSplit: xaiEvalSplit,
-      xaiEvalTargetBlock: xaiEvalTargetBlock,
-      xaiSegUnionIou: xaiSegUnionIou,
-      xaiSegMdice: xaiSegMdice,
-      xaiAucIou: xaiAucIou,
-      xaiEvalN: xaiEvalN,
-      isFromServer: isFromServer ?? this.isFromServer,
     );
   }
 

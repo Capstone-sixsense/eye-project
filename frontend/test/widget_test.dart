@@ -10,6 +10,6 @@ void main() {
         home: UploadScreen(),
       ),
     );
-    expect(find.text('Upload Retinal Image'), findsOneWidget);
+    expect(find.text('망막 이미지 분석'), findsOneWidget);
   });
 }

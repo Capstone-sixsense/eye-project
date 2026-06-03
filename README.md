@@ -1,107 +1,128 @@
 # eye-project
 
-안저(眼底) 이미지 기반 당뇨병성 망막병증 보조 판별 AI 시스템. 이미지를 업로드하면 AI가 이상 여부를 분류하고, 병변 후보 영역 overlay와 의료 리포트를 함께 제공한다. 본 시스템의 결과는 의료 전문가의 판단을 보조하는 용도로만 사용되어야 한다.
+**최종 갱신: 2026-06-03**
+
+안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
+이미지를 업로드하면 AI가 이상 여부를 추정하고, 병변 evidence overlay와 리포트, 품질 정보를 함께 제공합니다.
+
+> **의료 보조 용도** - 최종 판단은 반드시 의료 전문가가 합니다.
+> 설계·운영은 **정확성·재현성·설정 일관성**을 속도보다 우선합니다.
 
 ---
 
-## 브랜치 구조
+## 시스템 한눈에
 
-```
-main
-├── ai        # AI 팀 개발 브랜치
-├── backend   # 백엔드 팀 개발 브랜치
-└── frontend  # 프론트엔드 팀 개발 브랜치
-```
-
-각 컴포넌트 브랜치에서 작업한 후 `main`에 머지하는 방식으로 운영된다.
-
----
-
-## 프로젝트 개요
-
-| 항목 | 내용 |
-|---|---|
-| 목적 | 안저 이미지 기반 당뇨병성 망막병증 자동 스크리닝 |
-| 출력 | 이상 여부 분류, 이상 확률, 병변 후보 영역 overlay, 의료 리포트 |
-| 배포 | Docker Compose 기반 로컬 실행형 클라이언트 |
-| 설계 원칙 | 의료 시스템 특성상 속도보다 신뢰성과 정확성을 우선한다 |
-
----
-
-## 프로젝트 목표
-
-- 공개 안저 이미지 데이터셋을 활용하여 당뇨병성 망막병증 보조 판별 AI 모델을 학습한다.
-- 사용자가 안저 이미지를 업로드하면 결과를 확인할 수 있는 클라이언트 기반 시스템을 구현한다.
-- 예측 결과와 함께 신뢰도 점수 및 시각적 설명 정보를 제공하여 결과 해석 가능성을 높인다.
-- 캡스톤디자인 과목 범위에 적합한 MVP를 완성하고, 실제 시연 가능한 형태로 구현한다.
-- 향후 안저 촬영 장비 또는 스마트폰 기반 보조 촬영 장치와 연계 가능한 구조로 확장 가능성을 고려한다.
-
----
-
-## 시스템 구조
-
-```
+```text
 [Flutter Web UI]  :8080
-       │  HTTP
-       ▼
+        │  HTTP
+        ▼
 [FastAPI Backend] :8000
-       │
-       ▼
-[drscreen AI 패키지]
-  - 이미지 전처리
-  - v31 classifier + v8b lesion segmenter 추론
-  - numeric meta-classifier score fusion
-  - 병변 후보 영역 overlay 생성
-  - 의료 리포트 생성
+        │  import (PYTHONPATH=/ai)
+        ▼
+[drscreen · PyTorch]  configs · checkpoints · QuickQual
 ```
 
----
-
-## 기술 스택
-
-| 컴포넌트 | 기술 |
-|---|---|
-| AI | PyTorch, EfficientNet-B5, ResNet50 U-Net lesion segmenter, numeric LogReg fusion, albumentations |
-| Backend | FastAPI, Uvicorn, OpenCV, cleanvision |
-| Frontend | Flutter (Dart) |
-| 인프라 | Docker Compose |
+| 컴포넌트 | 역할 | 기술 |
+|----------|------|------|
+| **Frontend** | 업로드·진행·결과·이력·PDF | Flutter (Web / Docker nginx) |
+| **Backend** | API, 이력·암호화 저장, QuickQual, 추론 호출 | FastAPI, Uvicorn |
+| **AI** | 학습·추론·XAI·설정·체크포인트 | PyTorch, EfficientNet-B5, lesion evidence segmenter, numeric fusion, `drscreen` 패키지 |
 
 ---
 
-## 시작하기
+## 브랜치 · 상세 문서
+
+팀별 개발 브랜치에서 작업 후 `main`에 머지합니다. **자세한 내용은 각 브랜치의 README·문서를 보세요.**
+
+| 브랜치 | 보는 것 | 문서로 이동 |
+|--------|---------|-------------|
+| [`frontend`](https://github.com/Capstone-sixsense/eye-project/tree/frontend) | Flutter 클라이언트, API 연동, 진행 UI | [`frontend/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/frontend/frontend/README.md) |
+| [`backend`](https://github.com/Capstone-sixsense/eye-project/tree/backend) | REST API, `storage/`·`results/`, Docker | `backend/` 디렉터리 · [`main.py`](https://github.com/Capstone-sixsense/eye-project/blob/backend/backend/main.py) |
+| [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
+
+로컬에서 브랜치 전환:
 
 ```bash
-# 1. 저장소 클론
+git fetch origin
+git checkout frontend   # 또는 backend, ai
+```
+
+`main`에는 통합 실행용 `docker-compose.yml`·`setup.sh`가 있습니다.
+
+---
+
+## 빠른 시작 (통합 실행)
+
+```bash
 git clone https://github.com/Capstone-sixsense/eye-project.git
 cd eye-project
-
-# 2. 디렉토리 및 의존성 초기화
 ./setup.sh
-
-# 3. 서비스 실행
+# 또는
 docker compose up -d
 ```
 
-실행 후 브라우저에서 `http://localhost:8080` 접속.
+| 서비스 | URL |
+|--------|-----|
+| UI | http://localhost:8080 |
+| API | http://localhost:8000 |
+| 헬스 | http://localhost:8000/health |
+
+- AI 체크포인트는 Git LFS일 수 있습니다. 수백 바이트 포인터만 보이면 `git lfs install && git lfs pull`.
+- 추론 기본 설정: `ai/configs/base.yaml` (Compose: `FUNDUS_CONFIG_PATH=/ai/configs/base.yaml`).
 
 ---
 
-## 주요 API 엔드포인트
+## 주요 API (요약)
 
 | 메서드 | 경로 | 설명 |
-|---|---|---|
-| `GET` | `/health` | 모델 로드 상태 확인 |
-| `POST` | `/predict` | 빠른 추론 (분류 결과만 반환) |
-| `POST` | `/analyze` | 전체 분석 (품질 검사 + 병변 evidence overlay + 리포트) |
-| `GET` | `/storage/<path>` | 업로드 이미지 조회 |
-| `GET` | `/results/<path>` | 생성된 리포트 조회 |
+|--------|------|------|
+| `GET` | `/health` | 모델·QuickQual 준비 상태 |
+| `POST` | `/analyze` | 분석 요청 (비동기 job, 202 + `job_id`) |
+| `GET` | `/analyze/jobs/{id}` | 분석 진행·결과 |
+| `GET` | `/history` | 분석 이력 |
+| `GET` | `/deploy-metric` | 배포용 eval 지표 |
+| `GET` | `/image/raw/{id}`, `/image/report/{id}` | 복호화 이미지 |
+
+상세 스키마·오류 코드는 **backend** 브랜치 코드·프론트 `eye_api_client`와 맞춰 확인하세요.
 
 ---
+
+## 저장소 레이아웃 (`main` 기준)
+
+```text
+eye-project/
+├── ai/                 # drscreen 패키지, configs, artifacts
+├── backend/            # FastAPI, QuickQual 래퍼
+├── frontend/           # Flutter
+├── docker-compose.yml
+├── setup.sh
+└── README.md           # 이 파일
+```
+
+```text
+/upload (UploadScreen)
+  ├─ 이미지 선택·미리보기·10MB/확장자 검증
+  ├─ 업로드 및 분석 → 진행 다이얼로그
+  ├─ 서버 로그 (`GET /logs`, `server_logs_dialog.dart`)
+  └─ 성능 지표 (`GET /deploy-metric`)
+
+/result (ResultScreen)
+  ├─ 원본·설명(heatmap) 이미지, 판정·확률·품질
+  ├─ PDF 생성·공유 (printing)
+  ├─ 다시 업로드 → /upload (스택 제거)
+  └─ 이력 보기 → /history
+
+/history (HistoryScreen)
+  ├─ GET /history 목록·무한 스크롤
+  ├─ 대시보드 / 목록 뷰, 판정·기간 필터
+  ├─ 선택 삭제 (DELETE)
+  └─ 항목 탭 → /result (저장 메타 + 네트워크 이미지)
+```
 
 ## 데이터셋 출처
 
 학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.
-현재 배포 기준 `v31_v8b_fusion_v2`의 병변 feature는 `seg_evidence_v8b_ddrseg_tjdr_maplesfix` 모델에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.
+현재 배포 기준 `v31_v8b_fusion_quickqual_v2`의 병변 evidence feature는 `seg_evidence_v8b_quickqual_v1` 계열 segmenter에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.
 데이터 원본은 저장소에 포함하지 않으며, 다운로드와 재사용은 각 원 배포처의 라이선스 및 이용 조건을 따른다.
 
 | 데이터셋 | 이 프로젝트에서의 사용 | 출처 / 인용 | 라이선스 / 이용 조건 |
@@ -124,14 +145,21 @@ TJDR 인용:
 }
 ```
 
+(동일 표기: [`backend` 브랜치 README](https://github.com/Capstone-sixsense/eye-project/blob/backend/README.md))
+
 ---
 
-## 환경구축
+## 기여·규칙
 
-1. git clone을 통해서 setup.sh 실행
-2. docker hub를 이용 → 폴더 생성 후 docker-compose.yml 파일을 위치시킨 후 `docker compose up -d` 명령어 입력
+- 컴포넌트별 작업: 해당 브랜치에서 PR → `main` 머지.
+- `ai/configs/base.yaml` 변경 시 Docker 추론·백엔드 응답 필드와 **함께** 검증.
+- Cursor/에이전트 규칙: [`.cursor/rules/eye-project.mdc`](.cursor/rules/eye-project.mdc)
+- `test/widget_test.dart`는 업로드 화면 빌드 스모크 테스트입니다. AppBar 문구가 `망막 이미지 분석`으로 바뀐 경우 테스트 문자열을 맞춰 주세요.
 
+---
 
-##테스트시 result 폴더 비우기
-rm -rf backend/storage/raw_* backend/results/2026-*
+## 더 보기
 
+- **프론트**: `git checkout frontend` → [`frontend/README.md`](frontend/README.md)
+- **백엔드**: `git checkout backend` → `backend/main.py`, `docker-compose.yml`
+- **AI**: `git checkout ai` → `ai/drscreen/`, `ai/configs/`, `ai/docs/`

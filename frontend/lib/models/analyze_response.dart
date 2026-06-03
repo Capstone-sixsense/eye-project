@@ -80,16 +80,6 @@ class AnalyzeResponse {
   /// 이번 추론 판정 임계값 (`decision_threshold`).
   final double? decisionThreshold;
 
-  /// 결과 화면·PDF용 — 서버 `metrics` / `eval_metrics` (AI eval_metrics 그대로).
-  ReportMetrics? get modelPerformanceMetrics {
-    final m = evalMetrics;
-    if (m == null) return null;
-    if (decisionThreshold != null && m.decisionThreshold == null) {
-      return m.copyWith(decisionThreshold: decisionThreshold);
-    }
-    return m;
-  }
-
   /// 네트워크 이미지용 상대 경로. XAI 실패 시에는 null (실패 UI).
   String? get resolvedExplanationPath {
     if (shouldShowExplanationFailure) return null;
@@ -165,8 +155,7 @@ class AnalyzeResponse {
       message: null,
       details: null,
       label: json['label'] as String?,
-      abnormalProbability:
-          (json['abnormal_probability'] as num?)?.toDouble(),
+      abnormalProbability: abnormalProbability,
       reportUrl: (json['report_url'] ?? json['reportUrl']) as String?,
       originalUrl: (json['raw_url'] ?? json['original_url'] ?? json['rawUrl']) as String?,
       preprocessed: 1,

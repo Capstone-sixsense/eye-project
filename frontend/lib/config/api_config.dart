@@ -7,10 +7,15 @@ abstract final class ApiConfig {
     defaultValue: 'http://127.0.0.1:8000',
   );
 
+  /// API 요청용 베이스 URI (`/` 로 끝남).
+  static Uri get baseUri {
+    final base = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
+    return Uri.parse(base);
+  }
+
   /// 서버가 주는 경로(`results/...` 등)를 이미지 요청용 절대 URL로 변환.
   static String resolveAssetUrl(String serverPath) {
     final p = serverPath.replaceAll(r'\', '/').replaceFirst(RegExp(r'^/+'), '');
-    final base = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
-    return Uri.parse(base).resolve(p).toString();
+    return baseUri.resolve(p).toString();
   }
 }
