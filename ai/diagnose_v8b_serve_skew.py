@@ -98,7 +98,10 @@ def _eval_path(model, transform, mask_preprocessor, items, *, serve: bool) -> di
     device = next(model.parameters()).device
     rows = []
     for image_path, masks in items:
-        raw = Image.open(image_path).convert("RGB")
+        # Context-manage the file handle; convert() returns an independent copy,
+        # so `raw` stays valid after the handle closes (avoids fd exhaustion).
+        with Image.open(image_path) as _im:
+            raw = _im.convert("RGB")
         if serve:
             image = quickqual_image(raw)
             masks_use = {k: quickqual_mask(v, raw) for k, v in masks.items() if v is not None}
