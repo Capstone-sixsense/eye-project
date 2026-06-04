@@ -99,7 +99,10 @@ def run_audit(
         items = _provider_items(project_root, provider, split)
         per_image: list[dict] = []
         for image_path, masks in items:
-            image = Image.open(image_path).convert("RGB")
+            # Context-manage the file handle; convert() returns an independent copy,
+            # so `image` stays valid after the handle closes (avoids fd exhaustion).
+            with Image.open(image_path) as _im:
+                image = _im.convert("RGB")
             tensor = transform(image).unsqueeze(0).to(device)
             with torch.no_grad():
                 logits = model(tensor)

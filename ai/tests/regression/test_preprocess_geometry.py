@@ -80,7 +80,7 @@ def test_circular_mode_uses_circular_ben_graham_mask() -> None:
 
 
 def test_active_deployment_config_requests_quickqual_serve_preprocessing() -> None:
-    # Active deployment is v31_v8b_fusion_quickqual_v1: offline training uses quickqual
+    # Active deployment is v31_v8b_fusion_quickqual_v2: offline training uses quickqual
     # geometry; at serve time backend QuickQual already applied the square crop, so AI
     # inference skips geometry (infer.preprocess_mode: none). v31_v8b_fusion_v2 remains
     # the circular rollback baseline.

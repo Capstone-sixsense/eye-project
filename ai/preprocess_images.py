@@ -1,11 +1,16 @@
 """Offline preprocessing script.
 
-(한글 요약) manifest의 모든 이미지에 crop+pad+resize+Ben Graham 전처리를 미리 적용해
-processed*/images/에 저장한다. 학습/평가는 이 전처리본을 쓰므로 런타임 전처리를 끈다
-(use_preprocessing=false). 품질 필터링은 하지 않는다(모든 이미지 포함).
+(한글 요약) manifest의 모든 이미지에 config 기반 전처리를 미리 적용해
+processed*/images/에 저장한다. crop/pad geometry는 data.preprocess_mode
+(contentcrop/safezoom/quickqual/circular/none)를 따르고, Ben Graham 광학 정규화는
+data.apply_ben_graham가 켜졌을 때만 수행한다. 학습/평가는 이 전처리본을 쓰므로 런타임
+전처리를 끈다(use_preprocessing=false). 품질 필터링은 하지 않는다(모든 이미지 포함).
 
-Applies content-aware border crop + Ben Graham normalization + resize (data.preprocess_size)
-to every image in the manifest. No quality filtering -- all images are included.
+Builds FundusPreprocess from preprocess_kwargs_from_config(...), so both the crop/pad
+geometry (data.preprocess_mode) and whether Ben Graham normalization runs
+(data.apply_ben_graham) are config-dependent. The resolved pipeline is applied to every
+image in the manifest and resized to data.preprocess_size. No quality filtering -- all
+images are included.
 
 Run:
     python preprocess_images.py [--config configs/base.yaml] [--workers N]
@@ -134,8 +139,12 @@ def main() -> None:
         ) from exc
 
     preprocess_mode = str(preprocess_options.get("preprocess_mode", "contentcrop"))
+    # Ben Graham is config-gated (FundusPreprocess default is on); reflect the actual
+    # flag in the log so preprocess/serve-path guard validation is not misleading.
+    apply_ben_graham = bool(preprocess_options.get("apply_ben_graham", True))
+    ben_graham_note = " + Ben Graham" if apply_ben_graham else " (no Ben Graham)"
     print(
-        f"Preprocessor: {preprocess_mode} + Ben Graham, "
+        f"Preprocessor: {preprocess_mode}{ben_graham_note}, "
         f"output_size={preprocess_size}, align={use_align}, options={preprocess_options}"
     )
 
