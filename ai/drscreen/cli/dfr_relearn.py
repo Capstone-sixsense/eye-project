@@ -4,6 +4,10 @@ This is a diagnostic track. It freezes the active v31 backbone/gated-pooling
 path, extracts classifier pre-logit features from a group-balanced reweighting
 set, fits a linear classifier, and writes a new checkpoint with only the final
 classifier weights changed.
+
+(한글 요약) DFR(Deep Feature Reweighting) 진단: backbone은 동결한 채 마지막 분류층만
+그룹 균형 집합에서 다시 학습해, shortcut 의존을 줄일 수 있는지 본다. backbone 특징이
+그대로라 DDR 외부 성능이 무너져(연구용) 배포 후보가 아니다.
 """
 from __future__ import annotations
 
@@ -24,7 +28,11 @@ from sklearn.preprocessing import StandardScaler
 
 from drscreen.infer.service import InferenceSession
 from drscreen.models.build import get_classifier_module
-from drscreen.settings import get_run_artifact_dir, get_run_checkpoint_dir, resolve_project_path
+from drscreen.settings import (
+    get_run_artifact_dir,
+    get_run_checkpoint_dir,
+    resolve_project_path,
+)
 from drscreen.xai.iou import load_lesion_masks, load_maples_masks, union_mask
 
 

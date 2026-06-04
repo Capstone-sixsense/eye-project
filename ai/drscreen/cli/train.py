@@ -1,3 +1,9 @@
+"""분류기 학습 CLI 진입점.
+
+config(+ 같은 폴더 base.yaml)를 병합해 학습을 실행한다. --dry-run은 config/경로만 검증한다.
+학습은 Python 3.14를 강제한다(배포/런타임 인터프리터로 실수 실행하는 것을 막기 위함).
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -5,11 +11,11 @@ import sys
 from pathlib import Path
 from pprint import pprint
 
-
 _REQUIRED_TRAINING_PYTHON = (3, 14)
 
 
 def _enforce_training_python() -> None:
+    # 학습 전용 Python 버전 가드. 다른 버전이면 명확한 안내와 함께 중단한다.
     if sys.version_info[:2] == _REQUIRED_TRAINING_PYTHON:
         return
     required = ".".join(str(part) for part in _REQUIRED_TRAINING_PYTHON)

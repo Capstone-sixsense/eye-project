@@ -1,3 +1,11 @@
+"""아키텍처별 입력 정규화 + 학습/추론 하이퍼파라미터 프로필 레지스트리.
+
+각 모델이 기대하는 입력 크기/보간법/정규화 통계(mean/std)와 권장 학습 설정을
+한곳에 모은다. service.py는 추론 transform을 만들 때 이 프로필의 mean/std/
+interpolation을 사용한다. rationale 필드는 그 설정을 고른 이유를 영어로 남긴
+메모이며, 동작에는 영향을 주지 않는다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
@@ -49,6 +57,8 @@ def resolve_interpolation_mode(name: str) -> InterpolationMode:
 
 
 def get_model_profile(architecture: str) -> ModelProfile:
+    # 융합 모델은 입력 정규화를 v31 분류기(EfficientNet-B5) 프로필과 동일하게 쓰므로
+    # 그 프로필을 복제하고 architecture/rationale만 교체한다.
     if architecture == "v31_v8b_fusion":
         return replace(
             get_model_profile("efficientnet_b5"),

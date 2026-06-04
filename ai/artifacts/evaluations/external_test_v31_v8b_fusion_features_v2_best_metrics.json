@@ -1,0 +1,21 @@
+{
+  "split": "external_test",
+  "source_split": "external_test",
+  "evaluation_split": "external_holdout",
+  "threshold_policy": "DDR external_test stratified 20% calibration / 80% holdout, sensitivity guard >= v31",
+  "rows": 10018,
+  "metrics": {
+    "auroc": 0.9413425194394673
+  },
+  "optimal_threshold": 0.4,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.8655420243561589,
+    "sensitivity": 0.8077922077922078,
+    "specificity": 0.9231996808298424,
+    "precision": 0.9130532971996387,
+    "f1": 0.8572034347503446,
+    "threshold": 0.4
+  },
+  "source_metrics_json": "artifacts\\runs\\10_grounded_classifier\\v31_v8b_late_fusion_features_v2\\evaluations\\v31_v8b_late_fusion_features_v2_metrics.json",
+  "source_result_key": "all_train:late_fusion"
+}

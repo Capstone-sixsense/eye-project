@@ -1,3 +1,20 @@
+"""모델 팩토리: 아키텍처 이름을 받아 해당 nn.Module을 생성하는 디스패처.
+
+build_model()이 진입점이며, model_name 문자열로 분기해 각 변형을 만든다
+(efficientnet_b5 분류기, v31_v8b_fusion 융합, lesion_seg_evidence 분할기,
+sparse_bagnet/concept_bottleneck 연구 모델, resnet50/convnext_tiny 베이스라인).
+
+이 파일은 EfficientNet의 attention 위치(SE 자리)를 교체하는 어댑터도 정의한다:
+- _EcaSpatialAttn: ECA 채널 + CBAM 공간 attention
+- EcaModule: ECA 채널 attention(legacy 기본값)
+- IdentitySE: attention 완전 제거(true no-attention ablation)
+attention_mode 문자열 -> SE 레이어 클래스 매핑은 resolve_attention_mode/
+_attention_se_layer가 담당한다.
+
+보조 함수: get_classifier_module(분류 헤드 추출), split_model_parameters(
+backbone vs head 파라미터 분리 -> 서로 다른 학습률 적용용).
+"""
+
 from __future__ import annotations
 
 import timm
@@ -261,6 +278,8 @@ def build_model(
         )
 
     if model_name == "v31_v8b_fusion":
+        # 배포 모델: v31 분류기(멀티태스크 aux-seg)와 v8b 분할기를 각각 만들어 래핑.
+        # 메타 분류기 파라미터/스키마는 여기서 비우고, 체크포인트 로드 시 주입된다.
         from drscreen.models.fusion import V31V8bFusion
         from drscreen.models.seg_evidence import LesionSegEvidence
 
@@ -392,8 +411,11 @@ def split_model_parameters(
     model_name: str,
     model: nn.Module,
 ) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
-    from drscreen.models.mil_attention import MILAttentionModel
+    # 파라미터를 head(분류/분할 헤드)와 backbone으로 분리한다.
+    # id() 집합으로 head 파라미터를 표시해 두고, 나머지를 backbone으로 분류한다
+    # -> 학습 시 head와 backbone에 서로 다른 학습률을 줄 수 있다.
     from drscreen.models.concept_bottleneck import ConceptBottleneckModel
+    from drscreen.models.mil_attention import MILAttentionModel
     from drscreen.models.sparse_bagnet import SparseBagNet
 
     if isinstance(model, MILAttentionModel):

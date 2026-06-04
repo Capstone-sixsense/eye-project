@@ -1,3 +1,13 @@
+"""특정 split(test/external_test 등)에서 체크포인트를 평가하고 메트릭 JSON을 저장한다.
+
+흐름: 체크포인트 로드 -> effective config 구성 -> 모델/로더 준비 -> 원시 logit 수집 ->
+최적 임계값(Youden's J) 산출 -> '고정 임계값'과 '최적 임계값' 두 기준으로 메트릭 계산 ->
+도메인별 분해(domain_breakdown) -> artifacts/runs/<group>/<version>/evaluations/에 JSON 저장.
+
+이 JSON의 optimal_threshold/metrics가 추론 서비스(service.py)의 배포 임계값과
+eval_metrics 페이로드 소스가 된다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -15,14 +25,17 @@ from drscreen.settings import (
     resolve_project_path,
 )
 from drscreen.train.data_loader_factory import build_eval_dataset
+from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch
+from drscreen.train.metrics import (
+    compute_binary_classification_metrics,
+    find_optimal_threshold,
+)
 from drscreen.train.model_setup import (
     build_criterion,
     build_model_for_eval,
     resolve_device,
     validate_training_scope,
 )
-from drscreen.train.engine import collect_logits_and_targets, evaluate_one_epoch
-from drscreen.train.metrics import compute_binary_classification_metrics, find_optimal_threshold
 from drscreen.utils.checkpoint import load_state_from_checkpoint
 
 
@@ -65,6 +78,7 @@ def run_split_evaluation(
     criterion = build_criterion(effective_config).to(device)
     amp_enabled = bool(effective_config["train"].get("amp", False)) and device.type == "cuda"
 
+    # logit을 한 번만 수집해 최적 임계값을 구하고, 고정/최적 두 임계값에서 메트릭을 낸다.
     logits, targets = collect_logits_and_targets(model, loader, device, amp_enabled=amp_enabled)
     optimal_threshold = find_optimal_threshold(logits, targets)
 

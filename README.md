@@ -1,169 +1,103 @@
-# Eye Project · Frontend
+# eye-project
 
-**최종 갱신: 2026-05-30**
+**최종 갱신: 2026-06-03**
 
-> `eye-project/frontend/` — **frontend** 브랜치 Flutter 클라이언트.  
-> 망막 이미지 업로드 → 백엔드 분석 API → 결과·이력·PDF를 담당합니다. AI·FastAPI·Docker 설정은 저장소 루트를 참고하세요.
+안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
+이미지를 업로드하면 AI가 이상 여부를 추정하고, 병변 evidence overlay와 리포트, 품질 정보를 함께 제공합니다.
 
----
-
-## 목차
-
-1. [개요](#개요)
-2. [기술 스택](#기술-스택)
-3. [폴더 구조](#폴더-구조)
-4. [실행 방법](#실행-방법)
-5. [백엔드 API 연동](#백엔드-api-연동)
-6. [분석·진행 UI](#분석진행-ui)
-7. [화면·라우팅](#화면라우팅)
-8. [모듈 요약](#모듈-요약)
-9. [테스트](#테스트)
-10. [배포·플랫폼](#배포플랫폼)
+> **의료 보조 용도** - 최종 판단은 반드시 의료 전문가가 합니다.
+> 설계·운영은 **정확성·재현성·설정 일관성**을 속도보다 우선합니다.
 
 ---
 
-## 개요
-
-- **대상**: 당뇨병성 망막병증 보조 스크리닝 MVP (의료 **보조** 용도, 최종 판단은 전문가).
-- **UI**: Material 3 + `MedicalTokens` 기반 의료용 톤(한국어 문구).
-- **주요 플로우**: 이미지 선택 → 비동기 `/analyze` → 진행 다이얼로그 → 결과 화면 → (선택) PDF 공유 / 이력 조회.
-- **기본 API**: `http://127.0.0.1:8000` (`api_config.dart`, Docker Compose 백엔드와 맞춤).
-
----
-
-## 기술 스택
-
-| 구분 | 내용 |
-|------|------|
-| 프레임워크 | Flutter · Dart SDK `^3.11.3` |
-| HTTP | `http` — 멀티파트 업로드, job 폴링, JSON |
-| 파일 | `file_picker` — jpg/jpeg/png, 최대 10MB |
-| PDF | `pdf`, `printing` — 결과 리포트 PDF 생성·공유 |
-| UI | Material 3, 공통 위젯 `lib/ui/medical_ui.dart` |
-
----
-
-## 폴더 구조
+## 시스템 한눈에
 
 ```text
-frontend/
-├── lib/
-│   ├── main.dart                 # 테마·라우트 (/upload, /history, /result)
-│   ├── api/
-│   │   └── eye_api_client.dart   # REST 클라이언트
-│   ├── config/
-│   │   └── api_config.dart       # baseUrl, baseUri, 이미지 URL resolve
-│   ├── constants/
-│   │   └── api_error_codes.dart
-│   ├── models/
-│   │   ├── analyze_response.dart
-│   │   ├── analyze_job_status.dart
-│   │   ├── analysis_history_entry.dart
-│   │   ├── report_metrics.dart
-│   │   ├── result_screen_args.dart
-│   │   └── server_log_entry.dart
-│   ├── screens/
-│   │   ├── upload_screen.dart    # 업로드·분석 시작
-│   │   ├── result_screen.dart    # 판정·XAI·PDF
-│   │   └── history_screen.dart   # 이력 대시보드·필터·삭제
-│   ├── util/
-│   │   └── format.dart           # 날짜·타임스탬프 표시 (이력·로그 공통)
-│   └── ui/
-│       ├── medical_ui.dart
-│       ├── notice_dialog.dart
-│       ├── analyze_progress_dialog.dart
-│       ├── analyze_progress_controller.dart
-│       ├── report_metrics_dialog.dart
-│       ├── server_logs_dialog.dart
-│       └── dialog_keyboard.dart
-├── test/
-├── web/, linux/, windows/         # 플랫폼 러너 (개발·Web Docker 빌드)
-├── frontend_Dockerfile
-├── docker-web.nginx.conf
-└── pubspec.yaml
+[Flutter Web UI]  :8080
+        │  HTTP
+        ▼
+[FastAPI Backend] :8000
+        │  import (PYTHONPATH=/ai)
+        ▼
+[drscreen · PyTorch]  configs · checkpoints · QuickQual
 ```
+
+| 컴포넌트 | 역할 | 기술 |
+|----------|------|------|
+| **Frontend** | 업로드·진행·결과·이력·PDF | Flutter (Web / Docker nginx) |
+| **Backend** | API, 이력·암호화 저장, QuickQual, 추론 호출 | FastAPI, Uvicorn |
+| **AI** | 학습·추론·XAI·설정·체크포인트 | PyTorch, EfficientNet-B5, lesion evidence segmenter, numeric fusion, `drscreen` 패키지 |
 
 ---
 
-## 실행 방법
+## 브랜치 · 상세 문서
 
-### 전체 스택 (권장, 저장소 루트)
+팀별 개발 브랜치에서 작업 후 `main`에 머지합니다. **자세한 내용은 각 브랜치의 README·문서를 보세요.**
+
+| 브랜치 | 보는 것 | 문서로 이동 |
+|--------|---------|-------------|
+| [`frontend`](https://github.com/Capstone-sixsense/eye-project/tree/frontend) | Flutter 클라이언트, API 연동, 진행 UI | [`frontend/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/frontend/frontend/README.md) |
+| [`backend`](https://github.com/Capstone-sixsense/eye-project/tree/backend) | REST API, `storage/`·`results/`, Docker | `backend/` 디렉터리 · [`main.py`](https://github.com/Capstone-sixsense/eye-project/blob/backend/backend/main.py) |
+| [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
+
+로컬에서 브랜치 전환:
 
 ```bash
+git fetch origin
+git checkout frontend   # 또는 backend, ai
+```
+
+`main`에는 통합 실행용 `docker-compose.yml`·`setup.sh`가 있습니다.
+
+---
+
+## 빠른 시작 (통합 실행)
+
+```bash
+git clone https://github.com/Capstone-sixsense/eye-project.git
 cd eye-project
 ./setup.sh
-# 또는: docker compose up -d
+# 또는
+docker compose up -d
 ```
 
-- UI(Web): `http://localhost:8080` (nginx + `flutter build web`)
-- API: `http://localhost:8000`
+| 서비스 | URL |
+|--------|-----|
+| UI | http://localhost:8080 |
+| API | http://localhost:8000 |
+| 헬스 | http://localhost:8000/health |
 
-### Flutter만 (로컬 UI 개발)
-
-```bash
-cd frontend
-flutter pub get
-flutter run -d chrome   # Web
-# flutter run -d macos  # macOS 데스크톱 (Xcode 필요)
-```
-
-백엔드 주소 변경:
-
-```bash
-flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000
-```
-
-- `localhost` 대신 **`127.0.0.1`** 권장 (Windows·Docker IPv6 이슈 회피).
+- AI 체크포인트는 Git LFS일 수 있습니다. 수백 바이트 포인터만 보이면 `git lfs install && git lfs pull`.
+- 추론 기본 설정: `ai/configs/base.yaml` (Compose: `FUNDUS_CONFIG_PATH=/ai/configs/base.yaml`).
 
 ---
 
-## 백엔드 API 연동
+## 주요 API (요약)
 
-| 메서드 | 경로 | 프론트 사용처 |
-|--------|------|----------------|
-| `GET` | `/health` | (간접) 서버 기동 확인 |
-| `GET` | `/deploy-metric` | 업로드 화면 「성능 지표 보기」 |
-| `POST` | `/analyze` | 이미지 업로드 → **202** + `job_id` |
-| `GET` | `/analyze/jobs/{job_id}` | 분석 진행 폴링 (`progress`, `phase`, `result`) |
-| `GET` | `/history` | 이력 목록 (페이지네이션) |
-| `DELETE` | `/history/{id}` | 이력 삭제 |
-| `GET` | `/logs` | 업로드 화면 「서버 로그」 (레벨 필터·무한 스크롤) |
-| `GET` | `/image/raw/{id}`, `/image/report/{id}` | `ApiConfig.resolveAssetUrl` |
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/health` | 모델·QuickQual 준비 상태 |
+| `POST` | `/analyze` | 분석 요청 (비동기 job, 202 + `job_id`) |
+| `GET` | `/analyze/jobs/{id}` | 분석 진행·결과 |
+| `GET` | `/history` | 분석 이력 |
+| `GET` | `/deploy-metric` | 배포용 eval 지표 |
+| `GET` | `/image/raw/{id}`, `/image/report/{id}` | 복호화 이미지 |
 
-- 멀티파트 필드명: **`image`** (백엔드와 동일).
-- 분석 대기: `EyeApiClient.analyzeTimeout` 기본 **20분** (CPU 추론).
-- 오류 본문: `detail.message`, `detail.code` (`not_fundus_image`, `low_image_quality` 등) 파싱 → `EyeApiException` / `showErrorNotice`.
+상세 스키마·오류 코드는 **backend** 브랜치 코드·프론트 `eye_api_client`와 맞춰 확인하세요.
 
 ---
 
-## 분석·진행 UI
-
-백엔드는 단계마다 `progress`·`phase`를 점프시키므로, 화면은 **표시용 진행률**을 별도로 보간합니다.
+## 저장소 레이아웃 (`main` 기준)
 
 ```text
-POST /analyze (202, job_id)
-    → GET /analyze/jobs/{id} (400ms 폴링)
-    → AnalyzeProgressController (50ms 틱, phase별 상한·보간)
-    → AnalyzeProgressDialog (N%, 단계 문구)
-    → 서버 완료 후 visual 100% + 0.3초 정지
-    → /result 이동
+eye-project/
+├── ai/                 # drscreen 패키지, configs, artifacts
+├── backend/            # FastAPI, QuickQual 래퍼
+├── frontend/           # Flutter
+├── docker-compose.yml
+├── setup.sh
+└── README.md           # 이 파일
 ```
-
-| `phase` (서버) | UI 문구 (예) |
-|----------------|--------------|
-| `upload` | 이미지 확인 중 |
-| `fundus_check` | 안저 이미지 검증 중 |
-| `quickqual` | 이미지 품질 평가 중 |
-| `inference` | AI 분석 중 |
-| `report` | 리포트 생성 중 |
-| `done` | 완료 |
-
-구현 파일: `analyze_progress_controller.dart`, `analyze_progress_dialog.dart`, `upload_screen.dart`.  
-기본 단계 문구는 `AnalyzeProgressDialog.defaultMessage` 한 곳에서 관리합니다.
-
----
-
-## 화면·라우팅
 
 ```text
 /upload (UploadScreen)
@@ -185,59 +119,47 @@ POST /analyze (202, job_id)
   └─ 항목 탭 → /result (저장 메타 + 네트워크 이미지)
 ```
 
-`main.dart`의 `/result` 인자:
+## 데이터셋 출처
 
-- **`ResultScreenArgs`** — `originalImageBytes` + `AnalyzeResponse` (일반 분석 직후).
-- **`Uint8List`만** — 구 호환(원본만).
-- 인자 없음 — 빈 결과 화면.
+학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.
+현재 배포 기준 `v31_v8b_fusion_quickqual_v2`의 병변 evidence feature는 `seg_evidence_v8b_quickqual_v1` 계열 segmenter에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.
+데이터 원본은 저장소에 포함하지 않으며, 다운로드와 재사용은 각 원 배포처의 라이선스 및 이용 조건을 따른다.
 
----
+| 데이터셋 | 이 프로젝트에서의 사용 | 출처 / 인용 | 라이선스 / 이용 조건 |
+|---|---|---|---|
+| APTOS 2019 | DR 분류 학습 보조 | [Kaggle — APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Aravind Eye Hospital) | Kaggle Competition Terms |
+| IDRiD | DR 분류, XAI 평가, v8b 병변 feature 학습(MA/HE/EX/SE mask) | [IDRiD Grand Challenge](https://idrid.grand-challenge.org/Data/) / [IEEE DataPort — Indian Diabetic Retinopathy Image Dataset](https://ieee-dataport.org/open-access/indian-diabetic-retinopathy-image-dataset-idrid) | CC BY 4.0 |
+| Messidor | DR 분류 학습 및 MAPLES-DR 원본 fundus image | [ADCIS — Messidor](https://www.adcis.net/en/third-party/messidor/) | 비상업적 연구 목적 |
+| MAPLES-DR | v8b 병변 feature 학습 및 평가(MA/HE/EX/CWS mask) | [LIV4D/MAPLES-DR](https://github.com/LIV4D/MAPLES-DR), [Scientific Data 2024](https://www.nature.com/articles/s41597-024-03739-6) | MAPLES-DR label/code repo: CC0-1.0. 논문: CC BY-NC-ND 4.0. 원본 fundus image는 Messidor 이용 조건을 따름 |
+| TJDR | v8b 병변 feature 학습(MA/HE/EX/SE pixel-level mask) | [TJDR dataset page](https://www.juheapi.com/datasets/tjdr), [arXiv:2312.15389](https://arxiv.org/abs/2312.15389) | 공개 연구용 데이터셋. 명시 라이선스 파일은 로컬 데이터와 공개 페이지에서 확인되지 않았으므로 원 배포처 조건 및 논문 인용 필요 |
+| DDR / DDR_SEG | DR 분류 평가 및 v8b 병변 feature 학습용 lesion segmentation subset | [GitHub — nkicsl/DDR-dataset](https://github.com/nkicsl/DDR-dataset) | 배포 repo: MIT License. README의 DDR 논문 인용 요구 및 원 배포처 조건 준수 |
 
-## 모듈 요약
+TJDR 인용:
 
-| 경로 | 역할 |
-|------|------|
-| `api_config.dart` | `baseUrl`·`baseUri`(API 요청 베이스), `resolveAssetUrl` |
-| `eye_api_client.dart` | analyze job, history, logs, deploy-metric, 오류 파싱 |
-| `analyze_response.dart` | 분석·이력 JSON, `canShowInferenceResults`, XAI 경로 |
-| `analyze_job_status.dart` | job 폴링 상태·`phaseLabel` |
-| `analysis_history_entry.dart` | 이력 행 파싱 |
-| `server_log_entry.dart` | 서버 로그 행 파싱·`phaseLabel` |
-| `report_metrics.dart` | AUROC·민감도 등 배포 지표 |
-| `util/format.dart` | `formatLocalDateTime`, `formatIsoTimestamp` |
-| `medical_ui.dart` | 카드·버튼·배너·토큰 |
-| `notice_dialog.dart` | `showNoticeDialog`·`showCodeNoticeDialog`·`showErrorNotice` |
-| `report_metrics_dialog.dart` | 성능 지표 설명 UI |
-| `server_logs_dialog.dart` | 서버 로그 조회·레벨 필터 UI |
-
----
-
-## 테스트
-
-```bash
-cd frontend
-flutter analyze
-flutter test
+```bibtex
+@article{mao2023tjdr,
+  title={TJDR: A High-Quality Diabetic Retinopathy Pixel-Level Annotation Dataset},
+  author={Mao, Jingxin and Ma, Xiaoyu and Bi, Yanlong and Zhang, Rongqing},
+  journal={arXiv preprint arXiv:2312.15389},
+  year={2023}
+}
 ```
 
+(동일 표기: [`backend` 브랜치 README](https://github.com/Capstone-sixsense/eye-project/blob/backend/README.md))
+
+---
+
+## 기여·규칙
+
+- 컴포넌트별 작업: 해당 브랜치에서 PR → `main` 머지.
+- `ai/configs/base.yaml` 변경 시 Docker 추론·백엔드 응답 필드와 **함께** 검증.
+- Cursor/에이전트 규칙: [`.cursor/rules/eye-project.mdc`](.cursor/rules/eye-project.mdc)
 - `test/widget_test.dart`는 업로드 화면 빌드 스모크 테스트입니다. AppBar 문구가 `망막 이미지 분석`으로 바뀐 경우 테스트 문자열을 맞춰 주세요.
 
 ---
 
-## 배포·플랫폼
+## 더 보기
 
-| 경로 | 용도 |
-|------|------|
-| `frontend_Dockerfile` | `flutter build web --release` + nginx (`:8080`) |
-| `docker-web.nginx.conf` | SPA `try_files` |
-| `web/` | Flutter Web 엔트리 (Compose 프론트) |
-| `linux/`, `windows/` | 데스크톱 러너 (로컬 `flutter run`) |
-
-단일 `.app`/`.exe`에 백엔드·모델까지 묶는 **오프라인 배포**는 이 README 범위 밖이며, 별도 패키징 절차가 필요합니다.
-
----
-
-## 관련 문서
-
-- 저장소 루트 `README.md` — Docker Compose, 브랜치 구조, API 목록
-- `.cursor/rules/eye-project.mdc` — 팀 컨벤션·AI 연동 주의사항
+- **프론트**: `git checkout frontend` → [`frontend/README.md`](frontend/README.md)
+- **백엔드**: `git checkout backend` → `backend/main.py`, `docker-compose.yml`
+- **AI**: `git checkout ai` → `ai/drscreen/`, `ai/configs/`, `ai/docs/`

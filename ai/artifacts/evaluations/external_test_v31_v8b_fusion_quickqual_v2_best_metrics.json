@@ -1,0 +1,25 @@
+{
+  "split": "external_test",
+  "source_split": "external_test",
+  "evaluation_split": "external_holdout",
+  "threshold_policy": "calibration_matched_sensitivity",
+  "threshold_policy_note": "Deployment threshold selected on external_calibration to match the active v1 holdout sensitivity (0.8234); reported metrics are the unbiased external_holdout evaluation at that threshold.",
+  "rows": {
+    "external_calibration": 2504,
+    "external_holdout": 10018
+  },
+  "source_metrics_json": "artifacts/runs/99_misc/v31_v8b_late_fusion_quickqual_v1_v31rep/evaluations/v31_v8b_late_fusion_quickqual_v1_v31rep_metrics.json",
+  "source_result_key": "classification_domains:late_fusion:v31_logit",
+  "metrics": {
+    "auroc": 0.9359964192998305
+  },
+  "optimal_threshold": 0.08563088401268978,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.8693351966460371,
+    "sensitivity": 0.8315684315684315,
+    "specificity": 0.9070416916018352,
+    "precision": 0.8993085566119274,
+    "f1": 0.864112945084605,
+    "threshold": 0.08563088401268978
+  }
+}

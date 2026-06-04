@@ -1,4 +1,8 @@
-"""Evaluate CBM concept maps against IDRiD/MAPLES lesion masks."""
+"""Evaluate CBM concept maps against IDRiD/MAPLES lesion masks.
+
+(한글 요약) Concept Bottleneck 모델의 개념(MA/HE/EX/SE) 맵이 실제 병변 마스크와 얼마나
+겹치는지 평가한다. 개념이 해당 병변을 실제로 가리키는지(localization) 점검하는 연구용 도구.
+"""
 from __future__ import annotations
 
 import argparse

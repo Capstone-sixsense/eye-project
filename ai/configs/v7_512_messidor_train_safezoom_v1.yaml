@@ -1,0 +1,32 @@
+project:
+  version: v7_512_messidor_train_safezoom_v1
+
+data:
+  manifest_path: data/processed/manifest_safezoom_preprocessed.csv
+  image_root: data/raw
+  preprocess_mode: safezoom
+  target_short_fill: 0.86
+  max_total_x_trim: 0.08
+  max_total_y_trim: 0.08
+  saliency_shift: true
+  saliency_weight: 1.2
+  saliency_candidates: 5
+  safezoom_max_dim: 1024
+  train_exclude_domains: []
+
+model:
+  architecture: efficientnet_b5
+  use_attention: true
+  attention_mode: eca_spatial
+  use_aux_seg: false
+  use_gated_pooling: false
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+
+infer:
+  checkpoint_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train_safezoom_v1/checkpoints/best.pt
+  threshold: 0.09
+  use_meta_classifier: false

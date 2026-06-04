@@ -1,5 +1,8 @@
 """Ensemble evaluation: average logits from two checkpoints on a given split.
 
+(한글 요약) 두 체크포인트의 logit을 평균내는 단순 앙상블을 특정 split에서 평가한다
+(예: v9_fda + v10_swad). 도메인 일반화 비교용 진단 도구.
+
 Usage:
     python eval_ensemble.py \
         --config1 configs/v9_fda.yaml \

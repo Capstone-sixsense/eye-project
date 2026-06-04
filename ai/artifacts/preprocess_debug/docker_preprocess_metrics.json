@@ -1,0 +1,49 @@
+{
+  "source": "/ai/data/raw/ddr/DR_grading/DR_grading/007-1612-000.jpg",
+  "raw_size": [
+    2560,
+    1920
+  ],
+  "quickqual_size": [
+    1024,
+    1024
+  ],
+  "ai_preprocess_size": [
+    512,
+    512
+  ],
+  "quickqual_foreground_bbox_xywh": [
+    0,
+    128,
+    1024,
+    768
+  ],
+  "old_circular_crop_rect_xyxy_on_quickqual": [
+    127,
+    135,
+    895,
+    903
+  ],
+  "new_contentcrop_geometry_xyxy_pad": [
+    0,
+    118,
+    1024,
+    907,
+    117,
+    118,
+    0,
+    0
+  ],
+  "old_ai_foreground_bbox_xywh": [
+    0,
+    0,
+    512,
+    507
+  ],
+  "new_ai_foreground_bbox_xywh": [
+    0,
+    63,
+    512,
+    385
+  ]
+}

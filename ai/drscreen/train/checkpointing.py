@@ -1,3 +1,13 @@
+"""체크포인트 payload 구성 + SWAD 가중치 평균 + 전역 best 승격 후보 판정.
+
+- checkpoint_payload: 모델/옵티마이저/스케줄러 상태 + config + 메트릭을 한 dict로 묶어
+  저장(추론 시 settings.build_effective_checkpoint_config가 이 config/architecture를 읽음).
+- apply_swad: 마지막 N개 에폭 스냅샷을 평균낸 뒤 BatchNorm 통계를 재보정하고, 민감도
+  하한을 만족하며 best AUROC를 넘으면 best로 저장.
+- check_promotion_candidate: 전역 best 체크포인트보다 좋으면 '승격 후보'로 로깅만 한다.
+  실제 배포 승격(파일 복사)은 수동이다(docs/AI_HANDOFF.md 4절 정책).
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,11 +19,11 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 
+from drscreen.settings import resolve_project_path
 from drscreen.train.engine import SWADBuffer, evaluate_one_epoch
 from drscreen.train.model_setup import _DEFAULT_MIN_SENSITIVITY
 from drscreen.utils.checkpoint import read_checkpoint_auroc
 from drscreen.utils.logging import get_logger
-from drscreen.settings import resolve_project_path
 
 LOGGER = get_logger(__name__)
 
@@ -81,6 +91,8 @@ def apply_swad(
         num_workers=int(config["data"].get("num_workers", 0)),
         pin_memory=device.type == "cuda",
     )
+    # 가중치를 평균내면 BatchNorm running stats가 어긋나므로, BN만 train 모드로 두고
+    # 학습 데이터를 한 번 흘려 running mean/var를 재보정한다(파라미터는 갱신 안 됨).
     model.eval()
     for module in model.modules():
         if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
