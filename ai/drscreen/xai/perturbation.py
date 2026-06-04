@@ -1,3 +1,11 @@
+"""입력 교란(perturbation) 기반 XAI 어트리뷰션: Occlusion / RISE.
+
+그래디언트 대신 입력 일부를 가려 점수가 얼마나 떨어지는지로 중요도를 추정한다.
+- occlusion: 격자 셀을 하나씩 가린 뒤 '확률 하락분'을 그 셀의 중요도로 본다(결정적, 느림).
+- rise: 무작위 저해상도 마스크 수천 개를 씌워, 마스크별 점수로 가중 평균한 중요도 맵.
+연구/충실도 진단용이며 실시간 추론에는 쓰지 않는다(forward 호출이 많음).
+"""
+
 from __future__ import annotations
 
 import argparse

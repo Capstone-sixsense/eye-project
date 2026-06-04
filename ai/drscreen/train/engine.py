@@ -1,3 +1,17 @@
+"""에폭 단위 학습/평가 루프와 SWAD 가중치 버퍼.
+
+train_one_epoch이 핵심이다. 기본은 분류 손실이지만, config 플래그에 따라 여러 보조
+손실을 선택적으로 더한다(모두 0이면 순수 분류 학습):
+- aux_seg: 병변 마스크 분할 손실(멀티태스크 supervision).
+- cam_align: Layer-CAM 어트리뷰션을 병변 마스크에 정렬.
+- coral: 도메인 간 특징 공분산 정렬(도메인 일반화).
+- rsc: Representation Self-Challenging — 가장 기여 큰 특징을 마스킹해 robust feature 학습.
+- concept / patch_l1: CBM 개념 손실 / BagNet patch-logit 희소화.
+
+AMP는 _amp_dtype로 GPU 세대에 맞춰 bf16/fp16을 고른다. evaluate_one_epoch /
+collect_logits_and_targets는 추론 전용(메트릭 계산 / 원시 logit 수집).
+"""
+
 from __future__ import annotations
 
 from collections import deque
@@ -234,6 +248,7 @@ def train_one_epoch(
         images, targets = _unpack_batch(batch, device)
         domains: list[str] | None = batch.get("domain") if use_coral else None
 
+        # 배치마다: forward -> 분류 손실 -> (켜진 보조 손실들 누적) -> backward -> step.
         optimizer.zero_grad(set_to_none=True)
 
         with torch.autocast(device_type=device.type, dtype=_amp_dtype(device), enabled=amp_enabled):
@@ -324,6 +339,8 @@ def train_one_epoch(
                         loss = loss + lambda_coral * coral_loss
 
                 if use_aux_seg and seg_logits is not None:
+                    # 마스크가 유효한 샘플(seg_mask_valid)에만 분할 손실을 건다. 마스크 없는
+                    # 도메인 행이 0 마스크로 잘못된 음성 supervision을 주지 않도록 필터링.
                     valid = batch.get("seg_mask_valid")
                     if valid is not None:
                         valid = valid.to(device)

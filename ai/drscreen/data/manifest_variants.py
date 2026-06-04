@@ -1,3 +1,14 @@
+"""manifest CSV 변형(variant) 생성과 분할 통계 요약 유틸.
+
+핵심은 'shadow validation' 만들기: 외부 테스트 도메인과 라벨 분포가 같은
+검증셋을 학습 도메인에서 떼어내, 검증 성능이 외부 테스트를 더 잘 대변하도록 한다
+(도메인 일반화 실험에서 검증-테스트 분포 차이를 줄이기 위함).
+
+- build_shadow_validation_manifest: reference 분할(예: test)의 라벨별 개수만큼
+  source 분할(예: train)에서 같은 도메인 행을 표본추출해 destination(예: val)으로 옮긴다.
+- summarize_manifest_variant: 분할/도메인/라벨별 행 수를 집계한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

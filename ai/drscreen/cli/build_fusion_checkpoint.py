@@ -1,3 +1,12 @@
+"""배포용 v31+v8b 융합 체크포인트 조립 CLI.
+
+분류기 체크포인트, 분할기 체크포인트, 그리고 메타 분류기(StandardScaler+LogReg) 파라미터가
+담긴 metrics JSON을 하나의 융합 체크포인트로 합친다. 출력 payload는 fusion_version 키로
+식별되며(utils/checkpoint.load_state_from_checkpoint가 이를 보고 분기), 분류기/분할기
+state_dict + 메타 파라미터 + 특징 스키마/추출 설정 + 임계값을 포함한다.
+이렇게 만든 파일을 artifacts/checkpoints/best.pt에 배치하면 새 배포 별칭이 된다.
+"""
+
 from __future__ import annotations
 
 import argparse

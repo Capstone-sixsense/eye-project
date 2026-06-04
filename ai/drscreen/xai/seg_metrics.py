@@ -1,3 +1,10 @@
+"""분할(segmentation) 평가 지표: Dice / IoU 계산.
+
+채널별 지표(mdice/miou)는 GT 양성 픽셀이 있는 (이미지, 채널) 쌍만 평균에 포함한다
+(병변이 없는 채널을 1.0/0.0으로 집계해 지표를 왜곡하지 않기 위함). union 지표는 4채널을
+합친 '어떤 병변이든' 마스크 기준이다. seg_runner와 eval_seg_evidence가 이 함수를 쓴다.
+"""
+
 from __future__ import annotations
 
 import numpy as np

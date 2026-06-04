@@ -1,3 +1,17 @@
+"""분류기 학습 전체를 조율하는 오케스트레이터(run_training).
+
+흐름: 시드/결정성 설정 -> 데이터로더/모델/손실 구성 -> 단계(phase)별 학습 루프
+(head -> finetune) -> 에폭마다 평가/체크포인트 저장/조기종료 판단 -> (선택)SWAD 평균 ->
+전역 best 승격 후보 판정 -> training_summary.json 저장.
+
+best 체크포인트 선택: 'min_checkpoint_sensitivity 이상'을 만족하는 에폭 중 선택 메트릭
+(AUROC)이 가장 높은 것. selection_metric으로 무엇을 기준 삼을지 정한다:
+- val_auroc: 검증 split AUROC(기본). 전역 best 승격 후보 비교 대상이 된다.
+- external_calibration_auroc: 외부 calibration split 기준. 기존 val_auroc와 비교 불가라
+  전역 승격 검사는 건너뛴다(도메인 일반화 실험용).
+describe_training_setup은 학습 없이 설정/행 수만 미리 보여주는 dry-run 요약이다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -282,6 +296,7 @@ def run_training(
             selection_score = selection_metrics.auroc or 0.0
             default_min_sensitivity = 0.0 if use_calibration_selection else _DEFAULT_MIN_SENSITIVITY
             min_sensitivity = float(config["train"].get("min_checkpoint_sensitivity", default_min_sensitivity))
+            # best 갱신 조건: 민감도 하한을 만족하면서 선택 점수(AUROC)가 기존 best를 넘을 때만.
             if selection_sensitivity >= min_sensitivity and selection_score > best_val_auroc:
                 best_val_auroc = selection_score
                 best_epoch = global_epoch

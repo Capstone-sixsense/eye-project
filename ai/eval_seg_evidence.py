@@ -1,4 +1,8 @@
-"""Evaluate standalone lesion segmentation evidence models."""
+"""Evaluate standalone lesion segmentation evidence models.
+
+(한글 요약) 독립 병변 분할기(v8b 계열)를 IDRiD/MAPLES/TJDR/DDR_SEG 마스크로 평가한다
+(mDice/mIoU/union, 임계값 스윕). 오프라인 전처리 manifest면 마스크 geometry 정합을 적용한다.
+"""
 from __future__ import annotations
 
 import argparse

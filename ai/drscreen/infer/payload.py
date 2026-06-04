@@ -1,3 +1,13 @@
+"""백엔드로 전달되는 추론 결과 페이로드 계약(contract).
+
+이 dataclass의 필드 = `eye-project` 백엔드가 소비하는 JSON 스키마다
+(`docs/AI_HANDOFF.md` 5절). 필드 추가/이름 변경은 백엔드와의 계약 변경이므로
+tests/regression/test_payload_contract.py가 이 구조를 고정 검증한다.
+
+quality_* 필드는 QuickQual이 별도 백엔드 태스크로 분리된 뒤 항상 None으로
+채워지는 호환용 placeholder다(AI는 더 이상 품질 필터링을 하지 않는다).
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass

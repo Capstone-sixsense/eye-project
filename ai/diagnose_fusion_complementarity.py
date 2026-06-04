@@ -1,6 +1,9 @@
 """Phase 0: power / ceiling / C-premise. Replicates late_fusion_classifier setup to get
 per-sample scores (the fusion metrics JSON does not persist them), then CPU analysis.
 
+(한글 요약) v31+v8b 융합의 통계적 검정력(POWER)과 보완성 상한(CEILING: Q-통계량 등),
+전제 점검(C-PREMISE)을 샘플별 점수로 분석한다. 융합 추가 작업을 진행할 가치가 있는지 판단용.
+
   - POWER: paired-bootstrap 95% CI of holdout AUROC and delta(fusion - v31).
   - CEILING: Q-statistic / (v31-wrong & v8b-correct)/(v31-wrong) on holdout.
   - C-PREMISE: v31 error rate on train / external_calibration / external_holdout.

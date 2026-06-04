@@ -1,5 +1,8 @@
 """XAI quantitative validation: Layer-CAM vs MAPLES-DR lesion masks on MESSIDOR images.
 
+(한글 요약) IDRiD와 분리된 MAPLES-DR 코호트에서 CAM 위치정확도를 평가하는 CLI
+(drscreen.xai.evaluation.evaluate_maples 래퍼). 환자 오염 없는 깨끗한 cross-domain 평가용.
+
 Generates Layer-CAM for each MESSIDOR image in the MAPLES-DR split,
 and computes AUPRC / AUC-IoU / IoU top-N% / Pointing Game against
 MAPLES-DR pixel-level lesion annotations (MA / HE / EX / CWS).

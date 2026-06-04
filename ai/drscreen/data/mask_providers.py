@@ -1,3 +1,16 @@
+"""도메인별 병변 마스크 로더 + raw 마스크의 전처리 geometry 정합.
+
+데이터셋마다 마스크 포맷/라벨 규약이 달라(IDRiD/MAPLES/TJDR/DDR_SEG) 각 도메인
+전용 Provider가 있고, 모두 공통 인터페이스 LesionMaskProvider(load/has_valid_mask)를
+따른다. CompositeMaskProvider가 여러 Provider를 순서대로 시도해 도메인별로 분배한다.
+
+핵심 난제(geometry 정합): manifest의 이미지는 오프라인 전처리본(processed*/images/...)
+인데, 원본 병변 마스크는 raw 좌표계다. 그래서 마스크를 그냥 resize하면 이미지와
+어긋난다. _align_mask_to_image_preprocessing()이 raw 마스크에 '이미지와 동일한'
+crop/pad geometry를 적용해 좌표계를 맞춘다(geometry는 raw 원본 기준으로 계산 후
+lru_cache로 재사용). 채널 순서는 프로젝트 표준 MA/HE/EX/SE로 통일한다.
+"""
+
 from __future__ import annotations
 
 import re
@@ -103,6 +116,8 @@ def _resize_mask_array(mask: np.ndarray, size: int) -> np.ndarray:
     return resized
 
 
+# 같은 원본 이미지에 대한 전처리 geometry는 변하지 않으므로 캐시한다(에폭마다 마스크
+# 정합을 반복 호출하는 비용 절감). 인자는 모두 hashable해야 lru_cache가 작동한다.
 @lru_cache(maxsize=4096)
 def _cached_preprocess_geometry(
     reference_path: str,
@@ -396,6 +411,7 @@ class TJDRMaskProvider:
     3 → MA, 2 → HE, 1 → EX, 4 → SE.
     """
 
+    # TJDR 팔레트 라벨(1=EX,2=HE,3=MA,4=SE)을 프로젝트 표준 채널 순서 MA/HE/EX/SE로 매핑.
     _LABEL_BY_CODE = {"MA": 3, "HE": 2, "EX": 1, "SE": 4}
     _CHANNEL_CODES = ("MA", "HE", "EX", "SE")
 
@@ -585,6 +601,8 @@ class CompositeMaskProvider:
         return any(p.has_valid_mask(image_path, domain) for p in self._providers)
 
     def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
+        # 순서대로 시도해 valid=True인 첫 Provider가 이긴다. 모두 실패하면 첫 Provider의
+        # 0 마스크(valid=False)를 그대로 돌려 호출부가 일관된 텐서 형태를 받게 한다.
         for p in self._providers:
             mask, valid = p.load(image_path, domain, size)
             if valid:

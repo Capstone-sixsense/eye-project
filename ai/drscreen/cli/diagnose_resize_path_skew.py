@@ -1,5 +1,8 @@
 """Diagnose the train/serve preprocessing skew before deciding to re-preprocess + retrain.
 
+(한글 요약) 학습 전처리 경로와 서빙(백엔드 QuickQual) 전처리 경로가 만드는 512 입력이
+얼마나 다른지를 학습 없이 점검한다. 차이가 미미하면 재전처리/재학습이 불필요하다는 근거가 된다.
+
 Two checks, both 0-training:
 
   Check 1 (pixeldiff): For sampled RAW images, compare the 512 model-input produced by

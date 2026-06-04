@@ -1,3 +1,18 @@
+"""학습/평가용 PyTorch Dataset 정의(manifest CSV 기반).
+
+manifest CSV(image_path/label/split/domain 등)를 읽어 이미지 + 라벨 + 선택적
+병변 마스크 + 개념(concept) 라벨을 묶어 반환한다.
+
+클래스 계층:
+- ManifestDataset: 기본. 이미지/마스크에 각자 transform 적용.
+- SegmentationManifestDataset: 이미지와 마스크에 '동기화된' 공간 증강 적용
+  (분할/aux-seg 학습에서 crop/flip/rotate가 둘에 동일하게 들어가야 함).
+- FDAManifestDataset / SegmentationFDAManifestDataset: 위에 더해, 다른 도메인의
+  이미지를 reference로 뽑아 FDA(주파수영역 스타일 이식)로 도메인 일반화를 노린다.
+
+마스크는 mask_provider가 도메인별로 제공한다(없으면 NullMaskProvider가 0 마스크).
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,6 +32,7 @@ from drscreen.data.mask_providers import (
 )
 from drscreen.data.transforms import ampmix, fda_mix
 
+# 개념(concept) 4종 코드. CBM 등에서 약지도(weak label) 개념 벡터의 채널 순서.
 _CONCEPT_CODES = ("MA", "HE", "EX", "SE")
 
 
@@ -37,6 +53,7 @@ class ManifestDataset(Dataset):
         self.transform = transform
         self._seg_mask_size = seg_mask_size
 
+        # 마스크 공급자 우선순위: 명시적 mask_provider > seg_mask_dir(IDRiD 단축) > 없음(0 마스크).
         # mask_provider takes precedence; seg_mask_dir is a convenience shorthand
         if mask_provider is not None:
             self._mask_provider: LesionMaskProvider = mask_provider
@@ -85,6 +102,8 @@ class ManifestDataset(Dataset):
 
     @staticmethod
     def _idrid_segmentation_key(image_id: str, image_path: str, domain: str) -> str | None:
+        # IDRiD segmentation 학습셋(ID 1~54)만 픽셀 마스크 키를 부여한다. ID 55~81은
+        # segmentation '테스트셋'이라 학습 supervision으로 쓰면 안 된다(7절 오염 참조).
         if domain != "IDRiD" or "a. Training Set" not in image_path:
             return None
         import re
@@ -187,6 +206,7 @@ class SegmentationManifestDataset(ManifestDataset):
         seg_mask, seg_mask_valid = self._mask_provider.load(
             str(row["image_path"]), domain, self._seg_mask_size
         )
+        # 핵심 차이: 이미지와 마스크를 한 transform에 함께 넘겨 같은 공간 증강을 받게 한다.
         if self.transform is not None:
             image, seg_mask = self.transform(image, seg_mask)
         return self._base_record(

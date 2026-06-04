@@ -4,6 +4,9 @@ This CLI is intentionally diagnostic. It tests whether the active v31
 classifier block feature linearly separates lesion presence after domain
 stratification, then writes a concept-label table for grounded-classifier
 experiments.
+
+(한글 요약) v31 분류기의 블록 특징이 '병변 유무'를 선형으로 구분하는지(도메인 층화 후)
+점검하고, grounded-classifier 실험용 개념 라벨 표를 내보낸다.
 """
 from __future__ import annotations
 

@@ -1,3 +1,17 @@
+"""CAM 위치정확도(localization) 평가 오케스트레이션.
+
+분류기의 설명 히트맵이 실제 병변 마스크와 얼마나 겹치는지를 데이터셋 단위로 평가한다.
+진입점:
+- evaluate: IDRiD segmentation 코호트 기준 평가.
+- evaluate_maples: MAPLES-DR(MESSIDOR 이미지) 기준 평가(완전 분리 코호트).
+- compare_xai_methods: 여러 CAM 방법을 한 split에서 비교.
+
+이미지마다 CAM 생성(_compute_cam: gradcam/perturbation/seg_head 등) -> 망막 FOV 정규화 ->
+지표 계산(_eval_cam: Pointing Game/AUPRC/AUC-IoU/top-k IoU) -> 집계(_aggregate). 선택적으로
+baseline CAM(random/center-Gaussian/uniform)과 Phase-0 gate(모델 AUC-IoU가 center-Gaussian
++2σ를 넘는지)를 함께 낸다. 결과 JSON은 run의 evaluations/에 저장된다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -666,6 +680,8 @@ def evaluate(
             print(f"  Threshold      : {cg['mean']:.4f} + {gate_sigma}×{cg['std']:.4f} = {threshold:.4f}")
             print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
 
+    # Phase-0 gate: 모델 AUC-IoU가 center-Gaussian baseline + 2σ를 넘는지(통계적으로 의미있게
+    # random 중심편향을 상회하는지). 저장 JSON의 phase0_gate는 항상 2σ 기준으로 기록한다.
     phase0_gate: dict | None = None
     cg_bagg = aggregate.get("baselines", {}).get("center_gaussian") if run_baselines else None
     model_auc = aggregate["auc_iou"]["mean"] if aggregate.get("auc_iou") else None
@@ -1027,6 +1043,8 @@ def evaluate_maples(
             print(f"  Threshold      : {cg['mean']:.4f} + {gate_sigma}×{cg['std']:.4f} = {threshold:.4f}")
             print(f"  Gate           : {'PASS' if gate else 'FAIL'}")
 
+    # Phase-0 gate: 모델 AUC-IoU가 center-Gaussian baseline + 2σ를 넘는지(통계적으로 의미있게
+    # random 중심편향을 상회하는지). 저장 JSON의 phase0_gate는 항상 2σ 기준으로 기록한다.
     phase0_gate: dict | None = None
     cg_bagg = aggregate.get("baselines", {}).get("center_gaussian") if run_baselines else None
     model_auc = aggregate["auc_iou"]["mean"] if aggregate.get("auc_iou") else None

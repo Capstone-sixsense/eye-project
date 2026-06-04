@@ -1,3 +1,12 @@
+"""이진 분류 평가 메트릭과 최적 임계값 탐색(외부 의존성 없이 직접 구현).
+
+- _binary_auroc: 순위 기반(Mann-Whitney U) AUROC. sklearn 없이 계산한다.
+- find_optimal_threshold: 기본은 Youden's J(민감도+특이도-1) 최대화. min_sensitivity가
+  주어지면 '민감도 하한을 만족하면서 특이도가 가장 높은' 임계값을 고른다
+  (질환 놓침=위음성이 더 위험한 의료 선별 특성 반영).
+- compute_binary_classification_metrics: 혼동행렬 기반 accuracy/sens/spec/precision/F1/AUROC.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -51,6 +60,8 @@ def _average_ranks(values: np.ndarray) -> np.ndarray:
 
 
 def _binary_auroc(probabilities: np.ndarray, targets: np.ndarray) -> float | None:
+    # 순위합(Mann-Whitney U) 공식으로 AUROC를 계산한다. 양성 표본의 평균 순위에서
+    # 기대 순위합을 빼고 (양성수 x 음성수)로 정규화 = '양성이 음성보다 높게 점수받을 확률'.
     positive_mask = targets == 1
     negative_mask = targets == 0
     positive_count = int(positive_mask.sum())

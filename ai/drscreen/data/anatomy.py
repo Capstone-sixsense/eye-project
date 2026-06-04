@@ -64,14 +64,16 @@ def locate_od_fovea(image: object, *, work_max_dim: int = 1024) -> AnatomyLandma
     od_diameter = max(8.0, 0.10 * retina_w)
     sigma = od_diameter / 3.0
 
-    # OD: brightest red-channel region inside the retina.
+    # OD(시신경 유두): 망막 내부에서 적색 채널이 가장 밝은 영역. 흐림 처리 후 argmax.
+    # confidence는 밝기가 망막 평균 대비 몇 표준편차 위인지(밝은 병변과 헷갈릴 때 낮아짐).
     red = cv2.GaussianBlur(rgb[..., 0].astype(np.float32), (0, 0), sigma)
     red_masked = np.where(mask, red, -1.0)
     od_y, od_x = np.unravel_index(int(np.argmax(red_masked)), red_masked.shape)
     ref = red[mask]
     od_confidence = float((red[od_y, od_x] - ref.mean()) / (ref.std() + 1e-6))
 
-    # Fovea: darkest green-channel region ~2.5 OD-diameters temporal to OD.
+    # Fovea(중심와): OD에서 약 2.5 OD지름만큼 '귀쪽(temporal)'으로 떨어진 가장 어두운 영역.
+    # OD는 코쪽(nasal)에 있으므로, OD가 영상 중앙보다 오른쪽이면 fovea는 왼쪽(=중앙 방향).
     centre_x = w / 2.0
     temporal_sign = -1.0 if od_x > centre_x else 1.0  # OD is nasal; fovea toward centre.
     fx0 = od_x + temporal_sign * 2.5 * od_diameter

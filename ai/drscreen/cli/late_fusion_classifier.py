@@ -1,4 +1,9 @@
-"""Phase 4-G: v31 classifier + v8b lesion evidence late-fusion diagnostic."""
+"""Phase 4-G: v31 classifier + v8b lesion evidence late-fusion diagnostic.
+
+(한글 요약) v31 분류 점수와 v8b 병변 특징을 결합하는 후기 융합 메타 분류기를 학습/평가한다.
+이미지에서 v31 확률/logit과 병변 스칼라 특징을 뽑아 StandardScaler+LogisticRegression을
+DDR calibration split 기준으로 적합하고, 그 파라미터가 배포 융합 체크포인트의 메타 분류기가 된다.
+"""
 from __future__ import annotations
 
 import argparse

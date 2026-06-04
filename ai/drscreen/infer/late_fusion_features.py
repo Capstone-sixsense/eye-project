@@ -1,3 +1,16 @@
+"""v8b 병변 확률맵에서 메타 분류기용 스칼라 특징을 뽑는 추출기.
+
+fusion.py의 메타 분류기는 픽셀맵을 직접 먹지 않는다. 대신 이 모듈이 4채널
+병변맵(+ 4채널을 합친 union)에서 통계 특징을 계산해 고정 길이 벡터로 만든다:
+- 기본(base) 특징: 채널별 mean/max/std, 임계값별 면적비(area_ge), 상위 비율 평균(top_k).
+- 확장(extended) 특징: 연결요소(cc) 개수/평균면적, 중심-외곽 비율, 엔트로피, 채널 간 겹침.
+- OD 기준(anchored) 특징: optic disc(시신경 유두)를 원점으로 한 거리 기반 공간 특징.
+
+핵심 계약: 출력 순서는 항상 `schema`(학습 때 fit한 특징 이름 순서)를 따른다.
+extract_late_fusion_features()는 schema에 빠진 이름이 있으면 확장 -> OD 순으로
+추가 추출을 시도하고, 그래도 없으면 에러를 던진다.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -6,6 +19,7 @@ import cv2
 import numpy as np
 import torch
 
+# 병변 4종 채널 순서(프로젝트 표준). MA=미세동맥류, HE=출혈, EX=경성삼출물, SE=연성삼출물.
 LESION_CHANNELS = ("MA", "HE", "EX", "SE")
 FUSION_AREA_THRESHOLDS = (0.05, 0.1, 0.2, 0.3, 0.5)
 FUSION_TOPK_FRACS = (0.001, 0.01, 0.05)
@@ -72,12 +86,14 @@ def extract_late_fusion_features(
             f"Expected {len(LESION_CHANNELS)} lesion channels, got {seg_prob.shape[0]}"
         )
 
+    # 4채널에 union(채널별 최대 = 병변 종류 무관 '어떤 병변이든 있을 확률')을 더해 5장으로.
     seg_prob = seg_prob.float()
     union = seg_prob.amax(dim=0, keepdim=True)
     maps = torch.cat([seg_prob, union], dim=0)
     labels = (*LESION_CHANNELS, "union")
-    flat = maps.flatten(1)
+    flat = maps.flatten(1)  # [5, H*W] 픽셀을 1차원으로 펴서 통계 계산을 단순화.
 
+    # v31 분류기 출력도 특징에 포함(메타 모델이 분류 점수 + 병변 통계를 함께 본다).
     features: dict[str, float] = {
         "v31_probability": float(v31_probability),
         "v31_logit": float(v31_logit),
@@ -99,6 +115,7 @@ def extract_late_fusion_features(
         for idx, label in enumerate(labels):
             features[f"{label}_area_ge_{threshold_text}"] = float(areas[idx].item())
 
+    # 상위 frac 비율 픽셀의 평균: 작은 병변도 포착하도록 '가장 강한 영역'만 평균낸다.
     n_pixels = int(flat.shape[-1])
     for frac in topk_fracs:
         frac_float = float(frac)
@@ -108,6 +125,8 @@ def extract_late_fusion_features(
         for idx, label in enumerate(labels):
             features[f"{label}_top_{frac_text}_mean"] = float(top_means[idx].item())
 
+    # schema가 기본 특징만으로 채워지지 않으면 확장 -> OD 기준 특징을 순서대로 보강한다.
+    # (필요한 특징만 lazy하게 계산하기 위한 단계적 추가.)
     missing = [name for name in schema if name not in features]
     if missing:
         features.update(extract_extended_lesion_feature_dict(seg_prob))
@@ -117,6 +136,7 @@ def extract_late_fusion_features(
         missing = [name for name in schema if name not in features]
     if missing:
         raise ValueError(f"Late-fusion feature extractor missing schema keys: {missing}")
+    # schema 순서 그대로 값 리스트를 반환(메타 모델 입력 차원과 1:1 대응).
     return [features[name] for name in schema]
 
 

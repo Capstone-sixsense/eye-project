@@ -3,6 +3,9 @@
 This diagnostic keeps the v31 deployment classifier untouched. It asks whether
 the current best standalone segmenter (v8b) produces lesion evidence features
 that are sufficient for binary DR classification.
+
+(한글 요약) v8b 병변맵에서 뽑은 스칼라 특징'만'으로 이진 DR 분류가 가능한지 보는 진단이다.
+v31 분류기는 건드리지 않으며, 결과적으로 v8b 특징 단독은 v31에 못 미쳐 배포로 승격되지 않았다.
 """
 from __future__ import annotations
 

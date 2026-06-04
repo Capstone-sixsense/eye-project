@@ -1,3 +1,12 @@
+"""재현성(reproducibility) 유틸: 시드 고정, 결정성 설정, 환경 스냅샷.
+
+- set_seed: random/numpy/torch(+CUDA) 시드를 한 번에 고정.
+- configure_determinism: cuDNN deterministic/benchmark, 결정적 알고리즘 사용 여부를 설정하고
+  실제 적용 상태를 dict로 돌려준다(학습 요약에 기록해 재현 조건을 남긴다).
+- environment_snapshot: Python/torch/CUDA/주요 패키지 버전과 GPU 정보를 수집한다.
+  결과 차이를 추적할 때 '같은 환경이었는지' 확인하는 근거가 된다.
+"""
+
 from __future__ import annotations
 
 import importlib.metadata

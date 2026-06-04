@@ -1,3 +1,21 @@
+"""안저 이미지 전처리 + 학습/평가용 데이터 증강(transform) 정의.
+
+크게 세 부분:
+1. FundusPreprocess: 카메라 여백 제거(content crop/square-pad) + Ben Graham 조명
+   정규화. preprocess_mode로 geometry를 분기한다
+   (contentcrop / safezoom / circular / quickqual / none).
+2. 마스크 geometry 동기화: apply_mask_geometry()가 이미지에 적용한 crop/pad/resize와
+   '동일한 기하 변환'만 마스크에 적용한다(Ben Graham 같은 광학적 변환은 마스크에 미적용).
+3. transform 빌더: build_train/eval_transform(분류), build_segmentation_* (분할).
+   분할용은 이미지와 마스크에 같은 공간 증강을 동기 적용한다(_SegmentationTransform).
+
+geometry 규약: 내부 _*_geometry 메서드는 모두 8-튜플
+  (x1, y1, x2, y2, pad_top, pad_bottom, pad_left, pad_right)
+을 반환한다. 즉 '[y1:y2, x1:x2]로 자른 뒤 상/하/좌/우로 패딩해 정사각형으로'를 뜻한다.
+이미지와 마스크가 같은 8-튜플을 공유하므로 픽셀 정합이 보장된다.
+이 규약은 tests/regression/test_preprocess_geometry.py가 고정 검증한다.
+"""
+
 from __future__ import annotations
 
 import albumentations as A
@@ -68,6 +86,8 @@ class FundusPreprocess:
         self._apply_ben_graham = bool(apply_ben_graham)
 
     def __call__(self, img: PILImage.Image) -> PILImage.Image:
+        # 처리 순서: (선택)정렬 -> content crop+pad -> (선택)정사각 resize -> (선택)Ben Graham.
+        # geometry(crop/pad/resize)를 먼저 끝낸 뒤 마지막에 광학적 정규화를 적용한다.
         arr = np.asarray(img.convert("RGB")).copy()
         if self._align:
             arr = self._correct_alignment(arr)
@@ -242,6 +262,9 @@ class FundusPreprocess:
         self,
         image: np.ndarray,
     ) -> tuple[int, int, int, int, int, int, int, int] | None:
+        # preprocess_mode에 따라 crop/pad 8-튜플을 계산한다. 이 단일 진입점을 이미지
+        # 크롭(_content_crop)과 마스크 정합(apply_mask_geometry)이 공유하므로, 어떤 mode든
+        # 이미지와 마스크에 같은 geometry가 적용된다. none은 전처리 없음(8-튜플 대신 None).
         if self._preprocess_mode == "circular":
             return self._legacy_circular_crop_geometry(image)
         if self._preprocess_mode == "safezoom":

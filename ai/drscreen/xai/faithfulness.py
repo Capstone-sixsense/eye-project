@@ -1,3 +1,13 @@
+"""어트리뷰션 충실도(faithfulness) 진단: deletion / insertion AUC.
+
+설명 히트맵이 '정말로 모델 판단에 중요한 픽셀'을 가리키는지 측정한다.
+- deletion: 중요 픽셀부터 지워가며 확률 곡선의 면적(AUC). 낮을수록 좋다(중요 픽셀을
+  지우면 확신이 빨리 떨어져야 함).
+- insertion: 빈 이미지에 중요 픽셀부터 채워가며 AUC. 높을수록 좋다.
+insertion_minus_deletion이 클수록 설명이 충실하다. 위치 정확도가 아니라 '인과적 중요도'를
+보는 지표라 CAM/perturbation 방법 비교에 쓰인다(AI_HANDOFF Phase 4-E).
+"""
+
 from __future__ import annotations
 
 import numpy as np

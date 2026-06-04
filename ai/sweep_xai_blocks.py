@@ -1,5 +1,8 @@
 """Block sweep: run XAI IoU evaluation at each target block and compare.
 
+(한글 요약) 여러 backbone 블록에서 CAM 위치정확도를 각각 평가해 어느 블록이 병변을 가장 잘
+가리키는지 비교한다. 얕은 블록만 높고 마지막 블록이 낮으면 분류/풀링 shortcut을 시사한다.
+
 For each block index (and the default last-block baseline), runs eval_xai_iou
 and collects aggregate metrics. Prints a comparison table and saves a JSON summary.
 

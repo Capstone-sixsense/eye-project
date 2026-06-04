@@ -1,3 +1,9 @@
+"""SSL 사전학습 -> 학습 -> 평가를 한 번에 실행하는 파이프라인 CLI.
+
+--ssl-config가 있으면 3단계(SSL->학습->평가), 없으면 2단계(학습->평가)로 진행한다.
+--dry-run은 설정만 검증한다. 개별 단계는 각각 ssl_pretrain/train/evaluate CLI로도 실행 가능하다.
+"""
+
 from __future__ import annotations
 
 import argparse

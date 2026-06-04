@@ -1,5 +1,9 @@
 """Fusion complementarity diagnostics and cheap residual meta ablation.
 
+(한글 요약) v31과 v8b가 서로 얼마나 보완적인지(한쪽이 틀린 것을 다른 쪽이 맞추는지)를
+측정하고, 잔차(residual) 가중 메타 융합을 저비용으로 시험한다. 보완성 상한이 낮아
+배포는 그대로 유지됐다(활성 별칭 미변경).
+
 This tool implements the Phase-C follow-up in
 ``.omc/plans/fusion_complementarity_plan.md`` after Phase 0 found a low
 complementarity ceiling.  It does not modify active deployment aliases.

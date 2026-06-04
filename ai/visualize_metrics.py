@@ -1,5 +1,9 @@
 """
 Model performance visualization across all evaluation runs.
+
+(한글 요약) 모든 평가 run의 메트릭(AUROC 등)을 모아 비교 그래프로 시각화한다.
+ai/ 디렉터리에서 실행한다.
+
 Run from the ai/ directory:
     python visualize_metrics.py
 """

@@ -1,3 +1,16 @@
+"""config로부터 학습/평가용 Dataset과 DataLoader를 조립하는 팩토리.
+
+config의 플래그에 따라 적절한 Dataset 클래스와 마스크 공급자, transform을 고른다:
+- lambda_aux_seg > 0 (마스크 supervision): 이미지/마스크 동기 transform이 필요하므로
+  Segmentation 계열 Dataset을 쓴다(_uses_mask_supervision).
+- use_fda: 도메인 일반화를 위해 FDA 계열 Dataset을 쓴다.
+- seg_mask_mode: union/per_lesion/composite로 마스크 공급자를 결정(composite는 IDRiD+
+  MAPLES+TJDR+DDR_SEG를 CompositeMaskProvider로 묶음).
+
+또한 train_exclude_domains(특정 도메인 제외)와 train_mask_valid_only(마스크 있는 행만)
+필터를 적용한 뒤, 시드 고정 generator로 재현 가능한 train DataLoader를 만든다.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,6 +46,8 @@ from drscreen.settings import resolve_project_path
 
 
 def _uses_mask_supervision(config: dict[str, Any]) -> bool:
+    # 보조 분할 손실 가중치가 양수면 마스크 supervision을 쓰는 것 -> 이미지/마스크 동기
+    # transform이 필요하다는 신호로 사용된다(Dataset/transform 선택의 기준).
     train_cfg = config.get("train", {})
     return float(train_cfg.get("lambda_aux_seg", 0.0) or 0.0) > 0.0
 

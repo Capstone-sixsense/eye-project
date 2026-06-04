@@ -1,3 +1,10 @@
+"""검증(validation)/holdout 분할 선택의 건전성 진단.
+
+체크포인트 선택에 쓰는 검증 분할이 holdout/외부 테스트를 잘 대변하는지(선택 기준이
+실제 일반화 성능과 어긋나지 않는지)를 점검한다. 검증-테스트 분포 괴리로 인한 잘못된
+모델 선택을 사전에 잡기 위한 도구다.
+"""
+
 from __future__ import annotations
 
 import argparse

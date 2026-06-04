@@ -1,3 +1,21 @@
+"""추론 세션 오케스트레이션: 이미지 한 장 -> 백엔드 페이로드 전체 흐름.
+
+이 모듈의 InferenceSession이 배포 추론의 최상위 진입점이다. 책임은 크게 둘:
+
+1. 구성(from_config_path): config + 체크포인트를 읽어 모델을 만들고, 입력 transform,
+   전처리기(FundusPreprocess), 판정 임계값, eval 메트릭을 준비한다.
+2. 추론(predict_pil_image): 전처리 -> transform -> 모델 forward(융합이면 메타 분류기,
+   선택적으로 hflip TTA) -> evidence 오버레이 생성 -> 페이로드/아티팩트 저장.
+
+evidence_type에 따라 근거 시각화가 갈린다:
+- lesion_segmentation: v8b 병변맵 오버레이(현재 배포). 실패 시 xai_error_code="XAI_002".
+- grounded_classifier : BagNet 등 patch-logit 오버레이. 실패 시 "XAI_003".
+- cam_research        : Grad-CAM/Layer-CAM 오버레이. 실패 시 "XAI_001".
+
+파일 앞부분의 `_`-접두 헬퍼들은 메트릭 JSON 파싱, 임계값 검증, 오버레이 렌더링,
+망막 영역 마스크 추출 등 추론을 구성하는 작은 부품들이다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -303,6 +321,9 @@ def _load_compact_xai_eval_metrics(
 
 
 def _build_retina_mask(image: Image.Image) -> np.ndarray:
+    # 안저 원형 영역만 1로 표시하는 마스크. 검은 배경에 evidence가 칠해지는 것을 막아
+    # 활성 비율/면적 계산이 망막 내부만 대상으로 하도록 한다.
+    # 방법: 밝기 임계화 -> 모폴로지 정리 -> 가장 큰 연결요소(=망막 원판) 선택.
     rgb = np.asarray(image.convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     _, thresholded = cv2.threshold(gray, 8, 255, cv2.THRESH_BINARY)
@@ -669,6 +690,8 @@ class InferenceSession:
             except Exception:
                 eval_metrics = None
 
+        # 판정 임계값 우선순위: 체크포인트/메트릭의 optimal_threshold > config의
+        # infer.threshold > 최후 기본값 0.5. 아티팩트 임계값을 최우선으로 신뢰한다.
         decision_threshold = (
             optimal_threshold
             if optimal_threshold is not None
@@ -704,6 +727,9 @@ class InferenceSession:
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
         resolved_image_path = Path(image_path).resolve()
+        # Footgun 방어: 이미 오프라인 전처리(geometry + Ben Graham)된 이미지에
+        # Ben Graham을 또 적용하면 정확도가 급락한다(meta AUROC ~0.93 -> ~0.80).
+        # 입력 경로가 전처리본으로 보이는데 config가 다시 Ben Graham을 켰다면 경고한다.
         if (
             self.preprocessor is not None
             and getattr(self.preprocessor, "_apply_ben_graham", False)
@@ -747,6 +773,9 @@ class InferenceSession:
         image_name: str = "upload.png",
         save_outputs: bool = True,
     ) -> SingleImagePrediction:
+        # 1) 선택적 라이브 전처리(QuickQual crop/Ben Graham 등) -> 2) eval transform(resize/
+        # crop/normalize) -> 모델 입력 텐서. 배포 config는 preprocess_mode=none(백엔드가
+        # 이미 QuickQual을 수행)이라 보통 preprocessor가 None이다.
         original_image = image.convert("RGB")
         if self.preprocessor is not None:
             original_image = self.preprocessor(original_image)
@@ -756,6 +785,8 @@ class InferenceSession:
         fusion_output: dict[str, Any] | None = None
         cached_lesion_prob: torch.Tensor | None = None
         fusion_summary: dict[str, Any] | None = None
+        # 융합 경로: 메타 분류기를 쓰는 모델은 predict_fusion_score로 최종 확률을 얻는다.
+        # (일반 분류기는 아래 else의 run_single_image_inference를 사용.)
         if bool(infer_cfg.get("use_meta_classifier", False)):
             if not hasattr(self.model, "predict_fusion_score"):
                 raise RuntimeError("use_meta_classifier=True requires predict_fusion_score().")
@@ -836,10 +867,13 @@ class InferenceSession:
         xai_no_region = False
         lesion_summary = None
         evidence_warning = None
+        # evidence(근거 시각화) 생성은 config의 evidence_type으로 분기한다. 어떤 분기든
+        # 실패는 예측 자체를 막지 않고 xai_error_code로만 표시한다(추론은 best-effort).
         evidence_type = str(infer_cfg.get("evidence_type", "cam_research")).strip().lower()
         if evidence_type in {"lesion_segmentation", "lesion_evidence", "segmentation"}:
             evidence_type = "lesion_segmentation"
             try:
+                # 융합 경로에서 이미 계산한 병변맵이 있으면 재사용(중복 forward 회피).
                 if cached_lesion_prob is not None:
                     lesion_prob = cached_lesion_prob
                 else:

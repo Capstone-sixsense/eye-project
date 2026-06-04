@@ -1,4 +1,8 @@
-"""Audit v8b teacher mask quality before mask-conditioned augmentation."""
+"""Audit v8b teacher mask quality before mask-conditioned augmentation.
+
+(한글 요약) v8b 분할기가 만든 teacher 마스크의 품질을 마스크 기반 증강(pseudo-lesion 등)에
+쓰기 전에 점검한다. 마스크 audit 실패율이 높으면 해당 증강 트랙을 보류하는 근거가 된다.
+"""
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,9 @@
 """Offline preprocessing script.
 
+(한글 요약) manifest의 모든 이미지에 crop+pad+resize+Ben Graham 전처리를 미리 적용해
+processed*/images/에 저장한다. 학습/평가는 이 전처리본을 쓰므로 런타임 전처리를 끈다
+(use_preprocessing=false). 품질 필터링은 하지 않는다(모든 이미지 포함).
+
 Applies content-aware border crop + Ben Graham normalization + resize (data.preprocess_size)
 to every image in the manifest. No quality filtering -- all images are included.
 

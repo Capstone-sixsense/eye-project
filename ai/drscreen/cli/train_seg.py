@@ -1,3 +1,9 @@
+"""독립 병변 분할기 학습 CLI 진입점(분류기 train.py와 별개).
+
+config(+ base.yaml)를 병합해 seg_runner.run_segmentation_training을 실행한다.
+분류 학습과 동일하게 Python 3.14를 강제한다. --dry-run은 데이터/모델 설정만 검증한다.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -9,6 +15,7 @@ _REQUIRED_TRAINING_PYTHON = (3, 14)
 
 
 def _enforce_training_python() -> None:
+    # 학습 전용 Python 버전 가드(배포 인터프리터로 실수 실행 방지).
     if sys.version_info[:2] == _REQUIRED_TRAINING_PYTHON:
         return
     required = ".".join(str(part) for part in _REQUIRED_TRAINING_PYTHON)

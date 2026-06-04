@@ -2,6 +2,9 @@
 the actual SERVE-geometry input (backend QuickQual square -> AI circular) vs the
 TRAIN-geometry input (AI circular on raw, = the AI_HANDOFF baseline)?
 
+(한글 요약) v8b 병변 오버레이(mDice)가 학습 geometry 입력 대비 실제 서빙 geometry 입력에서
+저하되는지 측정한다. 분류기 AUROC가 아니라 '병변 공간 정합'에 대한 학습-서빙 skew 점검.
+
 reeval (.omc/research/preprocessing_color/resize_path_reeval_v1.json) already showed the
 fusion CLASSIFIER AUROC is robust to the skew. It did NOT measure the v8b spatial overlay.
 This script measures exactly that, reusing eval_seg_evidence helpers so train-path

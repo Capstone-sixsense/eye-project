@@ -1,3 +1,16 @@
+"""독립 병변 분할기(v8b 계열, LesionSegEvidence) 학습 오케스트레이터.
+
+분류기 학습(runner.py)과 별개의 루프다. 핵심 차이:
+- 마스크가 유효한 행만 사용한다(_valid_mask_indices). IDRiD/MAPLES/TJDR/DDR_SEG를
+  CompositeMaskProvider로 묶어 4채널 마스크를 공급한다.
+- 자체 검증 분할을 만든다(seg_val_fraction 비율로 결정적 train/val split).
+- best는 검증 mDice 최고 에폭으로 선택한다(분류와 달리 AUROC 아님).
+- 옵션: 도메인 가중 샘플링, 초기 체크포인트 warmstart, 조기종료, SWA(가중치 평균),
+  AdverIN(적대적 강도 변환으로 도메인 일반화) 진단.
+
+run_segmentation_training이 진입점이고, describe_segmentation_setup은 dry-run 요약이다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -156,6 +169,7 @@ def _make_dataset(
 
 
 def _valid_mask_indices(dataset: ManifestDataset) -> list[int]:
+    # 픽셀 마스크가 실제로 존재하는 행의 위치만 모은다(마스크 없는 행은 분할 학습에서 제외).
     valid: list[int] = []
     has_valid_mask = getattr(dataset._mask_provider, "has_valid_mask", None)  # noqa: SLF001
     for idx, row in dataset.frame.iterrows():
@@ -467,6 +481,7 @@ def _run_epoch(
     for batch in loader:
         images = batch["image"].to(device)
         targets = batch["seg_mask"].to(device)
+        # 배치 안에서도 마스크 유효 샘플만 골라 손실/지표를 계산한다(나머지는 건너뜀).
         valid = batch["seg_mask_valid"].to(device).bool()
         if not valid.any():
             continue

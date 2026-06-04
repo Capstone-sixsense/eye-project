@@ -1,5 +1,7 @@
 """Heatmap vs GT lesion mask visualization for a single IDRiD image.
 
+(한글 요약) IDRiD 한 장에 대해 모델 히트맵과 정답 병변 마스크를 나란히 시각화한다(정성 점검용).
+
 Usage
 -----
     python visualize_heatmap_gt.py --config configs/base.yaml --image IDRiD_01

@@ -1,3 +1,10 @@
+"""MAPLES-DR 학습 마스크 배선(wiring)과 픽셀 희소성 진단.
+
+MAPLES 마스크가 manifest 행에 제대로 연결됐는지, 그리고 마스크가 사실상 비어 있는
+(R0 등 픽셀이 거의 없는) 경우가 얼마나 되는지 점검한다. 빈 마스크가 잘못된 음성
+supervision을 주는 문제(AI_HANDOFF Phase 4-C)를 잡기 위한 도구다.
+"""
+
 from __future__ import annotations
 
 import argparse

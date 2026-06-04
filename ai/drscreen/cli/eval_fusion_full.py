@@ -5,6 +5,9 @@ the active fusion checkpoint was promoted from a staged late-fusion sweep. It
 records the current classification/XAI metrics, payload contract, optional
 single-image inference smoke output, and optional local latency probe in one
 JSON file.
+
+(한글 요약) 현재 배포 융합 모델의 회귀 점검 도구. 분류/XAI 메트릭, 페이로드 계약, 단일
+이미지 추론 스모크, 로컬 지연(latency)까지 한 JSON에 모아 배포 상태를 한눈에 검증한다.
 """
 from __future__ import annotations
 

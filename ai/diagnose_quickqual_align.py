@@ -1,5 +1,8 @@
 """P-A and P-B verification before any retrain.
 
+(한글 요약) 재학습 전, AI의 quickqual geometry가 백엔드 전처리와 일치하는지(P-A: bbox 동일)와
+두 경로의 512 입력 차이(P-B: MAE/PSNR)를 검증한다. 학습-서빙 전처리 정합 점검 도구.
+
 P-A: For sampled raw images, the AI `quickqual` geometry bbox MUST equal the backend
      `preprocess_fundus_image` bbox (both: RGB-mean>15, +20px buffer, clamped). Semantic
      replica check, not pixel-exact — resampler/resize differences are P-B's territory.

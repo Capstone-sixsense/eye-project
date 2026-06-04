@@ -1,3 +1,19 @@
+"""raw 데이터셋 디렉터리를 스캔해 학습용 manifest CSV를 만든다.
+
+데이터셋마다 라벨 CSV/디렉터리 구조가 달라(APTOS/IDRiD/Messidor/MAPLES/TJDR/
+DDR/DDR_SEG) 각 _build_*_rows()가 해당 포맷을 읽어 공통 스키마 행으로 변환한다:
+  image_id / image_path / label / original_grade / split / domain / source_split.
+
+라벨 규약: DR grade 0 = 정상(0), 1 이상 = 비정상(1) (binary_label_from_grade).
+도메인 역할: APTOS/IDRiD는 학습/내부평가, Messidor/DDR은 외부 테스트, MAPLES/TJDR/
+DDR_SEG는 픽셀 마스크(분할 evidence) 공급용이다.
+
+분할 후처리:
+- split_external_into_calibration_holdout: 외부 테스트를 calibration 20% / holdout 80%로
+  층화 분할(임계값 보정용 / 최종 평가용). 배포 메트릭의 공식 분할 정책이다.
+- rebalance_val_split: 도메인별 할당량으로 혼합 검증셋(val_mixed)을 구성.
+"""
+
 from __future__ import annotations
 
 import re
@@ -21,6 +37,7 @@ class ManifestSummary:
 
 
 def binary_label_from_grade(grade: int) -> int:
+    # DR 등급(0~4)을 이진 라벨로: grade 0만 정상(0), 나머지는 모두 비정상(1).
     return 0 if grade == 0 else 1
 
 
@@ -558,6 +575,8 @@ def split_external_into_calibration_holdout(
     calibration_split: str = "external_calibration",
     holdout_split: str = "external_holdout",
 ) -> pd.DataFrame:
+    # 외부 테스트를 calibration(임계값 보정용) / holdout(최종 평가용)으로 층화 분할한다.
+    # 라벨 비율을 보존(_stratified_sample_indices)해 보정 임계값이 편향되지 않게 한다.
     if not 0.0 < calibration_fraction < 1.0:
         raise ValueError("calibration_fraction must be between 0 and 1.")
     updated = frame.copy()

@@ -1,5 +1,8 @@
 """Screen color canonicalization candidates before changing preprocessing.
 
+(한글 요약) 전처리 변경 전, 색 정규화 후보들을 저비용으로 비교하는 Phase 1 진단이다
+(FundusPreprocess나 활성 아티팩트를 건드리지 않음).
+
 This is a low-cost Phase 1 diagnostic for
 ``.omc/plans/preprocessing_color_canonicalization_plan.md``.  It intentionally
 does not modify ``FundusPreprocess`` or any active artifacts.  Each candidate is

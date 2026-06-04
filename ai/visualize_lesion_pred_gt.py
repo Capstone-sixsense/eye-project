@@ -1,5 +1,8 @@
 """Lesion evidence prediction vs GT visualization for one IDRiD image.
 
+(한글 요약) v8b 병변 예측과 정답 마스크를 한 이미지에 겹쳐 보여준다. 배포 추론 경로는 그대로
+두되(Ben Graham 포함), 배경만 보기 좋게 동일 geometry로 다시 그려 가독성을 높인다.
+
 This script keeps the deployed inference path intact while making the
 presentation background easier to read:
 
