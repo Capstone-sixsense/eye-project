@@ -7,7 +7,7 @@
 - **대상 범위**: v30~v39 classifier-routing/decoder-alignment 실험, Phase 4-E/F shortcut audit 및 shortcut-free classifier 재설계 진단, standalone lesion segmentation evidence scaffold, mask-geometry 보정
 - **범위 제외**: Phase 4-G 전체는 Sprint 5 작업으로 분리한다. 여기에는 TJDR/DDR_SEG 통합, MAPLES ROI 보정 후 v8b evidence baseline, v8b evidence classifier, v31+v8b late fusion 진단이 포함된다.
 
-> 주의: Sprint 4 종료 기준 active deployment는 `v31_no_se_gated`다. 이후 실험 중 `v37b`, `v37b_aux03`, `cbm_v1` 등 일부 run은 DDR AUROC가 v31보다 높았지만, 병변 위치 정렬 또는 MAPLES 일반화 기준을 만족하지 못해 배포하지 않는다. `artifacts/checkpoints/best.pt`는 계속 v31 checkpoint alias로 유지한다.
+> 주의: Sprint 4 종료 기준 active deployment는 `v31_no_se_gated`였다. 이후 실험 중 `v37b`, `v37b_aux03`, `cbm_v1` 등 일부 run은 DDR AUROC가 v31보다 높았지만, 병변 위치 정렬 또는 MAPLES 일반화 기준을 만족하지 못해 배포하지 않았다. 현재 전체 배포 버전은 Sprint 5에서 `v31_v8b_fusion_v2`로 변경되었으며, `artifacts/checkpoints/best.pt`도 composite checkpoint alias로 교체되어 있다.
 
 ## 2. 주요 개발 및 성과 (Milestones)
 
@@ -61,7 +61,7 @@
 | 버전 | 핵심 변경 | DDR AUROC | Optimal threshold | Sensitivity@optimal | 판정 |
 |---|---|---:|---:|---:|---|
 | `v30_gated_pooling` | block4 lesion gate x classifier pooling | 0.9137 | 0.31 | 0.7840 | classifier-routing baseline |
-| `v31_no_se_gated` | true no-attention + gated pooling | **0.9160** | **0.35** | **0.7983** | active deployment |
+| `v31_no_se_gated` | true no-attention + gated pooling | **0.9160** | **0.35** | **0.7983** | Sprint 4 active deployment |
 | `v37b_xai_unet_only` | U-Net decoder, no CAM alignment | 0.9200 | 0.27 | 0.8223 | XAI/MAPLES 미달 |
 | `v37b_aux03` | aux seg loss 0.3 sweep | 0.9203 | 0.41 | 0.7813 | XAI 회귀 |
 | `v31_dfr_v1` | DFR last-layer reweighting | 0.8641 | 0.05 | 0.6554 | DDR 실패 |
@@ -77,7 +77,7 @@
 
 ## 4. 결론 및 Sprint 5 이월
 
-- **성과**: Sprint 4는 active model을 `v31_no_se_gated`로 확정하고, XAI를 제품 기능으로 내세우기 어려운 원인을 shortcut audit과 segmentation evidence 실험으로 분리했다.
+- **성과**: Sprint 4는 당시 active model을 `v31_no_se_gated`로 확정하고, XAI를 제품 기능으로 내세우기 어려운 원인을 shortcut audit과 segmentation evidence 실험으로 분리했다.
 - **핵심 학습**:
   - Layer-CAM 방식 자체를 바꾸는 것만으로는 병변 위치 문제를 해결하지 못한다.
   - v31 계열은 DDR 분류 성능은 유지하지만, 병변만으로 판단하는 shortcut-free classifier라고 보기 어렵다.
@@ -94,7 +94,7 @@
 ## 5. 근거 파일
 - `ai/docs/DEVLOG.md`: Sprint 4 및 이후 상세 변경 이력. v31 syncfix, Phase 4-E/F, 이후 Sprint 5 Phase 4-G 기록.
 - `ai/docs/EXPERIMENT_REGISTRY.md`: run group, artifact 위치, DDR/XAI/segmentation 평가 요약.
-- `ai/docs/AI_HANDOFF.md`: active deployment, open issues, Sprint 5 Phase 4-G 이후 상태.
+- `ai/docs/AI_HANDOFF.md`: 최신 active deployment, known gaps, Sprint 5 Phase 4-G 이후 상태.
 - `ai/.omc/research/phase4e_shortcut_audit.json`
 - `ai/.omc/research/phase4f_v3_selection.json`
 - `ai/artifacts/runs/07_lesion_evidence/v31_no_se_gated/evaluations/external_test_v31_no_se_gated_best_metrics.json`

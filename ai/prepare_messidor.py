@@ -1,5 +1,8 @@
 """Prepare Messidor dataset for manifest builder.
 
+(한글 요약) Messidor 원본(12개 annotation 엑셀 + 분산된 tif)을 manifest builder가 읽을 수
+있는 형태로 정리한다: messidor_data.csv 생성 + 이미지를 평평한 images/ 폴더로 하드링크.
+
 Reads the 12 Annotation_BaseXX.xls files and:
   1. Creates messidor_data.csv with columns image_id, adjudicated_dr_grade
   2. Hardlinks all .tif images into a flat images/ directory

@@ -1,3 +1,15 @@
+"""병변 마스크 로딩 + CAM 위치정확도(localization) 평가 지표.
+
+두 축으로 구성된다:
+1. 마스크 로더: load_lesion_masks(IDRiD), load_maples_masks(MAPLES). MAPLES 마스크는
+   1500x1500 ROI 공간이라 원본 MESSIDOR 좌표계로 복원해야 한다
+   (_maples_roi_to_messidor_canvas). 이 복원을 빠뜨리면 마스크가 어긋나 과거 MAPLES
+   수치가 오염됐었다(AI_HANDOFF: MAPLES ROI coordinate fix).
+2. 평가 지표: CAM(연속 점수)을 GT 병변 마스크와 비교 — IoU, 픽셀 AUPRC, AUC-IoU(임계값
+   스윕 평균), Pointing Game(최댓값 픽셀이 병변 안인지). 비교용 baseline CAM도 제공
+   (random / center-Gaussian / retina-uniform).
+"""
+
 from __future__ import annotations
 
 import csv
@@ -56,6 +68,8 @@ def _maples_roi_to_messidor_canvas(
     if roi is None:
         return mask
 
+    # ROI 마스크를 원본 크기(H x W) 빈 캔버스의 [y0:y1, x0:x1] 위치에 되돌려 붙인다.
+    # ROI 정보(MESSIDOR-ROIs.csv)가 없으면 원본 마스크를 그대로 반환한다.
     canvas = np.zeros((roi["H"], roi["W"]), dtype=np.uint8)
     x0, y0, x1, y1 = roi["x0"], roi["y0"], roi["x1"], roi["y1"]
     roi_w, roi_h = x1 - x0, y1 - y0

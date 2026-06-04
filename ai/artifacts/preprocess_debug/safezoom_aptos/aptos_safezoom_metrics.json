@@ -1,0 +1,122 @@
+{
+  "1ae8c165fd53": {
+    "raw_size": [
+      3216,
+      2136
+    ],
+    "quickqual_size": [
+      1024,
+      1024
+    ],
+    "quickqual_foreground_bbox_xywh": [
+      7,
+      113,
+      1010,
+      798
+    ],
+    "old_circular_crop_rect_xyxy_on_quickqual": [
+      113,
+      108,
+      911,
+      906
+    ],
+    "current_contentcrop_output_foreground_bbox_xywh": [
+      4,
+      56,
+      504,
+      399
+    ],
+    "proposed_safezoom": {
+      "bounds_xyxy": [
+        0,
+        103,
+        1024,
+        921
+      ],
+      "bbox_wh": [
+        1024,
+        818
+      ],
+      "full_fit_side": 1024,
+      "safe_zoom_side": 930,
+      "crop_rect_xyxy": [
+        47,
+        47,
+        977,
+        977
+      ],
+      "target_short_fill": 0.88,
+      "max_total_x_trim": 0.12,
+      "max_total_y_trim": 0.08,
+      "actual_trim_x_frac_est": 0.091796875,
+      "actual_trim_y_frac_est": 0.0,
+      "lost_foreground_frac": 0.029717690357038667,
+      "output_foreground_bbox_xywh": [
+        0,
+        36,
+        512,
+        439
+      ]
+    }
+  },
+  "4dd71fc7f22b": {
+    "raw_size": [
+      640,
+      480
+    ],
+    "quickqual_size": [
+      1024,
+      1024
+    ],
+    "quickqual_foreground_bbox_xywh": [
+      0,
+      127,
+      1024,
+      770
+    ],
+    "old_circular_crop_rect_xyxy_on_quickqual": [
+      126,
+      128,
+      896,
+      898
+    ],
+    "current_contentcrop_output_foreground_bbox_xywh": [
+      0,
+      64,
+      512,
+      384
+    ],
+    "proposed_safezoom": {
+      "bounds_xyxy": [
+        0,
+        117,
+        1024,
+        907
+      ],
+      "bbox_wh": [
+        1024,
+        790
+      ],
+      "full_fit_side": 1024,
+      "safe_zoom_side": 902,
+      "crop_rect_xyxy": [
+        61,
+        61,
+        963,
+        963
+      ],
+      "target_short_fill": 0.88,
+      "max_total_x_trim": 0.12,
+      "max_total_y_trim": 0.08,
+      "actual_trim_x_frac_est": 0.119140625,
+      "actual_trim_y_frac_est": 0.0,
+      "lost_foreground_frac": 0.1097289573840931,
+      "output_foreground_bbox_xywh": [
+        0,
+        38,
+        512,
+        436
+      ]
+    }
+  }
+}

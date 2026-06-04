@@ -1,4 +1,8 @@
-"""Evaluate standalone lesion segmentation evidence models."""
+"""Evaluate standalone lesion segmentation evidence models.
+
+(한글 요약) 독립 병변 분할기(v8b 계열)를 IDRiD/MAPLES/TJDR/DDR_SEG 마스크로 평가한다
+(mDice/mIoU/union, 임계값 스윕). 오프라인 전처리 manifest면 마스크 geometry 정합을 적용한다.
+"""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +18,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from drscreen.data.transforms import FundusPreprocess, build_eval_transform
+from drscreen.data.transforms import FundusPreprocess, build_eval_transform, preprocess_kwargs_from_config
 from drscreen.models.profiles import get_model_profile
 from drscreen.models.seg_evidence import LesionSegEvidence
 from drscreen.settings import get_run_evaluation_dir, load_app_config, resolve_project_path
@@ -53,7 +57,14 @@ def _manifest_uses_offline_preprocessing(config: dict, project_root: Path) -> bo
         first = next(reader, None)
     if not first:
         return False
-    return str(first.get("image_path", "")).startswith("processed/images/")
+    image_path = str(first.get("image_path", ""))
+    return image_path.startswith((
+        "processed/images/",
+        "processed_contentcrop/images/",
+        "processed_safezoom/images/",
+        "processed_quickqual/images/",
+        "processed_quickqual_1024/images/",
+    ))
 
 
 def _eval_preprocessing_enabled(config: dict, project_root: Path) -> bool:
@@ -80,6 +91,7 @@ def _eval_transform(config: dict, project_root: Path):
         mean=profile.mean,
         std=profile.std,
         use_preprocessing=use_preprocessing,
+        preprocess_kwargs=preprocess_kwargs_from_config(data_cfg),
     )
 
 
@@ -278,7 +290,10 @@ def evaluate(
     transform = _eval_transform(config, project_root)
     data_cfg = config["data"]
     mask_preprocessor = (
-        FundusPreprocess(output_size=int(data_cfg.get("image_size", 512)))
+        FundusPreprocess(
+            output_size=int(data_cfg.get("image_size", 512)),
+            **preprocess_kwargs_from_config(data_cfg),
+        )
         if _eval_preprocessing_enabled(config, project_root)
         else None
     )
@@ -378,7 +393,10 @@ def evaluate_threshold_sweep(
     transform = _eval_transform(config, project_root)
     data_cfg = config["data"]
     mask_preprocessor = (
-        FundusPreprocess(output_size=int(data_cfg.get("image_size", 512)))
+        FundusPreprocess(
+            output_size=int(data_cfg.get("image_size", 512)),
+            **preprocess_kwargs_from_config(data_cfg),
+        )
         if _eval_preprocessing_enabled(config, project_root)
         else None
     )

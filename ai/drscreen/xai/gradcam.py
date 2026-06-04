@@ -1,3 +1,16 @@
+"""CAM 계열 XAI 어트리뷰션(설명 히트맵) 생성기 모음.
+
+분류기가 '이미지 어디를 보고' 판단했는지 추정하는 사후(post-hoc) 설명 기법들을 모았다.
+generate_gradcam이 진입점(method 문자열로 분기):
+- gradcam/layercam/hirescam/gradcam++: forward+backward 1회로 활성값과 그래디언트를 결합.
+- scorecam/eigencam: 그래디언트 없이 채널 마스킹/주성분으로 계산(느리지만 robust).
+- ig: Integrated Gradients(픽셀 단위 어트리뷰션).
+generate_multiblock_cam은 여러 블록의 CAM을 가중합한다.
+
+주의: 현재 배포 evidence는 CAM이 아니라 v8b 병변 분할이다. CAM은 연구/진단용으로 남아 있다
+(AI_HANDOFF 6절). 각 함수의 영어 docstring에 논문 출처가 있다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,9 +71,12 @@ def _gradcam_core(
         fwd.remove()
         bwd.remove()
 
-    act = activations["v"]   # [B, C, H, W]
-    grad = gradients["v"]    # [B, C, H, W]
+    act = activations["v"]   # [B, C, H, W] 대상 레이어의 활성값
+    grad = gradients["v"]    # [B, C, H, W] 점수에 대한 그래디언트
 
+    # 방법별로 채널 가중치를 다르게 만든다:
+    # - layercam: 픽셀별 양의 그래디언트로 가중(공간 해상도 유지에 유리)
+    # - gradcam: 그래디언트를 공간 평균내 채널당 스칼라 가중(고전적 방식)
     if method == "layercam":
         weights = torch.relu(grad)
         cam = torch.relu((weights * act).sum(dim=1, keepdim=True))

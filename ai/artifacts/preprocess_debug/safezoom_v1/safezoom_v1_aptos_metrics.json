@@ -1,0 +1,90 @@
+{
+  "1ae8c165fd53": {
+    "raw_size": [
+      3216,
+      2136
+    ],
+    "contentcrop_output_bbox": {
+      "x": 5,
+      "y": 58,
+      "w": 502,
+      "h": 396
+    },
+    "safezoom_output_bbox": {
+      "x": 0,
+      "y": 35,
+      "w": 512,
+      "h": 442
+    },
+    "contentcrop_raw_crop": {
+      "geometry": [
+        326,
+        0,
+        3091,
+        2136,
+        314,
+        315,
+        0,
+        0
+      ],
+      "foreground_loss": 0.0
+    },
+    "safezoom_raw_crop": {
+      "geometry": [
+        464,
+        0,
+        2946,
+        2136,
+        173,
+        173,
+        0,
+        0
+      ],
+      "foreground_loss": 0.03268806096693402
+    }
+  },
+  "4dd71fc7f22b": {
+    "raw_size": [
+      640,
+      480
+    ],
+    "contentcrop_output_bbox": {
+      "x": 0,
+      "y": 64,
+      "w": 512,
+      "h": 384
+    },
+    "safezoom_output_bbox": {
+      "x": 0,
+      "y": 45,
+      "w": 512,
+      "h": 422
+    },
+    "contentcrop_raw_crop": {
+      "geometry": [
+        0,
+        0,
+        640,
+        480,
+        80,
+        80,
+        0,
+        0
+      ],
+      "foreground_loss": 0.0
+    },
+    "safezoom_raw_crop": {
+      "geometry": [
+        28,
+        0,
+        612,
+        480,
+        52,
+        52,
+        0,
+        0
+      ],
+      "foreground_loss": 0.07852709072786902
+    }
+  }
+}

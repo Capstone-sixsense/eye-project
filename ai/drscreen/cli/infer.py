@@ -1,3 +1,10 @@
+"""단일 안저 이미지 추론 CLI.
+
+config + 이미지 경로를 받아 InferenceSession을 만들고 결과 페이로드를 JSON으로 출력한다.
+주의(footgun): RAW 이미지에 이 CLI를 그대로 쓰면 QuickQual 크롭이 적용되지 않는다.
+RAW 입력은 preprocess_mode: quickqual 설정의 config를 사용해야 한다(AI_HANDOFF 1절).
+"""
+
 from __future__ import annotations
 
 import argparse

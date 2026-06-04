@@ -1,11 +1,11 @@
 # eye-project
 
-**최종 갱신: 2026-05-25**
+**최종 갱신: 2026-06-03**
 
-안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.  
-이미지를 업로드하면 AI가 이상 여부를 추정하고, 설명(GradCAM·리포트)과 품질 정보를 함께 제공합니다.
+안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
+이미지를 업로드하면 AI가 이상 여부를 추정하고, 병변 evidence overlay와 리포트, 품질 정보를 함께 제공합니다.
 
-> **의료 보조 용도** — 최종 판단은 반드시 의료 전문가가 합니다.  
+> **의료 보조 용도** - 최종 판단은 반드시 의료 전문가가 합니다.
 > 설계·운영은 **정확성·재현성·설정 일관성**을 속도보다 우선합니다.
 
 ---
@@ -26,7 +26,7 @@
 |----------|------|------|
 | **Frontend** | 업로드·진행·결과·이력·PDF | Flutter (Web / Docker nginx) |
 | **Backend** | API, 이력·암호화 저장, QuickQual, 추론 호출 | FastAPI, Uvicorn |
-| **AI** | 학습·추론·XAI·설정·체크포인트 | PyTorch, `drscreen` 패키지 |
+| **AI** | 학습·추론·XAI·설정·체크포인트 | PyTorch, EfficientNet-B5, lesion evidence segmenter, numeric fusion, `drscreen` 패키지 |
 
 ---
 
@@ -121,8 +121,8 @@ eye-project/
 
 ## 데이터셋 출처
 
-학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.  
-현재 배포 기준 `v31_v8b_fusion_v2`의 병변 feature는 `seg_evidence_v8b_ddrseg_tjdr_maplesfix` 모델에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.  
+학습 및 평가에 사용된 공개 데이터셋에 대한 저작권 및 credit 표기.
+현재 배포 기준 `v31_v8b_fusion_quickqual_v2`의 병변 evidence feature는 `seg_evidence_v8b_quickqual_v1` 계열 segmenter에서 생성되며, 이 병변 feature 학습에는 `IDRiD`, `MAPLES-DR`, `TJDR`, `DDR_SEG`가 사용되었다.
 데이터 원본은 저장소에 포함하지 않으며, 다운로드와 재사용은 각 원 배포처의 라이선스 및 이용 조건을 따른다.
 
 | 데이터셋 | 이 프로젝트에서의 사용 | 출처 / 인용 | 라이선스 / 이용 조건 |
@@ -154,7 +154,6 @@ TJDR 인용:
 - 컴포넌트별 작업: 해당 브랜치에서 PR → `main` 머지.
 - `ai/configs/base.yaml` 변경 시 Docker 추론·백엔드 응답 필드와 **함께** 검증.
 - Cursor/에이전트 규칙: [`.cursor/rules/eye-project.mdc`](.cursor/rules/eye-project.mdc)
-
 - `test/widget_test.dart`는 업로드 화면 빌드 스모크 테스트입니다. AppBar 문구가 `망막 이미지 분석`으로 바뀐 경우 테스트 문자열을 맞춰 주세요.
 
 ---

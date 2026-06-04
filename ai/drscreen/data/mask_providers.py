@@ -1,3 +1,16 @@
+"""도메인별 병변 마스크 로더 + raw 마스크의 전처리 geometry 정합.
+
+데이터셋마다 마스크 포맷/라벨 규약이 달라(IDRiD/MAPLES/TJDR/DDR_SEG) 각 도메인
+전용 Provider가 있고, 모두 공통 인터페이스 LesionMaskProvider(load/has_valid_mask)를
+따른다. CompositeMaskProvider가 여러 Provider를 순서대로 시도해 도메인별로 분배한다.
+
+핵심 난제(geometry 정합): manifest의 이미지는 오프라인 전처리본(processed*/images/...)
+인데, 원본 병변 마스크는 raw 좌표계다. 그래서 마스크를 그냥 resize하면 이미지와
+어긋난다. _align_mask_to_image_preprocessing()이 raw 마스크에 '이미지와 동일한'
+crop/pad geometry를 적용해 좌표계를 맞춘다(geometry는 raw 원본 기준으로 계산 후
+lru_cache로 재사용). 채널 순서는 프로젝트 표준 MA/HE/EX/SE로 통일한다.
+"""
+
 from __future__ import annotations
 
 import re
@@ -14,7 +27,23 @@ _SEG_TRAIN_IDS = range(1, 55)
 _SEG_SPLIT = {_SEG_TRAIN_SPLIT: _SEG_TRAIN_IDS, "b. Testing Set": range(55, 82)}
 _SEG_ID_RE = re.compile(r"IDRiD_(\d+)")
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
-_PROCESSED_PREFIX = ("processed", "images")
+_PROCESSED_PREFIXES = (
+    ("processed", "images"),
+    ("processed_contentcrop", "images"),
+    ("processed_safezoom", "images"),
+    ("processed_quickqual", "images"),
+    ("processed_quickqual_1024", "images"),
+)
+_SAFEZOOM_DEFAULTS = {
+    "preprocess_mode": "safezoom",
+    "target_short_fill": 0.86,
+    "max_total_x_trim": 0.08,
+    "max_total_y_trim": 0.08,
+    "saliency_shift": True,
+    "saliency_weight": 1.2,
+    "saliency_candidates": 5,
+    "safezoom_max_dim": 1024,
+}
 
 
 def _infer_raw_root(path: Path) -> Path:
@@ -27,15 +56,42 @@ def _infer_raw_root(path: Path) -> Path:
 
 def _is_processed_image_path(image_path: str) -> bool:
     parts = Path(image_path).parts
-    return len(parts) >= 2 and tuple(parts[:2]) == _PROCESSED_PREFIX
+    return any(
+        len(parts) >= len(prefix) and tuple(parts[: len(prefix)]) == prefix
+        for prefix in _PROCESSED_PREFIXES
+    )
 
 
 def _raw_relative_image_path(image_path: str) -> Path:
     path = Path(image_path)
     parts = path.parts
-    if len(parts) >= 2 and tuple(parts[:2]) == _PROCESSED_PREFIX:
-        return Path(*parts[2:])
+    for prefix in _PROCESSED_PREFIXES:
+        if len(parts) >= len(prefix) and tuple(parts[: len(prefix)]) == prefix:
+            return Path(*parts[len(prefix) :])
     return path
+
+
+def _preprocess_options_for_image_path(image_path: str) -> tuple[str, float, float, float, bool, float, int, int]:
+    parts = Path(image_path).parts
+    if len(parts) >= 2 and tuple(parts[:2]) == ("processed_safezoom", "images"):
+        return (
+            str(_SAFEZOOM_DEFAULTS["preprocess_mode"]),
+            float(_SAFEZOOM_DEFAULTS["target_short_fill"]),
+            float(_SAFEZOOM_DEFAULTS["max_total_x_trim"]),
+            float(_SAFEZOOM_DEFAULTS["max_total_y_trim"]),
+            bool(_SAFEZOOM_DEFAULTS["saliency_shift"]),
+            float(_SAFEZOOM_DEFAULTS["saliency_weight"]),
+            int(_SAFEZOOM_DEFAULTS["saliency_candidates"]),
+            int(_SAFEZOOM_DEFAULTS["safezoom_max_dim"]),
+        )
+    if len(parts) >= 2 and tuple(parts[:2]) == ("processed", "images"):
+        return ("circular", 0.86, 0.08, 0.08, True, 1.2, 5, 1024)
+    if len(parts) >= 2 and tuple(parts[:2]) in {
+        ("processed_quickqual", "images"),
+        ("processed_quickqual_1024", "images"),
+    }:
+        return ("quickqual", 0.86, 0.08, 0.08, True, 1.2, 5, 1024)
+    return ("contentcrop", 0.86, 0.08, 0.08, True, 1.2, 5, 1024)
 
 
 def _resolve_raw_image_path(raw_root: Path, image_path: str) -> Path | None:
@@ -60,9 +116,19 @@ def _resize_mask_array(mask: np.ndarray, size: int) -> np.ndarray:
     return resized
 
 
+# 같은 원본 이미지에 대한 전처리 geometry는 변하지 않으므로 캐시한다(에폭마다 마스크
+# 정합을 반복 호출하는 비용 절감). 인자는 모두 hashable해야 lru_cache가 작동한다.
 @lru_cache(maxsize=4096)
 def _cached_preprocess_geometry(
     reference_path: str,
+    preprocess_mode: str,
+    target_short_fill: float,
+    max_total_x_trim: float,
+    max_total_y_trim: float,
+    saliency_shift: bool,
+    saliency_weight: float,
+    saliency_candidates: int,
+    safezoom_max_dim: int,
 ) -> tuple[tuple[int, int], tuple[int, int, int, int, int, int, int, int] | None]:
     from PIL import Image as PILImage
 
@@ -70,7 +136,17 @@ def _cached_preprocess_geometry(
 
     with PILImage.open(reference_path) as reference:
         ref = np.asarray(reference.convert("RGB"))
-    preprocessor = FundusPreprocess(align=False)
+    preprocessor = FundusPreprocess(
+        align=False,
+        preprocess_mode=preprocess_mode,
+        target_short_fill=target_short_fill,
+        max_total_x_trim=max_total_x_trim,
+        max_total_y_trim=max_total_y_trim,
+        saliency_shift=saliency_shift,
+        saliency_weight=saliency_weight,
+        saliency_candidates=saliency_candidates,
+        safezoom_max_dim=safezoom_max_dim,
+    )
     return ref.shape[:2], preprocessor._circular_crop_geometry(ref)  # noqa: SLF001 - shared geometry
 
 
@@ -78,9 +154,10 @@ def _apply_cached_geometry(
     mask: np.ndarray,
     *,
     reference_path: Path,
+    preprocess_options: tuple[str, float, float, float, bool, float, int, int],
     size: int,
 ) -> np.ndarray:
-    ref_shape, geometry = _cached_preprocess_geometry(str(reference_path))
+    ref_shape, geometry = _cached_preprocess_geometry(str(reference_path), *preprocess_options)
     was_singleton_channel = mask.ndim == 3 and mask.shape[-1] == 1
     mask_arr = np.asarray(mask)
     if mask_arr.shape[:2] != ref_shape:
@@ -125,7 +202,12 @@ def _align_mask_to_image_preprocessing(
     if reference_path is None:
         return _resize_mask_array(mask, size)
 
-    aligned = _apply_cached_geometry(mask, reference_path=reference_path, size=size)
+    aligned = _apply_cached_geometry(
+        mask,
+        reference_path=reference_path,
+        preprocess_options=_preprocess_options_for_image_path(image_path),
+        size=size,
+    )
     return (aligned > 0).astype(np.float32)
 
 
@@ -137,6 +219,10 @@ class LesionMaskProvider(Protocol):
         """Return (mask [C, size, size] float32, is_valid)."""
         ...
 
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        """Return whether this row has pixel-level supervision."""
+        ...
+
 
 class NullMaskProvider:
     """Always returns a zero mask — use when no pixel-level supervision is needed."""
@@ -146,6 +232,9 @@ class NullMaskProvider:
 
     def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
         return torch.zeros(self._channels, size, size), False
+
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        return False
 
 
 class _IDRiDBaseMaskProvider:
@@ -189,6 +278,9 @@ class _IDRiDBaseMaskProvider:
             stem,
         )
         return masks, bool(masks)
+
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        return self._load_masks(image_path, domain, size=0)[1]
 
 
 class IDRiDMaskProvider(_IDRiDBaseMaskProvider):
@@ -273,6 +365,12 @@ class MAPLESTrainMaskProvider:
         if self._channels not in (1, 4):
             raise ValueError("MAPLESTrainMaskProvider channels must be 1 or 4")
 
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        if domain != "MAPLES":
+            return False
+        stem = Path(image_path).stem
+        return any((self._ann_dir / subdir / f"{stem}.png").exists() for subdir in self._CHANNEL_DIRS)
+
     def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
         zeros = torch.zeros(self._channels, size, size)
         if domain != "MAPLES":
@@ -313,6 +411,7 @@ class TJDRMaskProvider:
     3 → MA, 2 → HE, 1 → EX, 4 → SE.
     """
 
+    # TJDR 팔레트 라벨(1=EX,2=HE,3=MA,4=SE)을 프로젝트 표준 채널 순서 MA/HE/EX/SE로 매핑.
     _LABEL_BY_CODE = {"MA": 3, "HE": 2, "EX": 1, "SE": 4}
     _CHANNEL_CODES = ("MA", "HE", "EX", "SE")
 
@@ -327,6 +426,12 @@ class TJDRMaskProvider:
         self._raw_root = Path(raw_root) if raw_root is not None else _infer_raw_root(self._root_dir)
         if self._channels not in (1, 4):
             raise ValueError("TJDRMaskProvider channels must be 1 or 4")
+
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        if domain != "TJDR":
+            return False
+        mask_path = self._annotation_path(image_path)
+        return mask_path is not None and mask_path.exists()
 
     def _annotation_path(self, image_path: str) -> Path | None:
         path = Path(image_path)
@@ -396,6 +501,15 @@ class DDRSegMaskProvider:
         self._raw_root = Path(raw_root) if raw_root is not None else _infer_raw_root(self._root_dir)
         if self._channels not in (1, 4):
             raise ValueError("DDRSegMaskProvider channels must be 1 or 4")
+
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        if domain != "DDR_SEG":
+            return False
+        image_split = self._image_split(image_path)
+        if image_split is None:
+            return False
+        stem = Path(image_path).stem
+        return any(self._mask_path(image_split, code, stem) is not None for code in self._CHANNEL_CODES)
 
     def _image_split(self, image_path: str) -> str | None:
         parts = Path(image_path).parts
@@ -483,7 +597,12 @@ class CompositeMaskProvider:
             raise ValueError("CompositeMaskProvider needs at least one provider")
         self._providers = list(providers)
 
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        return any(p.has_valid_mask(image_path, domain) for p in self._providers)
+
     def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
+        # 순서대로 시도해 valid=True인 첫 Provider가 이긴다. 모두 실패하면 첫 Provider의
+        # 0 마스크(valid=False)를 그대로 돌려 호출부가 일관된 텐서 형태를 받게 한다.
         for p in self._providers:
             mask, valid = p.load(image_path, domain, size)
             if valid:
@@ -509,6 +628,12 @@ class MAPLESMaskProvider:
     def __init__(self, annotations_dir: str | Path, raw_root: str | Path | None = None) -> None:
         self._ann_dir = Path(annotations_dir)
         self._raw_root = Path(raw_root) if raw_root is not None else _infer_raw_root(self._ann_dir)
+
+    def has_valid_mask(self, image_path: str, domain: str) -> bool:
+        if domain.lower() != "messidor":
+            return False
+        stem = Path(image_path).stem
+        return any((self._ann_dir / subdir / f"{stem}.png").exists() for subdir in self._CHANNEL_DIRS)
 
     def load(self, image_path: str, domain: str, size: int) -> tuple[torch.Tensor, bool]:
         zeros = torch.zeros(4, size, size)

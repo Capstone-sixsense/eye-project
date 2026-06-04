@@ -1,0 +1,24 @@
+{
+  "split": "external_test",
+  "source_split": "external_test",
+  "evaluation_split": "external_holdout",
+  "threshold_policy": "sensitivity_guard",
+  "rows": {
+    "external_calibration": 2504,
+    "external_holdout": 10018
+  },
+  "source_metrics_json": "artifacts/runs/99_misc/v31_v8b_late_fusion_quickqual_v1/evaluations/v31_v8b_late_fusion_quickqual_v1_metrics.json",
+  "source_result_key": "classification_domains:late_fusion",
+  "metrics": {
+    "auroc": 0.9341293456194711
+  },
+  "optimal_threshold": 0.060000000000000005,
+  "metrics_at_optimal_threshold": {
+    "accuracy": 0.8660411259732481,
+    "sensitivity": 0.8233766233766234,
+    "specificity": 0.9086375423897866,
+    "precision": 0.8999781611705613,
+    "f1": 0.8599749582637729,
+    "threshold": 0.060000000000000005
+  }
+}

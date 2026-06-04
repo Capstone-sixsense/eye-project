@@ -1,5 +1,9 @@
 """D5-D7 shortcut audit for the active DR classifier.
 
+(한글 요약) 활성 분류기가 병변 근거보다 '도메인/스타일 단서'에 더 의존하는지(shortcut)를
+감사한다. 이 결과가 제품 문구를 '병변 때문에 분류'가 아니라 '분류 + 별도 탐지된 병변 후보'로
+제한하는 근거가 된다(AI_HANDOFF Phase 4-E).
+
 The audit tests whether the active classifier representation is more strongly
 aligned with domain/style cues than with lesion evidence:
 
@@ -15,7 +19,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import torch

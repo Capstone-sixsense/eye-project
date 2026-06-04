@@ -1,10 +1,10 @@
 project:
-  version: v31_v8b_fusion_v2
+  version: v31_v8b_fusion_quickqual_v2
   task: binary_dr_screening
   output_root: artifacts
 
 data:
-  manifest_path: data/processed/manifest_preprocessed.csv
+  manifest_path: data/processed/manifest_preprocessed_quickqual.csv
   image_root: data/raw
   resize_size: 512
   image_size: 512
@@ -13,6 +13,7 @@ data:
   batch_size: 12
   use_preprocessing: false
   use_align: false
+  preprocess_mode: quickqual
   preprocess_size: 512
   train_split: train
   val_split: val
@@ -65,7 +66,10 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
-  threshold: 0.38
+  preprocess_mode: none
+  threshold: 0.08563088401268978
+  amp: false
+  tta_mode: none
   use_meta_classifier: true
   gradcam_method: layercam
   gradcam_target_block: 4

@@ -1,3 +1,9 @@
+"""split 평가 CLI 진입점.
+
+지정한 split(기본 test_split)에서 체크포인트를 평가하고 메트릭 JSON을 저장한다.
+--threshold는 고정 임계값 메트릭용이며, 최적 임계값은 항상 별도로 함께 보고된다.
+"""
+
 from __future__ import annotations
 
 import argparse

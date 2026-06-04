@@ -1,6 +1,10 @@
 """Offline preprocessing script.
 
-Applies Circular Crop + Ben Graham normalization + resize (data.preprocess_size)
+(한글 요약) manifest의 모든 이미지에 crop+pad+resize+Ben Graham 전처리를 미리 적용해
+processed*/images/에 저장한다. 학습/평가는 이 전처리본을 쓰므로 런타임 전처리를 끈다
+(use_preprocessing=false). 품질 필터링은 하지 않는다(모든 이미지 포함).
+
+Applies content-aware border crop + Ben Graham normalization + resize (data.preprocess_size)
 to every image in the manifest. No quality filtering -- all images are included.
 
 Run:
@@ -16,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 from PIL import Image
 
-from drscreen.data.transforms import FundusPreprocess
+from drscreen.data.transforms import FundusPreprocess, preprocess_kwargs_from_config
 from drscreen.settings import load_app_config
 
 PROJECT_ROOT = Path(__file__).parent
@@ -33,9 +37,17 @@ def _resolve_under_project(project_root: Path, value: str | Path) -> Path:
     return path if path.is_absolute() else project_root / path
 
 
-def _init_worker(preprocess_size: int | None, use_align: bool) -> None:
+def _init_worker(
+    preprocess_size: int | None,
+    use_align: bool,
+    preprocess_options: dict | None = None,
+) -> None:
     global _preprocessor, _expected_size
-    _preprocessor = FundusPreprocess(output_size=preprocess_size, align=use_align)
+    _preprocessor = FundusPreprocess(
+        output_size=preprocess_size,
+        align=use_align,
+        **(preprocess_options or {}),
+    )
     _expected_size = preprocess_size
 
 
@@ -106,7 +118,8 @@ def main() -> None:
 
     preprocess_size = int(config["data"].get("preprocess_size", 0)) or None
     use_align = bool(config["data"].get("use_align", False))
-    _init_worker(preprocess_size, use_align)
+    preprocess_options = preprocess_kwargs_from_config(config.get("data", {}))
+    _init_worker(preprocess_size, use_align, preprocess_options)
 
     raw_root = _resolve_under_project(project_root, args.raw_root)
     manifest_path = _resolve_under_project(project_root, args.manifest)
@@ -120,7 +133,11 @@ def main() -> None:
             f"can stay relative to {raw_root}: {output_root}"
         ) from exc
 
-    print(f"Preprocessor: Circular Crop + Ben Graham, output_size={preprocess_size}, align={use_align}")
+    preprocess_mode = str(preprocess_options.get("preprocess_mode", "contentcrop"))
+    print(
+        f"Preprocessor: {preprocess_mode} + Ben Graham, "
+        f"output_size={preprocess_size}, align={use_align}, options={preprocess_options}"
+    )
 
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -150,7 +167,7 @@ def main() -> None:
         with ProcessPoolExecutor(
             max_workers=args.workers,
             initializer=_init_worker,
-            initargs=(preprocess_size, use_align),
+            initargs=(preprocess_size, use_align, preprocess_options),
         ) as pool:
             futures = {pool.submit(_process_one, t): t[0] for t in tasks}
             for future in as_completed(futures):

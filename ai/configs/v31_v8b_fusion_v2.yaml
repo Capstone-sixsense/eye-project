@@ -52,6 +52,7 @@ infer:
   prediction_dir: artifacts/predictions
   heatmap_dir: artifacts/heatmaps
   use_preprocessing: true
+  preprocess_mode: circular
   threshold: 0.38
   use_meta_classifier: true
   evidence_type: lesion_segmentation
