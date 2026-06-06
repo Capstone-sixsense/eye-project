@@ -84,6 +84,8 @@ venv/
 **/dist/
 **/out/
 **/target/
+windows/installer_output/
+.venv-win/
 docker-data/
 docker-volume/
 *.log
