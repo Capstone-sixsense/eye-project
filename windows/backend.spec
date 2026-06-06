@@ -16,11 +16,12 @@ from pathlib import Path
 ROOT = Path(SPEC).resolve().parent.parent  # windows/ 의 부모 = 프로젝트 루트
 
 a = Analysis(
-    [str(ROOT / 'backend' / 'main.py')],
+    [str(ROOT / 'windows' / 'backend_entry.py')],
 
     # PyInstaller가 import를 탐색할 경로.
     # PYTHONPATH=/ai (Docker) 와 동일한 역할 → drscreen 패키지를 찾을 수 있게 됨.
     pathex=[
+        str(ROOT / 'windows'),
         str(ROOT / 'backend'),
         str(ROOT / 'ai'),
     ],
@@ -36,17 +37,14 @@ a = Analysis(
         (str(ROOT / 'backend' / 'models' / 'quickqual_dn121_512.pkl'), 'models'),
         # AI 분류 모델 checkpoint (base.yaml: infer.checkpoint_path = artifacts/checkpoints/best.pt)
         (str(ROOT / 'ai' / 'artifacts' / 'checkpoints' / 'best.pt'), 'artifacts/checkpoints'),
-        # DenseNet121 가중치 — timm은 HuggingFace Hub 포맷(.safetensors)을 사용함.
-        # HF 캐시 구조: blobs/(실제파일) + refs/main + snapshots/(해시)/model.safetensors
-        # Windows에서 심볼릭 링크가 동작하지 않으므로 blob을 snapshot 경로에도 복사.
+        # 배포 성능 지표 및 XAI aggregate metrics
+        (str(ROOT / 'ai' / 'artifacts' / 'evaluations'), 'artifacts/evaluations'),
+        # DenseNet121 seed cache. Runtime hook copies this into writable AppData
+        # and creates snapshots/{hash}/model.safetensors there.
         (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
              'models--timm--densenet121.tv_in1k' / 'blobs' /
              'c894c6d9caa317a8ca1942986dee7a16a86c77734a4d691d2abe05389cfef358'),
          '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/blobs'),
-        (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
-             'models--timm--densenet121.tv_in1k' / 'blobs' /
-             'c894c6d9caa317a8ca1942986dee7a16a86c77734a4d691d2abe05389cfef358'),
-         '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/snapshots/f0d0f2698a02cb133b09d48396db6e1e46fe9f3b'),
         (str(ROOT / 'backend' / '.cache' / 'huggingface' / 'hub' /
              'models--timm--densenet121.tv_in1k' / 'refs' / 'main'),
          '.cache/huggingface/hub/models--timm--densenet121.tv_in1k/refs'),
@@ -121,7 +119,7 @@ a = Analysis(
         'albumentations.pytorch',   # drscreen/data/transforms.py: from albumentations.pytorch import ToTensorV2
         # captum, pytorch_grad_cam: 코드에서 사용하지 않으므로 제거
         # sklearn._cython_blas, _partition_nodes: scikit-learn 1.2.2에 존재하지 않으므로 제거
-        # uvicorn: main.py의 if __name__ == "__main__" 블록에서 import
+        # uvicorn: windows/backend_entry.py가 FastAPI app을 실행할 때 import
         'uvicorn',
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
