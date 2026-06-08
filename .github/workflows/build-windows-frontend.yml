@@ -1,0 +1,41 @@
+name: Build Flutter Windows
+
+on:
+  push:
+    branches: [window]
+    paths:
+      - 'frontend/**'           # frontend 코드 변경 시에만 실행
+      - '.github/workflows/build-windows-frontend.yml'
+
+  workflow_dispatch:            # GitHub 웹에서 수동 실행 버튼
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Flutter SDK 설치
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: 의존성 설치
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Windows 빌드
+        working-directory: frontend
+        run: flutter build windows --release
+
+      - name: 빌드 결과물 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: eye-frontend-windows
+          # Release 폴더 전체 (exe + dll + data/)
+          path: frontend/build/windows/x64/runner/Release/
+          retention-days: 30    # 30일간 보관
