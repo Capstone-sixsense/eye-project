@@ -8,20 +8,14 @@ Reference: https://github.com/justinengelmann/QuickQual
 from __future__ import annotations
 
 import os
-import sys
 import joblib
 import numpy as np
 import torch
 import timm
-from pathlib import Path
 from PIL import Image
 from torchvision.transforms import functional as TF
 
-if getattr(sys, "frozen", False):
-    # PyInstaller: datas의 'models' 항목이 _MEIPASS/models/ 에 배치됨
-    CURRENT_DIR = str(Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "models")
-else:
-    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # ---------------------------------------------------------------

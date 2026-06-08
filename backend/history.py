@@ -33,28 +33,15 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import threading
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import crypto
 
-
-def _get_data_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        # PyInstaller 배포: 사용자 AppData\Roaming\EyeProject\
-        appdata = os.environ.get("APPDATA") or str(Path.home())
-        return Path(appdata) / "EyeProject"
-    # 개발 환경: 기존과 동일하게 backend/ 기준
-    return Path(__file__).parent
-
-
-_DATA_DIR = _get_data_dir()
-UPLOAD_DIR = str(_DATA_DIR / "storage")
-RESULTS_DIR = str(_DATA_DIR / "results")
-DB_PATH = str(_DATA_DIR / "storage" / "history.db")
+UPLOAD_DIR = "storage"
+RESULTS_DIR = "results"
+DB_PATH = os.path.join(UPLOAD_DIR, "history.db")
 
 # 기존 .json.enc 파일 인식용 패턴 (migration.py에서 참조)
 ID_PATTERN = re.compile(r"^report_(?P<id>\d{8}_\d{6}_\d{3})\.json\.enc$")
