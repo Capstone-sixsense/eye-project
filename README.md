@@ -38,7 +38,7 @@
 |--------|---------|-------------|
 | [`frontend`](https://github.com/Capstone-sixsense/eye-project/tree/frontend) | Flutter 클라이언트, API 연동, 진행 UI | [`frontend/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/frontend/frontend/README.md) |
 | [`backend`](https://github.com/Capstone-sixsense/eye-project/tree/backend) | REST API, `storage/`·`results/`, Docker | `backend/` 디렉터리 · [`main.py`](https://github.com/Capstone-sixsense/eye-project/blob/backend/backend/main.py) |
-| [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
+| [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/README.md) · [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
 
 로컬에서 브랜치 전환:
 
@@ -162,4 +162,4 @@ TJDR 인용:
 
 - **프론트**: `git checkout frontend` → [`frontend/README.md`](frontend/README.md)
 - **백엔드**: `git checkout backend` → `backend/main.py`, `docker-compose.yml`
-- **AI**: `git checkout ai` → `ai/drscreen/`, `ai/configs/`, `ai/docs/`
+- **AI**: `git checkout ai` → [`ai/README.md`](ai/README.md), `ai/drscreen/`, `ai/configs/`, `ai/docs/`
