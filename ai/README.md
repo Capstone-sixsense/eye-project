@@ -328,7 +328,7 @@ TJDR 인용:
 | [`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md) | 체크포인트·평가·XAI 결과의 canonical 분류 인덱스(run별 group·config·아티팩트·승격 여부) |
 | [`docs/AI_SECTOR_MAP.md`](docs/AI_SECTOR_MAP.md) | 코드·아티팩트를 runtime/data/training/XAI/evidence/fusion 섹터로 분해한 리뷰 체크리스트 |
 | [`docs/DEVLOG.md`](docs/DEVLOG.md) | 역사적 변경 로그 (*왜* 그렇게 됐는지 참고용, 현재 진실 아님) |
-| [`docs/SPRINT1~5_Devlog.md`](docs/) | 스프린트별 회고 (Sprint 5 = CLOSED 2026-06-03) |
+| [`docs/SPRINT*_Devlog.md`](docs/) | 스프린트별 회고 (Sprint 5 = CLOSED 2026-06-03). 예: [`docs/SPRINT5_Devlog.md`](docs/SPRINT5_Devlog.md) |
 | [`docs/INDEX.md`](docs/INDEX.md) | docs 디렉토리 안내 |
 | [`AGENTS.md`](AGENTS.md) | 이 모듈에서 작업하기 전 읽을 가이드 |
 | 저장소 루트 `README.md` | 프로젝트 통합 개요, Docker Compose, 브랜치 맵, API 목록 |
