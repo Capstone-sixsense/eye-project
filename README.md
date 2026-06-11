@@ -1,6 +1,6 @@
 # eye-project
 
-**최종 갱신: 2026-06-03**
+**최종 갱신: 2026-06-11**
 
 안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
 이미지를 업로드하면 AI가 이상 여부를 추정하고, 병변 evidence overlay와 리포트, 품질 정보를 함께 제공합니다.
@@ -39,6 +39,7 @@
 | [`frontend`](https://github.com/Capstone-sixsense/eye-project/tree/frontend) | Flutter 클라이언트, API 연동, 진행 UI | [`frontend/README.md`](https://github.com/Capstone-sixsense/eye-project/blob/frontend/frontend/README.md) |
 | [`backend`](https://github.com/Capstone-sixsense/eye-project/tree/backend) | REST API, `storage/`·`results/`, Docker | `backend/` 디렉터리 · [`main.py`](https://github.com/Capstone-sixsense/eye-project/blob/backend/backend/main.py) |
 | [`ai`](https://github.com/Capstone-sixsense/eye-project/tree/ai) | 모델·학습·추론·`configs/`·`artifacts/` | [`ai/AGENTS.md`](https://github.com/Capstone-sixsense/eye-project/blob/ai/ai/AGENTS.md) · `ai/docs/` |
+| [`window`](https://github.com/Capstone-sixsense/eye-project/tree/window) | Windows 설치파일 배포 (PyInstaller + Inno Setup) | [`windows/BUILD_GUIDE.md`](https://github.com/Capstone-sixsense/eye-project/blob/window/windows/BUILD_GUIDE.md) |
 
 로컬에서 브랜치 전환:
 
@@ -94,6 +95,7 @@ eye-project/
 ├── ai/                 # drscreen 패키지, configs, artifacts
 ├── backend/            # FastAPI, QuickQual 래퍼
 ├── frontend/           # Flutter
+├── windows/            # Windows 배포 빌드 스크립트 및 설정
 ├── docker-compose.yml
 ├── setup.sh
 └── README.md           # 이 파일
@@ -158,8 +160,31 @@ TJDR 인용:
 
 ---
 
+## Windows 배포
+
+`window` 브랜치에서 관리하며, 최종 결과물은 단일 설치파일(`eye_project_setup_v1.0.0.exe`)입니다.
+
+| 구성 | 도구 | 역할 |
+|------|------|------|
+| **Frontend** | GitHub Actions 자동 빌드 | Flutter Windows 앱 |
+| **Backend** | PyInstaller | FastAPI 서버 + AI 모델 패키징 |
+| **Launcher** | PyInstaller (one-file) | 백엔드·프론트 기동·종료 관리 |
+| **Installer** | Inno Setup 6 | 설치파일 생성, 바탕화면 단축키 등록 |
+
+```powershell
+# 사전 조건: windows\dist\eye_frontend\ 에 Flutter 빌드 결과물 배치
+.venv-win\Scripts\Activate.ps1
+.\windows\build_all.bat
+# → windows\installer_output\eye_project_setup_v1.0.0.exe 생성
+```
+
+상세 설정·업데이트 절차: [`windows/BUILD_GUIDE.md`](windows/BUILD_GUIDE.md)
+
+---
+
 ## 더 보기
 
 - **프론트**: `git checkout frontend` → [`frontend/README.md`](frontend/README.md)
 - **백엔드**: `git checkout backend` → `backend/main.py`, `docker-compose.yml`
 - **AI**: `git checkout ai` → `ai/drscreen/`, `ai/configs/`, `ai/docs/`
+- **Windows**: `git checkout window` → [`windows/BUILD_GUIDE.md`](windows/BUILD_GUIDE.md)
