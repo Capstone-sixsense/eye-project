@@ -1,3 +1,20 @@
+"""분류 backbone에 보조 분할(auxiliary segmentation) 헤드를 붙인 멀티태스크 모델.
+
+v31 분류기(`v31_no_se_gated` 계열)의 본체다. EfficientNet backbone 위에 병변
+분할 헤드를 얹어, (1) 학습 시 병변 마스크 supervision을 주고 (2) gated pooling으로
+병변 영역에 분류 풀링 경로를 집중시킨다.
+
+핵심 메커니즘:
+- forward hook: backbone의 중간 블록 출력을 가로채 분할 헤드 입력으로 쓴다.
+  backbone 자신의 forward()는 건드리지 않아 기존 추론/CAM 코드가 그대로 동작한다.
+- gated pooling: 분할 logit에서 만든 lesion gate를 feature map에 곱한 뒤 풀링한다.
+- train/eval 분기: 학습 모드 forward()는 (cls_logits, seg_logits)를, 평가 모드는
+  cls_logits만 반환한다.
+
+디코더 변형: single_block(단일 블록 위 얇은 1x1 헤드, v24~v35) / unet(여러 블록을
+top-down으로 결합, 고해상도 병변 supervision).
+"""
+
 from __future__ import annotations
 
 import torch
@@ -249,23 +266,41 @@ class MultiTaskModel(nn.Module):
             return seg_logits
         return seg_logits.amax(dim=1, keepdim=True)
 
-    def _forward_gated_classifier(self, x: torch.Tensor) -> torch.Tensor:
+    def _gated_pooled_features(self, x: torch.Tensor) -> torch.Tensor:
         if not all(
             hasattr(self.backbone, attr)
             for attr in ("forward_features", "forward_head", "classifier")
         ):
             raise ValueError("Gated pooling requires a timm-style backbone.")
 
+        # backbone 특징맵과 동일한 해상도로 분할 logit을 뽑아 lesion gate를 만든다.
         feat_map = self.backbone.forward_features(x)
         seg_logits = self._seg_forward(output_size=feat_map.shape[-2:])
         if self.seg_channels > 1 and self.lesion_weights is not None:
+            # 다채널 병변: 학습된 가중치(softmax)로 채널을 가중합해 단일 gate로 합친다.
             weights = torch.softmax(self.lesion_weights, dim=0).view(1, -1, 1, 1)
             gate = (torch.sigmoid(seg_logits) * weights).sum(dim=1, keepdim=True)
         else:
             gate = torch.sigmoid(seg_logits)
+        # gate를 공간 평균으로 정규화(평균 1)해 전체 활성 크기는 유지하고 '분포'만 재가중.
         gate = gate / gate.mean(dim=(2, 3), keepdim=True).clamp_min(1e-6)
-        pooled = self.backbone.forward_head(feat_map * gate, pre_logits=True)
+        # 병변 영역을 강조한 feature map을 backbone 풀링/헤드에 통과(분류 직전 표현 반환).
+        return self.backbone.forward_head(feat_map * gate, pre_logits=True)
+
+    def classify_pooled_features(self, pooled: torch.Tensor) -> torch.Tensor:
         return self.backbone.classifier(pooled)
+
+    def forward_with_gated_features(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        pooled = self._gated_pooled_features(x)
+        logits = self.classify_pooled_features(pooled)
+        seg_logits = self._seg_forward() if self.training else None
+        return logits, seg_logits, pooled
+
+    def _forward_gated_classifier(self, x: torch.Tensor) -> torch.Tensor:
+        pooled = self._gated_pooled_features(x)
+        return self.classify_pooled_features(pooled)
 
     def forward(
         self, x: torch.Tensor
@@ -274,6 +309,8 @@ class MultiTaskModel(nn.Module):
             logits = self._forward_gated_classifier(x)
         else:
             logits = self.backbone(x)
+        # 학습 모드: 분류+분할 logit을 함께 반환(멀티태스크 손실용).
+        # 평가 모드: 분류 logit만 반환해 기존 추론/CAM 코드와 호환.
         if self.training:
             return logits, self._seg_forward()
         return logits
@@ -291,6 +328,8 @@ class MultiTaskModel(nn.Module):
             return probabilities
         return probabilities.amax(dim=1, keepdim=True)
 
+    # 모르는 속성 접근은 backbone으로 위임한다. 덕분에 외부 코드가 래퍼를 의식하지 않고
+    # model.classifier / model.blocks 등에 그대로 접근할 수 있다(투명 래핑).
     # Delegate unknown attribute lookups to backbone so that external code
     # accessing model.classifier, model.blocks, etc. keeps working.
     def __getattr__(self, name: str):

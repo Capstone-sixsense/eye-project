@@ -1,5 +1,8 @@
 """XAI quantitative validation: Layer-CAM / HiResCAM / Eigen-CAM vs lesion masks.
 
+(한글 요약) IDRiD 마스크 대비 CAM 위치정확도를 정량 평가하는 CLI(drscreen.xai.evaluation 래퍼).
+방법/타깃 블록/베이스라인/Phase-0 게이트를 옵션으로 지정한다.
+
 Generates a CAM for each evaluation image, normalizes the heatmap within the
 retina FOV (Choe et al., CVPR 2020), binarizes at the top-N% threshold, and
 computes:

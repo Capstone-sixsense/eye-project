@@ -1,4 +1,9 @@
-"""Phase 4-G: v31 classifier + v8b lesion evidence late-fusion diagnostic."""
+"""Phase 4-G: v31 classifier + v8b lesion evidence late-fusion diagnostic.
+
+(한글 요약) v31 분류 점수와 v8b 병변 특징을 결합하는 후기 융합 메타 분류기를 학습/평가한다.
+이미지에서 v31 확률/logit과 병변 스칼라 특징을 뽑아 StandardScaler+LogisticRegression을
+DDR calibration split 기준으로 적합하고, 그 파라미터가 배포 융합 체크포인트의 메타 분류기가 된다.
+"""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +27,11 @@ from drscreen.cli.lesion_evidence_classifier import (
     _read_items,
 )
 from drscreen.infer.service import InferenceSession
-from drscreen.settings import get_run_evaluation_dir, load_app_config, resolve_project_path
+from drscreen.settings import (
+    get_run_evaluation_dir,
+    load_app_config,
+    resolve_project_path,
+)
 
 
 class _ImageDataset(Dataset):
@@ -55,9 +64,9 @@ def _extract_v31_scores(
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, str | int]]]:
     """Extract v31 probabilities on already-preprocessed manifest images.
 
-    The manifest used here points to ``processed/images/...``. Therefore this
-    diagnostic intentionally uses ``session.eval_transform`` directly and does
-    not apply the inference-time raw-image preprocessor a second time.
+    The manifest used here points to offline-preprocessed images. Therefore
+    this diagnostic intentionally uses ``session.eval_transform`` directly and
+    does not apply the inference-time raw-image preprocessor a second time.
     """
     dataset = _ImageDataset(items, session.eval_transform)
     loader = DataLoader(
@@ -106,20 +115,43 @@ def _extract_v31_scores(
     return np.concatenate(scores, axis=0), np.asarray(labels, dtype=np.int64), rows
 
 
+V31_FEATURE_SETS = ("v31_score_only", "late_fusion")
+
+
+def _v31_columns(
+    v31_scores: np.ndarray,
+    v31_representation: str,
+) -> tuple[np.ndarray, list[str]]:
+    """Select v31 score columns. Column 0 is probability, column 1 is logit.
+
+    `v31_probability = sigmoid(v31_logit)` are functionally dependent and
+    near-collinear. `prob`/`logit` keep a single representation to avoid
+    near-collinear inflation; `both` preserves the legacy two-column behavior.
+    """
+    if v31_representation == "prob":
+        return v31_scores[:, [0]], ["v31_probability"]
+    if v31_representation == "logit":
+        return v31_scores[:, [1]], ["v31_logit"]
+    if v31_representation == "both":
+        return v31_scores, ["v31_probability", "v31_logit"]
+    raise ValueError(f"Unsupported v31_representation: {v31_representation}")
+
+
 def _build_feature_matrix(
     feature_set: str,
     *,
     v31_scores: np.ndarray,
     v8b_features: np.ndarray,
+    v31_representation: str = "both",
 ) -> tuple[np.ndarray, list[str]]:
-    v31_names = ["v31_probability", "v31_logit"]
+    v31_cols, v31_names = _v31_columns(v31_scores, v31_representation)
     v8b_names = _feature_names([0.05, 0.1, 0.2, 0.3, 0.5], [0.001, 0.01, 0.05])
     if feature_set == "v31_score_only":
-        return v31_scores, v31_names
+        return v31_cols, v31_names
     if feature_set == "v8b_evidence_only":
         return v8b_features, v8b_names
     if feature_set == "late_fusion":
-        return np.concatenate([v31_scores, v8b_features], axis=1), [*v31_names, *v8b_names]
+        return np.concatenate([v31_cols, v8b_features], axis=1), [*v31_names, *v8b_names]
     raise ValueError(f"Unsupported feature_set: {feature_set}")
 
 
@@ -244,6 +276,43 @@ def _choose_threshold_by_policy(
     }
 
 
+def _match_sensitivity_threshold(
+    labels: np.ndarray,
+    scores: np.ndarray,
+    target_sensitivity: float,
+) -> dict | None:
+    """Find the most specific threshold whose sensitivity meets the target.
+
+    Uses the unique model scores as thresholds, so this is an exact sweep over
+    all attainable operating points for the given split.
+    """
+    reports = [
+        _classification_report(labels, scores, float(threshold))
+        for threshold in np.unique(scores)
+    ]
+    eligible = [
+        report
+        for report in reports
+        if report.get("sensitivity") is not None
+        and float(report["sensitivity"]) >= target_sensitivity
+    ]
+    if not eligible:
+        return None
+    selected = max(
+        eligible,
+        key=lambda report: (
+            report.get("specificity") or 0.0,
+            report.get("f1") or 0.0,
+            report.get("accuracy") or 0.0,
+            report.get("threshold") or 0.0,
+        ),
+    )
+    selected["target_sensitivity"] = float(target_sensitivity)
+    selected["threshold_source"] = "unique_scores"
+    selected["n_unique_thresholds"] = int(len(reports))
+    return selected
+
+
 def _fit_select_evaluate(
     features: np.ndarray,
     labels: np.ndarray,
@@ -259,6 +328,7 @@ def _fit_select_evaluate(
     class_weight: str,
     sensitivity_guard: float | None,
     threshold_policy: str,
+    matched_sensitivity_targets: list[float] | None = None,
 ) -> dict:
     row_splits = np.asarray([str(row["split"]) for row in rows])
     row_domains = np.asarray([str(row["domain"]) for row in rows])
@@ -351,6 +421,15 @@ def _fit_select_evaluate(
                     0.5,
                 ),
             }
+            if matched_sensitivity_targets:
+                by_split[split]["matched_sensitivity"] = {
+                    str(float(target)): _match_sensitivity_threshold(
+                        labels[split_mask],
+                        best_scores[split_mask],
+                        float(target),
+                    )
+                    for target in matched_sensitivity_targets
+                }
             threshold_reports = [
                 _classification_report(labels[split_mask], best_scores[split_mask], float(threshold))
                 for threshold in thresholds
@@ -469,40 +548,54 @@ def run(config_path: str) -> dict:
     primary_eval_split = str(data_cfg.get("primary_eval_split", "external_test"))
     threshold_policy = str(fusion_cfg.get("threshold_policy", "balanced_accuracy"))
 
+    v31_representations = [str(v) for v in fusion_cfg.get("v31_representations", ["both"])]
+    matched_sensitivity_targets = [
+        float(v) for v in fusion_cfg.get("matched_sensitivity_targets", [])
+    ]
+
     results: dict[str, dict] = {}
     for variant_name, variant_cfg in train_variants.items():
         train_domains = None
         if isinstance(variant_cfg, dict) and variant_cfg.get("train_domains") is not None:
             train_domains = [str(v) for v in variant_cfg["train_domains"]]
         for feature_set in feature_sets:
-            matrix, feature_names = _build_feature_matrix(
-                feature_set,
-                v31_scores=v31_scores,
-                v8b_features=v8b_features,
-            )
-            key = f"{variant_name}:{feature_set}"
-            result = _fit_select_evaluate(
-                matrix,
-                labels,
-                rows,
-                train_split=str(data_cfg.get("train_split", "train")),
-                threshold_split=str(data_cfg.get("threshold_split", "val")),
-                train_domains=train_domains,
-                eval_splits=eval_splits,
-                c_values=c_values,
-                thresholds=thresholds,
-                seed=int(fusion_cfg.get("seed", 43)),
-                class_weight=str(fusion_cfg.get("class_weight", "balanced")),
-                sensitivity_guard=(
-                    float(fusion_cfg["sensitivity_guard"])
-                    if fusion_cfg.get("sensitivity_guard") is not None
-                    else None
-                ),
-                threshold_policy=threshold_policy,
-            )
-            result["feature_set"] = feature_set
-            result["feature_names"] = feature_names
-            results[key] = result
+            reps = v31_representations if feature_set in V31_FEATURE_SETS else ["both"]
+            for v31_rep in reps:
+                matrix, feature_names = _build_feature_matrix(
+                    feature_set,
+                    v31_scores=v31_scores,
+                    v8b_features=v8b_features,
+                    v31_representation=v31_rep,
+                )
+                key = f"{variant_name}:{feature_set}"
+                if feature_set in V31_FEATURE_SETS and (len(reps) > 1 or v31_rep != "both"):
+                    key = f"{key}:v31_{v31_rep}"
+                result = _fit_select_evaluate(
+                    matrix,
+                    labels,
+                    rows,
+                    train_split=str(data_cfg.get("train_split", "train")),
+                    threshold_split=str(data_cfg.get("threshold_split", "val")),
+                    train_domains=train_domains,
+                    eval_splits=eval_splits,
+                    c_values=c_values,
+                    thresholds=thresholds,
+                    seed=int(fusion_cfg.get("seed", 43)),
+                    class_weight=str(fusion_cfg.get("class_weight", "balanced")),
+                    sensitivity_guard=(
+                        float(fusion_cfg["sensitivity_guard"])
+                        if fusion_cfg.get("sensitivity_guard") is not None
+                        else None
+                    ),
+                    threshold_policy=threshold_policy,
+                    matched_sensitivity_targets=matched_sensitivity_targets,
+                )
+                result["feature_set"] = feature_set
+                result["v31_representation"] = (
+                    v31_rep if feature_set in V31_FEATURE_SETS else None
+                )
+                result["feature_names"] = feature_names
+                results[key] = result
 
     def _primary_eval_auroc(item: tuple[str, dict]) -> float:
         section = item[1]["metrics_by_split"].get(primary_eval_split, {})

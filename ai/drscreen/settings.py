@@ -1,10 +1,25 @@
+"""설정(YAML) 병합과 아티팩트 경로 해석을 담당하는 공용 유틸.
+
+세 가지 책임:
+1. config 로딩/병합: base.yaml + 버전별 config를 깊은 병합(merge_dicts)한다.
+2. 실행(run) -> 그룹 매핑: RUN_PRIMARY_GROUPS로 각 실험 버전이 저장되는
+   artifacts/runs/<group>/<version>/ 경로를 결정한다.
+3. 체크포인트/메트릭 경로 해석: 신규 그룹 레이아웃과 legacy 경로를 모두 탐색한다.
+
+핵심: build_effective_checkpoint_config()는 체크포인트에 저장된 모델 구조/라벨/
+버전이 런타임 config보다 우선하도록 보장한다(가중치와 구조의 불일치 방지).
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+from collections.abc import Mapping
 
 import yaml
 
+# 실험 버전 이름 -> 아티팩트 1차 그룹 폴더. 등록되지 않은 버전은 99_misc로 떨어진다
+# (get_run_group). docs/EXPERIMENT_REGISTRY.md의 분류와 대응한다.
 RUN_PRIMARY_GROUPS: dict[str, str] = {
     "effnet_1shot": "00_baselines_and_early",
     "v3": "00_baselines_and_early",
@@ -34,6 +49,8 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v19_swad_focal_g2": "02_domain_generalization",
     "v20_coral": "02_domain_generalization",
     "v7_512_messidor_train": "03_resolution_layercam",
+    "v7_512_messidor_train_contentcrop_v1": "03_resolution_layercam",
+    "v7_512_messidor_train_safezoom_v1": "03_resolution_layercam",
     "v17_512_focal_g2": "03_resolution_layercam",
     "v21_512_focal_g2": "03_resolution_layercam",
     "v21_512_layercam": "03_resolution_layercam",
@@ -45,6 +62,10 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v29_with_attention": "05_xai_attention_ablation",
     "v30_gated_pooling": "06_xai_classifier_routing",
     "v31_no_se_gated": "07_lesion_evidence",
+    "v31_no_se_gated_contentcrop_v1": "07_lesion_evidence",
+    "v31_no_se_gated_contentcrop_bbretrain_v1": "07_lesion_evidence",
+    "v31_no_se_gated_safezoom_v1": "07_lesion_evidence",
+    "v31_no_se_gated_safezoom_bbretrain_v1": "07_lesion_evidence",
     "v31_syncfix_rerun": "07_lesion_evidence",
     "v31_syncfix_seed43": "07_lesion_evidence",
     "v31_syncfix_seed44": "07_lesion_evidence",
@@ -71,6 +92,11 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "seg_evidence_v7_maples_only": "09_evidence_segmentation",
     "seg_evidence_v8_ddrseg_tjdr": "09_evidence_segmentation",
     "seg_evidence_v8b_ddrseg_tjdr_maplesfix": "09_evidence_segmentation",
+    "seg_evidence_v8b_swa": "09_evidence_segmentation",
+    "seg_evidence_v9_gin": "09_evidence_segmentation",
+    "seg_evidence_v10_adverin": "09_evidence_segmentation",
+    "seg_evidence_v8b_contentcrop_v1": "09_evidence_segmentation",
+    "seg_evidence_v8b_safezoom_v1": "09_evidence_segmentation",
     "seg_evidence_v5b_maples_fda_tjdr_maplesfix": "09_evidence_segmentation",
     "v31_dfr_v1": "10_grounded_classifier",
     "bagnet_v1_p33_r256": "10_grounded_classifier",
@@ -83,6 +109,19 @@ RUN_PRIMARY_GROUPS: dict[str, str] = {
     "v8b_evidence_classifier_aptos_v1": "10_grounded_classifier",
     "v31_v8b_late_fusion_sweep_v1": "10_grounded_classifier",
     "v31_v8b_fusion_v2": "10_grounded_classifier",
+    "v31_v8b_late_fusion_features_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_hflip_v2": "10_grounded_classifier",
+    "v31_v8b_fusion_features_hflip_recalc_v2": "10_grounded_classifier",
+    "v31_v8b_late_fusion_contentcrop_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_contentcrop_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_safezoom_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_safezoom_v1": "10_grounded_classifier",
+    "v31_v8b_late_fusion_safezoom_bbretrain_v1": "10_grounded_classifier",
+    "v31_v8b_fusion_safezoom_bbretrain_v1": "10_grounded_classifier",
+    "v41_ampmix": "10_grounded_classifier",
+    "v42_coral_baseline": "10_grounded_classifier",
+    "v42_rsc_coral": "10_grounded_classifier",
 }
 
 
@@ -95,6 +134,8 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
 
 
 def merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    # base 위에 override를 깊은 병합. 양쪽 값이 모두 dict이면 재귀 병합하고,
+    # 그렇지 않으면 override 값이 base 값을 덮어쓴다(예: base.yaml + 버전 config).
     merged = dict(base)
     for key, value in override.items():
         if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
@@ -139,6 +180,10 @@ def get_run_log_dir(project_root: str | Path, version: str) -> Path:
 
 
 def _legacy_checkpoint_parts(path: Path) -> tuple[str, tuple[str, ...]] | None:
+    # 구버전 경로 artifacts/checkpoints/<version>/... 를 인식해서
+    # (version, 그 뒤 나머지 경로 조각)으로 분해한다. 신규 레이아웃은
+    # artifacts/runs/<group>/<version>/... 이므로 여기서 매핑해 재탐색에 쓴다.
+    # artifacts/checkpoints/best.pt 처럼 바로 .pt 파일이면 버전 폴더가 아니므로 제외.
     parts = path.parts
     for i in range(len(parts) - 2):
         if parts[i] == "artifacts" and parts[i + 1] == "checkpoints":
@@ -214,6 +259,8 @@ def build_effective_checkpoint_config(
     the checkpoint take precedence, and pretrained is forced to False (weights come
     from the checkpoint).
     """
+    # 우선순위: 체크포인트에 저장된 model/labels/version이 런타임 config를 이긴다.
+    # 마지막에 pretrained=False로 강제해 사전학습 가중치 대신 체크포인트 가중치만 쓰게 한다.
     checkpoint_config = checkpoint.get("config")
     checkpoint_project_config = (
         checkpoint_config.get("project", {}) if isinstance(checkpoint_config, dict) else {}

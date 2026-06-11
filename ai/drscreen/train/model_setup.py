@@ -1,3 +1,14 @@
+"""학습/평가 실행에 필요한 구성요소 빌더 모음.
+
+장치(device) 결정, 학습 단계(phase) 정의, 단계별 학습 가능 파라미터 설정, 옵티마이저/
+스케줄러/손실 구성, 그리고 학습/평가용 모델 빌드와 사전학습 backbone 로딩을 담당한다.
+
+학습 단계: head(분류 헤드만 학습) -> finetune(backbone까지 학습)의 2단계. head 단계에서는
+backbone을 freeze하되 BatchNorm은 train 모드로 둬, ImageNet 통계와 안저(512px) 분포의
+불일치로 인한 활성값 폭주를 막는다(prepare_model_for_head_only_training 참조).
+옵티마이저는 head/backbone에 서로 다른 학습률을 주는 파라미터 그룹을 구성한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,9 +18,18 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.optim import AdamW, Optimizer
-from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import (
+    CosineAnnealingLR,
+    LinearLR,
+    LRScheduler,
+    SequentialLR,
+)
 
-from drscreen.models.build import build_model, get_classifier_module, split_model_parameters
+from drscreen.models.build import (
+    build_model,
+    get_classifier_module,
+    split_model_parameters,
+)
 from drscreen.settings import resolve_checkpoint_path
 from drscreen.utils.checkpoint import (
     load_state_dict_with_shape_filter,
@@ -19,6 +39,7 @@ from drscreen.utils.logging import get_logger
 
 LOGGER = get_logger(__name__)
 
+# 체크포인트 승격을 위한 기본 민감도 하한. 이 값 미만인 에폭은 best 후보에서 제외된다.
 _DEFAULT_MIN_SENSITIVITY = 0.80
 
 
@@ -111,7 +132,7 @@ def prepare_model_for_decoder_only_training(model: nn.Module) -> None:
     if lesion_weights is not None:
         lesion_weights.requires_grad = True
 
-    setattr(model, "_decoder_only", True)
+    model._decoder_only = True
 
 
 def build_optimizer(

@@ -3,6 +3,9 @@
 This diagnostic keeps the v31 deployment classifier untouched. It asks whether
 the current best standalone segmenter (v8b) produces lesion evidence features
 that are sufficient for binary DR classification.
+
+(한글 요약) v8b 병변맵에서 뽑은 스칼라 특징'만'으로 이진 DR 분류가 가능한지 보는 진단이다.
+v31 분류기는 건드리지 않으며, 결과적으로 v8b 특징 단독은 v31에 못 미쳐 배포로 승격되지 않았다.
 """
 from __future__ import annotations
 
@@ -28,7 +31,12 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
-from drscreen.data.transforms import build_eval_transform
+from drscreen.data.transforms import build_eval_transform, preprocess_kwargs_from_config
+from drscreen.infer.late_fusion_features import (
+    base_lesion_feature_names,
+    extended_lesion_feature_names,
+    extract_extended_lesion_feature_values,
+)
 from drscreen.models.profiles import get_model_profile
 from drscreen.models.seg_evidence import LesionSegEvidence
 from drscreen.settings import (
@@ -36,7 +44,6 @@ from drscreen.settings import (
     load_app_config,
     resolve_project_path,
 )
-
 
 LESION_CODES = ("MA", "HE", "EX", "SE")
 
@@ -121,6 +128,7 @@ def _build_transform(seg_config: dict, project_root: Path):
         mean=profile.mean,
         std=profile.std,
         use_preprocessing=use_preprocessing,
+        preprocess_kwargs=preprocess_kwargs_from_config(data_cfg),
     )
 
 
@@ -145,15 +153,10 @@ def _load_segmenter(seg_config: dict, project_root: Path, checkpoint_path: Path)
 
 
 def _feature_names(thresholds: list[float], topk_fracs: list[float]) -> list[str]:
-    channels = [*LESION_CODES, "union"]
-    names = [f"{channel}_mean" for channel in channels]
-    names.extend(f"{channel}_max" for channel in channels)
-    names.extend(f"{channel}_std" for channel in channels)
-    for threshold in thresholds:
-        names.extend(f"{channel}_area_ge_{threshold:g}" for channel in channels)
-    for frac in topk_fracs:
-        names.extend(f"{channel}_top_{frac:g}_mean" for channel in channels)
-    return names
+    return [
+        *base_lesion_feature_names(area_thresholds=thresholds, topk_fracs=topk_fracs),
+        *extended_lesion_feature_names(),
+    ]
 
 
 def _extract_features(
@@ -198,6 +201,15 @@ def _extract_features(
                 k = max(1, int(round(n_pixels * frac)))
                 parts.append(torch.topk(flat, k=k, dim=2).values.mean(dim=2))
             batch_features = torch.cat(parts, dim=1).detach().cpu().numpy().astype(np.float32)
+            extended_schema = extended_lesion_feature_names()
+            extended_features = np.asarray(
+                [
+                    extract_extended_lesion_feature_values(probs[index], extended_schema)
+                    for index in range(probs.shape[0])
+                ],
+                dtype=np.float32,
+            )
+            batch_features = np.concatenate([batch_features, extended_features], axis=1)
             features.append(batch_features)
             batch_labels = [int(v) for v in batch["label"].tolist()]
             labels.extend(batch_labels)

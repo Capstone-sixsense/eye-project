@@ -1,0 +1,260 @@
+{
+  "APTOS 4dd71fc7f22b": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\APTOS\\train_images\\train_images\\4dd71fc7f22b.png",
+    "raw_size": [
+      640,
+      480
+    ],
+    "aspect": 1.3333333333333333,
+    "content_bbox": {
+      "x": 0,
+      "y": 64,
+      "w": 512,
+      "h": 384
+    },
+    "safe_bbox": {
+      "x": 0,
+      "y": 45,
+      "w": 512,
+      "h": 422
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.07852709072786902,
+    "content_geometry": [
+      0,
+      0,
+      640,
+      480,
+      80,
+      80,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      28,
+      0,
+      612,
+      480,
+      52,
+      52,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": false
+  },
+  "APTOS 1ae8c165fd53": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\APTOS\\train_images\\train_images\\1ae8c165fd53.png",
+    "raw_size": [
+      3216,
+      2136
+    ],
+    "aspect": 1.5056179775280898,
+    "content_bbox": {
+      "x": 5,
+      "y": 58,
+      "w": 502,
+      "h": 396
+    },
+    "safe_bbox": {
+      "x": 0,
+      "y": 35,
+      "w": 512,
+      "h": 442
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.03268806096693402,
+    "content_geometry": [
+      326,
+      0,
+      3091,
+      2136,
+      314,
+      315,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      464,
+      0,
+      2946,
+      2136,
+      173,
+      173,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": false
+  },
+  "APTOS 6107a2e9f60e": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\APTOS\\train_images\\train_images\\6107a2e9f60e.png",
+    "raw_size": [
+      1476,
+      1117
+    ],
+    "aspect": 1.3213965980304387,
+    "content_bbox": {
+      "x": 0,
+      "y": 62,
+      "w": 512,
+      "h": 388
+    },
+    "safe_bbox": {
+      "x": 0,
+      "y": 62,
+      "w": 512,
+      "h": 388
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.0,
+    "content_geometry": [
+      0,
+      0,
+      1476,
+      1117,
+      179,
+      180,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      0,
+      0,
+      1476,
+      1117,
+      179,
+      180,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": true
+  },
+  "DDR 007-3297-200": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\ddr\\DR_grading\\DR_grading\\007-3297-200.jpg",
+    "raw_size": [
+      3456,
+      2304
+    ],
+    "aspect": 1.5,
+    "content_bbox": {
+      "x": 98,
+      "y": 101,
+      "w": 317,
+      "h": 316
+    },
+    "safe_bbox": {
+      "x": 98,
+      "y": 101,
+      "w": 317,
+      "h": 316
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.0,
+    "content_geometry": [
+      0,
+      0,
+      3456,
+      2304,
+      576,
+      576,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      0,
+      0,
+      3456,
+      2304,
+      576,
+      576,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": true
+  },
+  "DDR 007-7762-601": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\ddr\\DR_grading\\DR_grading\\007-7762-601.jpg",
+    "raw_size": [
+      2048,
+      1536
+    ],
+    "aspect": 1.3333333333333333,
+    "content_bbox": {
+      "x": 114,
+      "y": 93,
+      "w": 393,
+      "h": 328
+    },
+    "safe_bbox": {
+      "x": 114,
+      "y": 93,
+      "w": 393,
+      "h": 328
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.0,
+    "content_geometry": [
+      274,
+      57,
+      1775,
+      1070,
+      244,
+      244,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      274,
+      57,
+      1775,
+      1070,
+      244,
+      244,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": true
+  },
+  "DDR 007-0004-000": {
+    "raw_path": "C:\\Users\\dg203\\Desktop\\eye-project\\ai\\data\\raw\\ddr\\DR_grading\\DR_grading\\007-0004-000.jpg",
+    "raw_size": [
+      512,
+      512
+    ],
+    "aspect": 1.0,
+    "content_bbox": {
+      "x": 0,
+      "y": 0,
+      "w": 512,
+      "h": 512
+    },
+    "safe_bbox": {
+      "x": 0,
+      "y": 0,
+      "w": 512,
+      "h": 512
+    },
+    "content_foreground_loss": 0.0,
+    "safe_foreground_loss": 0.02272208211243446,
+    "content_geometry": [
+      0,
+      0,
+      512,
+      512,
+      0,
+      0,
+      0,
+      0
+    ],
+    "safe_geometry": [
+      12,
+      13,
+      501,
+      502,
+      0,
+      0,
+      0,
+      0
+    ],
+    "safe_used_contentcrop_fallback": false
+  }
+}

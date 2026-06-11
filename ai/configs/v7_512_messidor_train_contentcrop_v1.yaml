@@ -1,0 +1,25 @@
+project:
+  version: v7_512_messidor_train_contentcrop_v1
+
+data:
+  manifest_path: data/processed/manifest_contentcrop_preprocessed.csv
+  image_root: data/raw
+  preprocess_mode: contentcrop
+  train_exclude_domains: []
+
+model:
+  architecture: efficientnet_b5
+  use_attention: true
+  attention_mode: eca_spatial
+  use_aux_seg: false
+  use_gated_pooling: false
+
+train:
+  loss: focal
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+
+infer:
+  checkpoint_path: artifacts/runs/03_resolution_layercam/v7_512_messidor_train_contentcrop_v1/checkpoints/best.pt
+  threshold: 0.09
+  use_meta_classifier: false

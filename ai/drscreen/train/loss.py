@@ -1,3 +1,13 @@
+"""학습에 쓰이는 손실 함수 모음.
+
+- BinaryFocalLoss: 쉬운 예제 가중치를 낮춰 어려운/오분류 예제에 집중(분류).
+- DiceBCELoss / FocalTverskyBCELoss: 병변 픽셀이 극히 적은 분할용 불균형 손실.
+- CamAlignmentLoss: Layer-CAM 어트리뷰션이 병변 마스크와 공간적으로 일치하도록 유도.
+- CoralLoss: 도메인 간 특징 공분산을 맞춰 도메인 일반화(DG)를 돕는다.
+
+각 클래스의 영어 docstring에 수식과 논문 출처가 있다.
+"""
+
 from __future__ import annotations
 
 import torch

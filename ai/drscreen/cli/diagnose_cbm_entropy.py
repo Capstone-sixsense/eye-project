@@ -1,3 +1,9 @@
+"""CBM(개념 병목) 모델의 개념 활성 다양성 진단.
+
+각 개념(MA/HE/EX/SE) 채널이 서로 구별되는 패턴을 학습했는지(중복/붕괴되지 않았는지)를
+엔트로피로 점검한다. CBM 연구 트랙의 '개념이 의미있게 분화됐는지' 게이트 용도다.
+"""
+
 from __future__ import annotations
 
 import argparse

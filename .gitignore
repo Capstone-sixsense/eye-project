@@ -84,6 +84,8 @@ venv/
 **/dist/
 **/out/
 **/target/
+windows/installer_output/
+.venv-win/
 docker-data/
 docker-volume/
 *.log
@@ -100,3 +102,6 @@ results/
 .DS_Store
 Thumbs.db
 /.env
+
+#Text
+window_explain.md

@@ -1,0 +1,80 @@
+project:
+  version: v31_v8b_fusion_features_hflip_v2
+  task: binary_dr_screening
+  output_root: artifacts
+
+data:
+  manifest_path: data/processed/manifest_preprocessed.csv
+  image_root: data/raw
+  resize_size: 512
+  image_size: 512
+  num_workers: 4
+  persistent_workers: false
+  batch_size: 12
+  use_preprocessing: false
+  use_align: false
+  preprocess_size: 512
+  train_split: train
+  val_split: val
+  test_split: test
+  external_test_split: external_test
+  train_exclude_domains: []
+
+labels:
+  names:
+    - normal
+    - abnormal
+
+model:
+  architecture: v31_v8b_fusion
+  pretrained: true
+  num_outputs: 1
+  use_attention: false
+  attention_mode: none
+  use_aux_seg: true
+  aux_seg_block: 4
+  aux_seg_channels: 1
+  use_gated_pooling: true
+  use_ibn: false
+  grad_checkpointing: false
+  segmenter_encoder: resnet50
+  segmenter_out_channels: 4
+  segmenter_decoder_channels: [256, 128, 64, 32]
+
+train:
+  seed: 42
+  device: cuda
+  optimizer: adamw
+  scheduler: cosine
+  head_epochs: 3
+  finetune_epochs: 15
+  warmup_epochs: 2
+  head_learning_rate: 0.0002
+  backbone_learning_rate: 0.00008
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+  min_checkpoint_sensitivity: 0.80
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.001
+  amp: true
+  checkpoint_dir: artifacts/runs
+  global_best_checkpoint_path: artifacts/checkpoints/best.pt
+
+infer:
+  device: cuda
+  checkpoint_path: artifacts/checkpoints/staging/v31_v8b_fusion_features_hflip_v2.pt
+  prediction_dir: artifacts/predictions
+  heatmap_dir: artifacts/heatmaps
+  use_preprocessing: true
+  preprocess_mode: circular
+  threshold: 0.3930909090909091
+  amp: false
+  tta_mode: hflip
+  use_meta_classifier: true
+  gradcam_method: layercam
+  gradcam_target_block: 4
+  heatmap_activation_threshold: 0.25
+  heatmap_gamma: 0.65
+  heatmap_alpha: 0.86
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5

@@ -1,3 +1,10 @@
+"""MAPLES-DR 학습 마스크 배선(wiring)과 픽셀 희소성 진단.
+
+MAPLES 마스크가 manifest 행에 제대로 연결됐는지, 그리고 마스크가 사실상 비어 있는
+(R0 등 픽셀이 거의 없는) 경우가 얼마나 되는지 점검한다. 빈 마스크가 잘못된 음성
+supervision을 주는 문제(AI_HANDOFF Phase 4-C)를 잡기 위한 도구다.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -119,9 +126,9 @@ def _load_diagnosis_grades(path: Path) -> dict[str, int]:
         raise ValueError(f"MAPLES diagnosis CSV must contain name and DR columns: {path}")
     grades: dict[str, int] = {}
     for row in frame.itertuples(index=False):
-        grade = _parse_r_grade(getattr(row, "DR"))
+        grade = _parse_r_grade(row.DR)
         if grade is not None:
-            grades[str(getattr(row, "name"))] = grade
+            grades[str(row.name)] = grade
     return grades
 
 
@@ -156,7 +163,7 @@ def main() -> None:
     maples_rows = manifest[manifest["domain"].astype(str) == "MAPLES"].copy()
     row_outputs: list[dict[str, Any]] = []
     for row in maples_rows.itertuples(index=False):
-        image_path = str(getattr(row, "image_path"))
+        image_path = str(row.image_path)
         stem = Path(image_path).stem
         manifest_grade = _parse_r_grade(getattr(row, "original_grade", None))
         diagnosis_grade = diagnosis_grades.get(stem)
@@ -177,7 +184,7 @@ def main() -> None:
                 "grade_label": _grade_label(grade),
                 "grade_bucket": _grade_bucket(grade),
                 "valid": bool(valid),
-                "label": int(getattr(row, "label")) if hasattr(row, "label") else None,
+                "label": int(row.label) if hasattr(row, "label") else None,
                 "pixel_ratio": {
                     "union": union_ratio,
                     "by_channel": channel_ratios,

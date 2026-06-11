@@ -1,0 +1,22 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+scikit-learn==1.2.2; python_version < "3.12"
+scikit-learn==1.4.2; python_version >= "3.12"
+numpy==1.26.4
+PyYAML>=6.0
+pandas>=2.2
+Pillow>=10.0
+opencv-python-headless>=4.8
+scipy
+joblib
+timm
+albumentations
+cryptography>=42.0
+# grad-cam, captum: drscreen 코드에서 사용하지 않으므로 제거
+
+# CPU-only PyTorch (works on both GPU and non-GPU machines)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1+cpu
+torchvision==0.24.1+cpu

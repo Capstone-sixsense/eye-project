@@ -1,3 +1,5 @@
+"""SimCLR 자기지도 사전학습 CLI 진입점(레이블 없는 backbone 사전학습)."""
+
 from __future__ import annotations
 
 import argparse

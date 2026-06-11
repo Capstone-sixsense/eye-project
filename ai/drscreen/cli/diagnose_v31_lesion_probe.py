@@ -4,6 +4,9 @@ This CLI is intentionally diagnostic. It tests whether the active v31
 classifier block feature linearly separates lesion presence after domain
 stratification, then writes a concept-label table for grounded-classifier
 experiments.
+
+(한글 요약) v31 분류기의 블록 특징이 '병변 유무'를 선형으로 구분하는지(도메인 층화 후)
+점검하고, grounded-classifier 실험용 개념 라벨 표를 내보낸다.
 """
 from __future__ import annotations
 
@@ -269,7 +272,6 @@ def _write_concept_labels(
     manifest_rows: list[dict[str, str]],
     output_path: Path,
 ) -> dict:
-    data_root = project_root / "data/raw"
     rows: list[dict[str, str | int | float]] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -329,7 +331,7 @@ def _write_concept_labels(
         label = str(row.get("label", "")).strip()
         image_path = Path(row["_resolved_image_path"])
         if label == "0":
-            concepts: dict[str, str | int | float] = {code: 0 for code in LESION_CODES}
+            concepts: dict[str, str | int | float] = dict.fromkeys(LESION_CODES, 0)
             _append(
                 {
                     "image_id": str(row.get("image_id", image_path.stem)),
@@ -353,7 +355,7 @@ def _write_concept_labels(
                     "domain": str(row.get("domain", "")),
                     "split": str(row.get("split", "")),
                     "label": label,
-                    **{code: "" for code in LESION_CODES},
+                    **dict.fromkeys(LESION_CODES, ""),
                     "lesion_present": "",
                     "mask_valid": 0,
                     "weak_label_valid": 0,

@@ -1,0 +1,15 @@
+project:
+  version: v31_v8b_fusion_contentcrop_v1
+  task: binary_dr_screening
+  output_root: artifacts
+
+data:
+  manifest_path: data/processed/manifest_contentcrop_preprocessed.csv
+  image_root: data/raw
+
+infer:
+  checkpoint_path: artifacts/runs/10_grounded_classifier/v31_v8b_fusion_contentcrop_v1/checkpoints/best.pt
+  threshold: 0.23
+  use_meta_classifier: true
+  evidence_type: lesion_segmentation
+  lesion_threshold: 0.5

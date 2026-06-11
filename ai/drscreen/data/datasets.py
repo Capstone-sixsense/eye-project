@@ -1,7 +1,23 @@
+"""학습/평가용 PyTorch Dataset 정의(manifest CSV 기반).
+
+manifest CSV(image_path/label/split/domain 등)를 읽어 이미지 + 라벨 + 선택적
+병변 마스크 + 개념(concept) 라벨을 묶어 반환한다.
+
+클래스 계층:
+- ManifestDataset: 기본. 이미지/마스크에 각자 transform 적용.
+- SegmentationManifestDataset: 이미지와 마스크에 '동기화된' 공간 증강 적용
+  (분할/aux-seg 학습에서 crop/flip/rotate가 둘에 동일하게 들어가야 함).
+- FDAManifestDataset / SegmentationFDAManifestDataset: 위에 더해, 다른 도메인의
+  이미지를 reference로 뽑아 FDA(주파수영역 스타일 이식)로 도메인 일반화를 노린다.
+
+마스크는 mask_provider가 도메인별로 제공한다(없으면 NullMaskProvider가 0 마스크).
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -9,9 +25,14 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from drscreen.data.mask_providers import IDRiDMaskProvider, LesionMaskProvider, NullMaskProvider
-from drscreen.data.transforms import fda_mix
+from drscreen.data.mask_providers import (
+    IDRiDMaskProvider,
+    LesionMaskProvider,
+    NullMaskProvider,
+)
+from drscreen.data.transforms import ampmix, fda_mix
 
+# 개념(concept) 4종 코드. CBM 등에서 약지도(weak label) 개념 벡터의 채널 순서.
 _CONCEPT_CODES = ("MA", "HE", "EX", "SE")
 
 
@@ -32,6 +53,7 @@ class ManifestDataset(Dataset):
         self.transform = transform
         self._seg_mask_size = seg_mask_size
 
+        # 마스크 공급자 우선순위: 명시적 mask_provider > seg_mask_dir(IDRiD 단축) > 없음(0 마스크).
         # mask_provider takes precedence; seg_mask_dir is a convenience shorthand
         if mask_provider is not None:
             self._mask_provider: LesionMaskProvider = mask_provider
@@ -80,6 +102,8 @@ class ManifestDataset(Dataset):
 
     @staticmethod
     def _idrid_segmentation_key(image_id: str, image_path: str, domain: str) -> str | None:
+        # IDRiD segmentation 학습셋(ID 1~54)만 픽셀 마스크 키를 부여한다. ID 55~81은
+        # segmentation '테스트셋'이라 학습 supervision으로 쓰면 안 된다(7절 오염 참조).
         if domain != "IDRiD" or "a. Training Set" not in image_path:
             return None
         import re
@@ -182,6 +206,7 @@ class SegmentationManifestDataset(ManifestDataset):
         seg_mask, seg_mask_valid = self._mask_provider.load(
             str(row["image_path"]), domain, self._seg_mask_size
         )
+        # 핵심 차이: 이미지와 마스크를 한 transform에 함께 넘겨 같은 공간 증강을 받게 한다.
         if self.transform is not None:
             image, seg_mask = self.transform(image, seg_mask)
         return self._base_record(
@@ -209,6 +234,9 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
         transform: Callable[[Image.Image, torch.Tensor], tuple[Any, torch.Tensor]] | None = None,
         fda_alpha: float = 0.05,
         fda_probability: float = 1.0,
+        ampmix_mode: bool = False,
+        ampmix_alpha_low: float = 0.0,
+        ampmix_alpha_high: float = 0.5,
         fda_target_domain: str | None = None,
         fda_apply_to_target_domain: bool = False,
         domain_column: str = "domain",
@@ -229,6 +257,9 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
         )
         self._alpha = fda_alpha
         self._probability = fda_probability
+        self._ampmix_mode = ampmix_mode
+        self._ampmix_alpha_low = ampmix_alpha_low
+        self._ampmix_alpha_high = ampmix_alpha_high
         self._target_domain = fda_target_domain
         self._apply_to_target_domain = fda_apply_to_target_domain
         self._domain_column = domain_column
@@ -287,7 +318,18 @@ class SegmentationFDAManifestDataset(SegmentationManifestDataset):
             image = img.convert("RGB")
             if self._should_mix(domain):
                 ref_arr = self._load_raw_array(self._sample_ref_index(index, domain))
-                image = Image.fromarray(fda_mix(np.asarray(image), ref_arr, self._alpha))
+                source_arr = np.asarray(image)
+                if self._ampmix_mode:
+                    mixed = ampmix(
+                        source_arr,
+                        ref_arr,
+                        alpha_low=self._ampmix_alpha_low,
+                        alpha_high=self._ampmix_alpha_high,
+                        rng=self._rng,
+                    )
+                else:
+                    mixed = fda_mix(source_arr, ref_arr, self._alpha)
+                image = Image.fromarray(mixed)
 
         seg_mask, seg_mask_valid = self._mask_provider.load(
             str(row["image_path"]), domain, self._seg_mask_size
@@ -336,6 +378,10 @@ class FDAManifestDataset(ManifestDataset):
         split: str | None = None,
         transform: Callable[[Image.Image], Any] | None = None,
         fda_alpha: float = 0.05,
+        fda_probability: float = 1.0,
+        ampmix_mode: bool = False,
+        ampmix_alpha_low: float = 0.0,
+        ampmix_alpha_high: float = 0.5,
         domain_column: str = "domain",
         seg_mask_dir: str | Path | None = None,
         seg_mask_size: int = 512,
@@ -348,6 +394,10 @@ class FDAManifestDataset(ManifestDataset):
             mask_provider=mask_provider, concept_label_path=concept_label_path,
         )
         self._alpha = fda_alpha
+        self._probability = fda_probability
+        self._ampmix_mode = ampmix_mode
+        self._ampmix_alpha_low = ampmix_alpha_low
+        self._ampmix_alpha_high = ampmix_alpha_high
         self._domain_column = domain_column
         self._rng = np.random.default_rng()
         self._domain_indices: dict[str, list[int]] = {}
@@ -391,10 +441,21 @@ class FDAManifestDataset(ManifestDataset):
     def __getitem__(self, index: int) -> dict[str, Any]:
         row = self.frame.iloc[index]
         src_arr = self._load_raw_array(index)
-        ref_arr = self._load_raw_array(self._sample_ref_index(index))
-
-        mixed = fda_mix(src_arr, ref_arr, self._alpha)
-        image = Image.fromarray(mixed)
+        if self._probability > 0.0 and self._rng.random() <= self._probability:
+            ref_arr = self._load_raw_array(self._sample_ref_index(index))
+            if self._ampmix_mode:
+                mixed = ampmix(
+                    src_arr,
+                    ref_arr,
+                    alpha_low=self._ampmix_alpha_low,
+                    alpha_high=self._ampmix_alpha_high,
+                    rng=self._rng,
+                )
+            else:
+                mixed = fda_mix(src_arr, ref_arr, self._alpha)
+            image = Image.fromarray(mixed)
+        else:
+            image = Image.fromarray(src_arr)
 
         if self.transform is not None:
             image = self.transform(image)
