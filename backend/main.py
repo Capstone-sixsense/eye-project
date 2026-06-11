@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os, sys, logging, time
+import os, logging, time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -22,15 +21,7 @@ import crypto  # 키 검증을 위해 import만 해도 충분 (모듈 로드 시
 import io
 
 
-def _get_bundle_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        # sys._MEIPASS: PyInstaller 5.x/6.x 모두 bundled 파일의 실제 경로를 가리킴
-        # 6.x one-dir → _internal/ , 5.x one-dir → exe 옆 폴더
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    # 개발 환경: backend/ 기준으로 ../ai/
-    return Path(__file__).parent.parent / "ai"
-
-_DEFAULT_CONFIG_PATH = str(_get_bundle_dir() / "configs" / "base.yaml")
+_DEFAULT_CONFIG_PATH = "/ai/configs/base.yaml"
 
 # 'bad' 확률이 이 값을 넘으면 경고 메시지를 응답에 포함 (usable 등급 대상)
 QUICKQUAL_BAD_THRESHOLD = float(os.environ.get("QUICKQUAL_BAD_THRESHOLD", "0.7"))
@@ -78,15 +69,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"[lifespan] DB 초기화 실패: {exc}")
         raise
-
-    try:
-        import torch
-        if torch.cuda.is_available():
-            history.write_log(f"GPU 사용: {torch.cuda.get_device_name(0)}", phase="startup")
-        else:
-            history.write_log("GPU 없음 — CPU 모드로 실행", phase="startup")
-    except Exception:
-        pass
 
     config_path = os.environ.get("FUNDUS_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
     checkpoint_path = os.environ.get("FUNDUS_CHECKPOINT_PATH") or None
@@ -492,10 +474,3 @@ def history_delete(record_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="record not found")
     history.delete_record_files(record_id)
     return {"status": "deleted", "id": record_id}
-
-
-if __name__ == "__main__":
-    # PyInstaller로 패키징된 exe에서 직접 실행될 때 uvicorn 서버를 기동한다.
-    # Docker 환경에서는 'uvicorn main:app' 명령어로 외부에서 기동하므로 이 블록은 실행되지 않는다.
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

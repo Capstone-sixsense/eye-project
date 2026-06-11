@@ -17,9 +17,6 @@ from __future__ import annotations
 
 import base64
 import os
-import secrets
-import sys
-from pathlib import Path
 from typing import Final
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -41,42 +38,29 @@ class DecryptionFailed(RuntimeError):
     """복호화 실패 — 키 불일치, 파일 위변조, 또는 손상."""
 
 
-def _get_key_path() -> Path:
-    if getattr(sys, "frozen", False):
-        # PyInstaller 배포: AppData\Roaming\EyeProject\.key
-        appdata = os.environ.get("APPDATA") or str(Path.home())
-        return Path(appdata) / "EyeProject" / ".key"
-    # 개발 환경: backend/.key (git에 커밋되지 않도록 .gitignore에 추가)
-    return Path(__file__).parent / ".key"
-
-
 def _load_key() -> bytes:
-    """암호화 키 로드. 우선순위: 환경변수 → 키 파일 → 자동 생성."""
-    # 1순위: 환경변수 (Docker/개발 환경 호환)
+    """환경변수에서 32바이트 키를 base64 디코딩해서 반환."""
     raw = os.environ.get(_ENV_KEY, "").strip()
-    if raw:
-        try:
-            key = base64.b64decode(raw, validate=True)
-            if len(key) == 32:
-                return key
-        except Exception:
-            pass
-
-    # 2순위: 키 파일 (Windows 배포 — 이전 실행에서 생성된 키)
-    key_path = _get_key_path()
-    if key_path.exists():
-        key = key_path.read_bytes()
-        if len(key) == 32:
-            return key
-
-    # 3순위: 첫 실행 — 키 자동 생성 후 파일에 저장
-    key = secrets.token_bytes(32)
-    key_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_bytes(key)
+    if not raw:
+        raise CryptoNotConfigured(
+            f"환경변수 {_ENV_KEY}가 비어있습니다. "
+            f".env 파일에 base64 인코딩된 32바이트 키를 설정하세요."
+        )
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise CryptoNotConfigured(
+            f"{_ENV_KEY} 디코딩 실패 (base64 형식 오류): {exc}"
+        ) from exc
+    if len(key) != 32:
+        raise CryptoNotConfigured(
+            f"{_ENV_KEY} 디코딩 결과가 {len(key)}바이트입니다. "
+            "AES-256-GCM은 정확히 32바이트 키가 필요합니다."
+        )
     return key
 
 
-# 모듈 로드 시 1회 실행
+# 모듈 로드 시 1회 검증 (서버 시작 시점에 미리 실패하도록 유도)
 _KEY = _load_key()
 _AESGCM = AESGCM(_KEY)
 

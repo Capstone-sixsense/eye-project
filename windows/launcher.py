@@ -142,6 +142,14 @@ def _close_loading() -> None:
         time.sleep(0.2)
 
 
+def _health_ok() -> bool:
+    try:
+        with urllib.request.urlopen(HEALTH_URL, timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 def _wait_for_backend(proc: subprocess.Popen, timeout: int) -> bool:
     """/health 폴링. 백엔드 프로세스가 먼저 종료되면 즉시 False 반환."""
     deadline = time.monotonic() + timeout
@@ -150,12 +158,8 @@ def _wait_for_backend(proc: subprocess.Popen, timeout: int) -> bool:
         if proc.poll() is not None:
             _log(f"eye_backend.exe 조기 종료 (exit code={proc.returncode})")
             return False
-        try:
-            with urllib.request.urlopen(HEALTH_URL, timeout=2) as r:
-                if r.status == 200:
-                    return True
-        except Exception:
-            pass
+        if _health_ok():
+            return True
         time.sleep(1)
     return False
 
@@ -174,11 +178,26 @@ def main() -> None:
             )
             sys.exit(1)
 
-    # 2. 이미 백엔드가 실행 중이면 UI만 열기
+    # 2. If port 8000 is already occupied, use it only when it is a healthy
+    # EyeProject-compatible backend. Fresh offline-installer validation should
+    # still be done with Docker/dev servers stopped.
     if _port_in_use(BACKEND_PORT):
-        _log("포트 8000 사용 중 → UI만 실행")
-        subprocess.Popen([str(FRONTEND_EXE)], cwd=str(FRONTEND_EXE.parent)).wait()
-        return
+        if _health_ok():
+            _log("기존 127.0.0.1:8000 백엔드 사용")
+            subprocess.Popen(
+                [str(FRONTEND_EXE)],
+                cwd=str(FRONTEND_EXE.parent),
+            ).wait()
+            _log("=== 런처 종료 ===")
+            return
+        _log("포트 8000 사용 중이나 /health 실패")
+        _msgbox(
+            "EyeProject 오류",
+            "127.0.0.1:8000 포트가 이미 사용 중이지만 EyeProject 서버가 아닙니다.\n\n"
+            "해당 포트를 사용하는 프로그램을 종료한 뒤 다시 실행해 주세요.",
+            error=True,
+        )
+        sys.exit(1)
 
     # 3. 로딩 창 표시 (사용자가 진행 중임을 알 수 있도록)
     _show_loading()
