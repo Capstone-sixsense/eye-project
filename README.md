@@ -1,6 +1,10 @@
 # eye-project
 
-**최종 갱신: 2026-06-03**
+| 자료 | 위치 |
+|------|------|
+| 포스터 | [`docs/poster/poster.pdf`](docs/poster/poster.pdf) · [이미지(PNG)](docs/poster/poster.png) |
+| 프로젝트 결과보고서 (PDF) | _추가 예정_ |
+| 시연 영상 | _추가 예정_ |
 
 안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
 이미지를 업로드하면 AI가 이상 여부를 추정하고, 병변 evidence overlay와 리포트, 품질 정보를 함께 제공합니다.

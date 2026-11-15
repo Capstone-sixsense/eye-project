@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>RetinAI (Team SixSense) · 당뇨병성 망막병증 AI 보조 스크리닝 포스터 (90×140cm)</title>
+<style>
+  @page { size: 900mm 1400mm; margin: 0; }
+  :root {
+    --navy: #0b2545;
+    --navy2: #13315c;
+    --teal: #0f8b8d;
+    --teal-l: #e3f4f4;
+    --coral: #e4572e;
+    --amber: #f2a541;
+    --ink: #1d2a3a;
+    --muted: #5b6b7d;
+    --line: #d7e0ea;
+    --bg: #f5f8fb;
+    --ma: rgb(52,152,219);
+    --he: rgb(231,76,60);
+    --ex: rgb(241,196,15);
+    --se: rgb(46,204,113);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 900mm; height: 1400mm; }
+  body {
+    font-family: "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    font-size: 8.6mm;
+    line-height: 1.45;
+    word-break: keep-all;
+  }
+  .poster { width: 900mm; height: 1400mm; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ---------- Header ---------- */
+  header {
+    background: radial-gradient(circle at 85% 40%, #1f5f8b 0%, var(--navy2) 38%, var(--navy) 75%);
+    color: #fff;
+    padding: 20mm 36mm 22mm;
+    position: relative;
+    height: 232mm;
+    flex: none;
+  }
+  .brandline { display: flex; align-items: center; gap: 7mm; }
+  .brand { font-size: 23mm; font-weight: 800; letter-spacing: -0.3mm; line-height: 1; padding-right: 7mm; border-right: 0.8mm solid rgba(159,216,217,0.5); }
+  .brand span { color: #6fe0d6; }
+  .eyebrow { font-size: 8.4mm; letter-spacing: 0.6mm; color: #9fd8d9; font-weight: 700; }
+  h1 { font-size: 28mm; line-height: 1.12; font-weight: 800; margin-top: 5mm; letter-spacing: -0.6mm; }
+  h1 .accent { color: #6fe0d6; }
+  .oneliner {
+    margin-top: 10mm; display: inline-block; max-width: 560mm;
+    background: rgba(255,255,255,0.1); border-left: 3mm solid #6fe0d6;
+    padding: 6mm 9mm; font-size: 11.2mm; font-weight: 600; line-height: 1.4;
+  }
+  .team { margin-top: 9mm; font-size: 8mm; color: #c9d7e6; }
+  .team b { color: #fff; }
+  .hero {
+    position: absolute; right: 40mm; top: 20mm; width: 180mm; height: 180mm; border-radius: 50%;
+    overflow: hidden; border: 3mm solid rgba(111,224,214,0.65);
+    box-shadow: 0 0 0 7mm rgba(111,224,214,0.12), 0 8mm 30mm rgba(0,0,0,0.45);
+  }
+  .hero img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.07); }
+  .hero-cap { position: absolute; right: 40mm; top: 205mm; width: 180mm; text-align: center; font-size: 6.4mm; color: #9fb6cc; }
+
+  /* ---------- KPI strip ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7mm; padding: 0 36mm; margin-top: -0mm; position: relative; z-index: 2; }
+  .kpi { background: #fff; border-radius: 5mm; padding: 6mm 7mm 5.5mm; box-shadow: 0 2mm 6mm rgba(11,37,69,0.10); border-top: 2.2mm solid var(--teal); margin-top: -14mm; }
+  .kpi .v { font-size: 19mm; font-weight: 800; color: var(--navy); line-height: 1.05; letter-spacing: -0.4mm; }
+  .kpi .v small { font-size: 9mm; font-weight: 700; }
+  .kpi .l { font-size: 7.2mm; color: var(--muted); margin-top: 1.5mm; font-weight: 600; }
+  .kpi.coral { border-top-color: var(--coral); }
+  .kpi.amber { border-top-color: var(--amber); }
+  .kpi-note { padding: 3.5mm 36mm 0; font-size: 6.2mm; color: var(--muted); }
+
+  /* ---------- Body ---------- */
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0 22mm; padding: 9mm 36mm 0; }
+  .col { display: flex; flex-direction: column; gap: 9mm; }
+  section.card { background: #fff; border-radius: 6mm; padding: 9mm 10mm 10mm; box-shadow: 0 1.5mm 5mm rgba(11,37,69,0.07); }
+  h2 { display: flex; align-items: center; gap: 4.5mm; font-size: 13.5mm; font-weight: 800; color: var(--navy); margin-bottom: 5mm; letter-spacing: -0.3mm; }
+  h2 .num { display: inline-flex; align-items: center; justify-content: center; width: 15mm; height: 15mm; border-radius: 3.5mm; background: var(--teal); color: #fff; font-size: 8.4mm; }
+  h3 { font-size: 9.6mm; font-weight: 800; color: var(--navy2); margin: 6mm 0 3mm; display: flex; align-items: center; gap: 2.5mm; }
+  h3::before { content: ""; width: 2.2mm; height: 8mm; background: var(--teal); border-radius: 1mm; }
+  h3:first-of-type { margin-top: 0; }
+  p { margin-bottom: 2.5mm; }
+  ul.dots { list-style: none; }
+  ul.dots li { position: relative; padding-left: 6mm; margin-bottom: 2mm; }
+  ul.dots li::before { content: ""; position: absolute; left: 0.5mm; top: 4.4mm; width: 2.4mm; height: 2.4mm; border-radius: 50%; background: var(--teal); }
+  .muted { color: var(--muted); }
+  .small { font-size: 6.8mm; line-height: 1.45; }
+  .hl { color: var(--teal); font-weight: 800; }
+  .hl-c { color: var(--coral); font-weight: 800; }
+
+  .goal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4mm; margin-top: 3mm; }
+  .goal { background: var(--teal-l); border-radius: 4mm; padding: 5.5mm 6mm; }
+  .goal b { display: block; font-size: 9mm; color: var(--navy); }
+  .goal span { font-size: 7.4mm; color: var(--muted); line-height: 1.4; display: block; margin-top: 1mm; }
+
+  /* architecture */
+  .arch { display: grid; grid-template-columns: 1fr 9mm 1fr 9mm 1fr; align-items: stretch; margin-top: 1mm; }
+  .arch .box { border: 0.7mm solid var(--line); border-radius: 4mm; padding: 5.5mm 4mm; text-align: center; background: #fbfdff; }
+  .arch .box .t { font-weight: 800; font-size: 9.2mm; color: var(--navy); }
+  .arch .box .s { font-size: 7mm; color: var(--muted); line-height: 1.35; margin-top: 1mm; }
+  .arch .box .tag { display: inline-block; margin-top: 2mm; font-size: 5.8mm; font-weight: 700; padding: 0.6mm 3mm; border-radius: 10mm; background: var(--teal-l); color: var(--teal); }
+  .arch .arrow { display: flex; align-items: center; justify-content: center; color: var(--teal); font-size: 9mm; font-weight: 800; }
+  .arch-foot { margin-top: 3mm; display: flex; gap: 3mm; flex-wrap: wrap; }
+  .tech .chip { font-size: 6.6mm; padding: 1.2mm 4mm; background: var(--teal-l); color: var(--teal); }
+  .col > section.card:last-child { flex: 1; }
+  .chip { font-size: 6.3mm; padding: 1mm 4mm; border-radius: 10mm; background: #edf2f7; color: var(--navy2); font-weight: 700; }
+
+  /* pipeline */
+  .pipe { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2.5mm; margin-top: 1mm; }
+  .step { background: #fbfdff; border: 0.7mm solid var(--line); border-radius: 4mm; padding: 5mm 2mm 4.5mm; text-align: center; position: relative; }
+  .step .n { width: 10.5mm; height: 10.5mm; border-radius: 50%; background: var(--navy); color: #fff; font-size: 6.4mm; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+  .step .t { font-size: 7.8mm; font-weight: 800; color: var(--navy); margin-top: 1.5mm; line-height: 1.25; }
+  .step .s { font-size: 6.2mm; color: var(--muted); line-height: 1.3; margin-top: 1mm; }
+  .step.gate { border-color: #f3b8a6; background: #fff6f3; }
+  .step.gate .n { background: var(--coral); }
+  .step.ai { border-color: #9ad7d3; background: #effaf9; }
+  .step.ai .n { background: var(--teal); }
+
+  /* model */
+  .model { display: grid; grid-template-columns: 74mm 1fr 82mm; gap: 4mm; align-items: center; margin-top: 1mm; }
+  .m-in { text-align: center; }
+  .m-in img { width: 68mm; height: 68mm; border-radius: 50%; object-fit: cover; border: 1mm solid var(--line); }
+  .m-in div { font-size: 6.2mm; color: var(--muted); margin-top: 1mm; line-height: 1.3; }
+  .m-branches { display: flex; flex-direction: column; gap: 4mm; }
+  .m-b { border-radius: 4mm; padding: 5mm 5mm; border: 0.7mm solid var(--line); background: #fbfdff; }
+  .m-b .t { font-weight: 800; font-size: 8.2mm; color: var(--navy); }
+  .m-b .s { font-size: 6.8mm; color: var(--muted); line-height: 1.35; }
+  .m-b.cls { border-left: 2.5mm solid var(--navy2); }
+  .m-b.seg { border-left: 2.5mm solid var(--teal); }
+  .m-out { background: var(--navy); color: #fff; border-radius: 4mm; padding: 7mm 5mm; text-align: center; }
+  .m-out .t { font-weight: 800; font-size: 7.6mm; }
+  .m-out .s { font-size: 6.2mm; color: #bcd0e4; line-height: 1.35; margin-top: 1.5mm; }
+  .m-out .big { font-size: 10mm; font-weight: 800; color: #6fe0d6; margin-top: 2mm; }
+
+  /* data table */
+  table.data { width: 100%; border-collapse: collapse; font-size: 7.2mm; margin-top: 1mm; }
+  table.data th { text-align: left; background: #edf2f7; color: var(--navy2); padding: 2.4mm 3mm; font-weight: 800; }
+  table.data td { padding: 2.6mm 3mm; border-bottom: 0.4mm solid var(--line); vertical-align: top; }
+  table.data td:first-child { font-weight: 800; color: var(--navy); white-space: nowrap; }
+
+  /* trust */
+  .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+  .trust .it { border: 0.7mm solid var(--line); border-radius: 4mm; padding: 4mm 5mm; }
+  .trust .it b { display: block; font-size: 7.8mm; color: var(--navy); margin-bottom: 1mm; }
+  .trust .it span { font-size: 6.4mm; color: var(--muted); line-height: 1.4; display: block; }
+
+  /* results */
+  .res-grid { display: grid; grid-template-columns: 150mm 1fr; gap: 6mm; align-items: start; }
+  .cm { display: grid; grid-template-columns: 24mm 1fr 1fr; grid-template-rows: auto 1fr 1fr; gap: 1.6mm; font-size: 6.2mm; }
+  .cm .h { text-align: center; color: var(--muted); font-weight: 700; align-self: end; }
+  .cm .r { color: var(--muted); font-weight: 700; display: flex; align-items: center; justify-content: flex-end; text-align: right; padding-right: 1mm; line-height: 1.2; }
+  .cm .c { border-radius: 3mm; padding: 4mm 2mm; text-align: center; font-weight: 800; font-size: 9mm; line-height: 1.1; }
+  .cm .c small { display: block; font-size: 5.4mm; font-weight: 700; margin-top: 1mm; opacity: 0.85; }
+  .cm .ok { background: var(--teal); color: #fff; }
+  .cm .ok2 { background: #3aa7a3; color: #fff; }
+  .cm .ng { background: #fde7df; color: #b23a17; }
+  .cm-cap { font-size: 5.8mm; color: var(--muted); margin-top: 2.5mm; line-height: 1.35; }
+
+  .viz { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4mm; }
+  .viz figure { text-align: center; }
+  .viz img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 4mm; background: #000; display: block; }
+  .viz figcaption { font-size: 6.2mm; margin-top: 1.5mm; line-height: 1.3; }
+  .viz figcaption b { color: var(--navy); }
+  .badge { display: inline-block; font-size: 5.6mm; font-weight: 800; padding: 0.4mm 3mm; border-radius: 10mm; margin-top: 1mm; }
+  .badge.abn { background: #fde7df; color: #b23a17; }
+  .badge.nor { background: #dff3ea; color: #1b7a4b; }
+  .badge.rej { background: #fff1d6; color: #9a6200; }
+  .legend { display: flex; gap: 5mm; justify-content: center; flex-wrap: wrap; font-size: 6.2mm; margin-top: 3mm; }
+  .legend span { display: inline-flex; align-items: center; gap: 1.6mm; }
+  .legend i { width: 5mm; height: 5mm; border-radius: 1.2mm; display: inline-block; }
+
+  .band { padding: 9mm 36mm 0; flex: none; }
+  .h2sub { font-size: 7.4mm; font-weight: 600; color: var(--muted); margin-left: 2mm; }
+  .screens { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8mm; }
+  .screens figure img { width: 100%; border-radius: 3mm; border: 0.6mm solid var(--line); display: block; box-shadow: 0 1.5mm 4mm rgba(11,37,69,0.10); }
+  .screens figcaption { font-size: 8mm; text-align: center; margin-top: 2.5mm; color: var(--navy2); font-weight: 800; }
+  .screens figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 6.6mm; line-height: 1.3; }
+
+  /* effects */
+  .effects-wrap { padding: 9mm 36mm 0; flex: none; }
+  .effects { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6mm; }
+  .eff { background: #fff; border-radius: 5mm; padding: 6mm 6.5mm; box-shadow: 0 1.5mm 5mm rgba(11,37,69,0.07); border-top: 2.2mm solid var(--teal); }
+  .eff .ic { font-size: 11mm; line-height: 1; color: var(--teal); font-weight: 800; }
+  .eff b { display: block; font-size: 8.6mm; color: var(--navy); margin: 2mm 0 1.5mm; line-height: 1.25; }
+  .eff span { font-size: 6.6mm; color: var(--muted); line-height: 1.42; display: block; }
+
+  footer { margin-top: auto; background: var(--navy); color: #b9c9da; padding: 7mm 36mm 8mm; font-size: 5.8mm; line-height: 1.5; display: grid; grid-template-columns: 1.55fr 1fr; gap: 14mm; flex: none; }
+  footer b { color: #fff; }
+  footer .warn { color: #ffd38a; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <!-- ====================== HEADER ====================== -->
+  <header>
+    <div class="brandline"><span class="brand">Retin<span>AI</span></span><span class="eyebrow">2026 CAPSTONE DESIGN · TEAM SIXSENSE</span></div>
+    <h1>안저 사진 한 장으로 보는<br><span class="accent">당뇨병성 망막병증</span> AI 보조 스크리닝</h1>
+    <div class="oneliner">
+      안저 영상을 올리면 약 1초 만에 <b>망막병증 의심 여부</b>와 <b>병변 후보 위치</b>를 함께 보여주는,<br>
+      품질 검사·암호화 저장까지 갖춘 의료진용 AI 보조 판독 웹 서비스
+    </div>
+    <div class="team">단국대학교 · <b>Team SixSense</b> &nbsp;|&nbsp; <b>이지호 · 정병훈 · 최지민</b> &nbsp;|&nbsp; github.com/Capstone-sixsense/eye-project</div>
+    <div class="hero"><img src="assets/abn_overlay.png" alt="병변 후보 오버레이"></div>
+    <div class="hero-cap">실제 배포 모델 출력 — 4종 병변 후보 영역 표시</div>
+  </header>
+
+  <!-- ====================== KPI ====================== -->
+  <div class="kpis">
+    <div class="kpi"><div class="v">0.936</div><div class="l">AUROC (외부 검증)</div></div>
+    <div class="kpi"><div class="v">90.7<small>%</small></div><div class="l">특이도 Specificity</div></div>
+    <div class="kpi coral"><div class="v">83.2<small>%</small></div><div class="l">민감도 Sensitivity</div></div>
+    <div class="kpi"><div class="v">89.9<small>%</small></div><div class="l">정밀도 Precision</div></div>
+    <div class="kpi amber"><div class="v">≈1<small>초</small></div><div class="l">1장 분석 (품질검사~리포트)</div></div>
+  </div>
+  <div class="kpi-note">* 학습에 쓰지 않은 외부 데이터셋 DDR 10,018장(정상 5,013 / 비정상 5,005) 홀드아웃 평가, 판정 임계값 0.0856 &nbsp;·&nbsp; 처리 시간은 Apple M5 CPU 단독 실측값</div>
+
+  <!-- ====================== BODY ====================== -->
+  <main>
+    <!-- ---------- LEFT ---------- -->
+    <div class="col">
+      <section class="card">
+        <h2><span class="num">01</span>작품 개요</h2>
+        <h3>배경</h3>
+        <p>당뇨병성 망막병증(DR)은 당뇨 환자에게 흔한 합병증이자 <b>성인 실명의 주요 원인</b>입니다. 초기에는 자각 증상이 거의 없어 <b>정기적인 안저 검사로 조기 발견</b>하는 것이 중요하지만, 안과 전문의가 모든 영상을 직접 판독하기에는 시간과 인력이 부족합니다.</p>
+        <h3>목표</h3>
+        <p>안저 영상 1장으로 <b>정상 / 비정상(DR 의심)</b>을 판별하고, 근거가 되는 <b>병변 후보 영역</b>을 함께 보여주는 보조 스크리닝 시스템을 만듭니다. 의료 보조 목적이므로 <b>속도보다 정확성·재현성·일관성</b>을 우선했습니다.</p>
+        <div class="goal-grid">
+          <div class="goal"><b>① 놓치지 않는 판별</b><span>민감도 80% 이상을 만족하는 모델만 채택, 외부 데이터로 검증</span></div>
+          <div class="goal"><b>② 보여주는 AI</b><span>미세동맥류·출혈·삼출물 등 4종 병변 후보를 색으로 표시</span></div>
+          <div class="goal"><b>③ 믿을 수 있는 입력</b><span>안저 여부·촬영 품질을 먼저 검사해 부적합 영상은 재촬영 안내</span></div>
+          <div class="goal"><b>④ 안전한 데이터</b><span>원본·리포트 영상을 AES-256-GCM으로 암호화하여 저장</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">02</span>개발 세부 내용</h2>
+
+        <h3>시스템 구성</h3>
+        <div class="arch">
+          <div class="box"><div class="t">Flutter Web</div><div class="s">업로드 · 진행 표시<br>결과 · 이력 · PDF</div><span class="tag">Frontend</span></div>
+          <div class="arrow">⇄</div>
+          <div class="box"><div class="t">FastAPI</div><div class="s">비동기 분석 Job<br>품질 게이트 · 암호화 저장</div><span class="tag">Backend</span></div>
+          <div class="arrow">→</div>
+          <div class="box"><div class="t">drscreen</div><div class="s">PyTorch 학습·추론<br>병변 분할 · 설정 관리</div><span class="tag">AI</span></div>
+        </div>
+        <div class="arch-foot">
+          <span class="chip">Docker Compose 통합 배포</span><span class="chip">단일 기준 설정 base.yaml</span><span class="chip">SQLite 이력</span><span class="chip">비동기 Job + 폴링 API</span>
+        </div>
+
+        <h3>분석 파이프라인</h3>
+        <div class="pipe">
+          <div class="step"><span class="n">1</span><div class="t">업로드</div><div class="s">jpg·png<br>10MB 이하</div></div>
+          <div class="step gate"><span class="n">2</span><div class="t">안저 판별</div><div class="s">비안저 영상<br>거부</div></div>
+          <div class="step gate"><span class="n">3</span><div class="t">품질 평가</div><div class="s">QuickQual<br>불량 시 재촬영</div></div>
+          <div class="step"><span class="n">4</span><div class="t">전처리</div><div class="s">원형 크롭<br>Ben Graham 정규화</div></div>
+          <div class="step ai"><span class="n">5</span><div class="t">AI 추론</div><div class="s">분류 + 병변 분할<br>메타 분류기 융합</div></div>
+          <div class="step"><span class="n">6</span><div class="t">결과·저장</div><div class="s">리포트·이력<br>AES 암호화</div></div>
+        </div>
+
+        <h3>AI 모델 — 분류기 + 병변 분할기 융합</h3>
+        <div class="model">
+          <div class="m-in"><img src="assets/abn_raw.jpg" alt="입력 안저 영상"><div>입력 안저 영상<br>512 × 512</div></div>
+          <div class="m-branches">
+            <div class="m-b cls"><div class="t">DR 분류기 · EfficientNet-B5</div><div class="s">자기지도 사전학습(SimCLR) → 보조 병변 분할 손실 + 게이트 풀링 → 비정상 확률</div></div>
+            <div class="m-b seg"><div class="t">병변 분할기 · ResNet50 U-Net</div><div class="s">MA · HE · EX · SE 4채널 픽셀 분할 → 병변별 존재 점수·면적 비율</div></div>
+          </div>
+          <div class="m-out"><div class="t">메타 분류기</div><div class="s">StandardScaler + 로지스틱 회귀로 두 근거를 결합</div><div class="big">정상 / 비정상</div><div class="s">+ 병변 후보 맵</div></div>
+        </div>
+
+        <h3>학습·검증 데이터 (공개 데이터셋 6종)</h3>
+        <table class="data">
+          <tr><th>용도</th><th>데이터셋</th><th>규모·특징</th></tr>
+          <tr><td>분류 학습</td><td>APTOS 2019 · IDRiD · Messidor</td><td>다기관·다장비 안저 영상, 자기지도 사전학습 5,378장</td></tr>
+          <tr><td>병변 분할</td><td>DDR-SEG · TJDR · MAPLES-DR · IDRiD</td><td>픽셀 단위 병변 마스크 1,156장 (532 / 448 / 122 / 54)</td></tr>
+          <tr><td>외부 검증</td><td>DDR</td><td>12,522장 — 임계값 보정 20% / 성능 평가 80% 분리</td></tr>
+        </table>
+
+        <h3>핵심 기술</h3>
+        <div class="arch-foot tech">
+          <span class="chip">SimCLR 자기지도 사전학습</span><span class="chip">FDA 도메인 일반화</span><span class="chip">보조 병변 분할 + 게이트 풀링</span><span class="chip">U-Net 4종 병변 분할</span><span class="chip">로지스틱 메타 분류기 융합</span>
+        </div>
+      </section>
+    </div>
+
+    <!-- ---------- RIGHT ---------- -->
+    <div class="col">
+      <section class="card">
+        <h2><span class="num">02</span>개발 과정 · 신뢰성 설계</h2>
+        <h3>외부 데이터 일반화 성능 향상 (DDR AUROC)</h3>
+        <svg viewBox="0 6 400 140" width="100%" style="display:block" font-family="Apple SD Gothic Neo, sans-serif">
+          <!-- grid: y from 0.86 (y=122) to 0.95 (y=14) => 1200 px per 1.0 -->
+          <g stroke="#d7e0ea" stroke-width="0.5">
+            <line x1="34" y1="122" x2="394" y2="122"/><line x1="34" y1="98" x2="394" y2="98"/><line x1="34" y1="74" x2="394" y2="74"/><line x1="34" y1="50" x2="394" y2="50"/><line x1="34" y1="26" x2="394" y2="26"/>
+          </g>
+          <g font-size="6.5" fill="#5b6b7d" text-anchor="end">
+            <text x="30" y="124">0.86</text><text x="30" y="100">0.88</text><text x="30" y="76">0.90</text><text x="30" y="52">0.92</text><text x="30" y="28">0.94</text>
+          </g>
+          <!-- points: x positions 64,128,192,256,320,374 -->
+          <polyline fill="none" stroke="#0f8b8d" stroke-width="2.2" points="64,107.0 126,84.7 188,68.5 250,57.6 312,54.8 370,30.8"/>
+          <g fill="#0f8b8d"><circle cx="64" cy="107.0" r="3"/><circle cx="126" cy="84.7" r="3"/><circle cx="188" cy="68.5" r="3"/><circle cx="250" cy="57.6" r="3"/><circle cx="312" cy="54.8" r="3"/></g>
+          <circle cx="370" cy="30.8" r="4.6" fill="#e4572e"/>
+          <g font-size="7" font-weight="800" fill="#0b2545" text-anchor="middle">
+            <text x="64" y="99">0.873</text><text x="126" y="77">0.891</text><text x="188" y="61">0.905</text><text x="250" y="50">0.914</text><text x="312" y="47">0.916</text><text x="370" y="20" fill="#e4572e" font-size="8.5">0.936</text>
+          </g>
+          <g font-size="6.2" fill="#1d2a3a" text-anchor="middle">
+            <text x="64" y="134">Messidor</text><text x="64" y="142">학습 편입</text>
+            <text x="126" y="134">FDA 스타일</text><text x="126" y="142">+ Focal Loss</text>
+            <text x="188" y="134">고해상도</text><text x="188" y="142">512px</text>
+            <text x="250" y="134">병변 게이트</text><text x="250" y="142">풀링</text>
+            <text x="312" y="134">SE 제거</text><text x="312" y="142">+ Dice-BCE</text>
+            <text x="370" y="134" font-weight="800" fill="#e4572e">병변 분할</text><text x="370" y="142" font-weight="800" fill="#e4572e">융합(배포)</text>
+          </g>
+        </svg>
+        <p class="small muted" style="margin-top:1.5mm">60여 개 실험 설정을 버전별로 기록·비교하며 개선. 외부 데이터 성능이 떨어지는 기법(MixStyle, SWAD, IBN 등)은 근거와 함께 폐기했습니다. (마지막 값은 DDR 80% 홀드아웃 기준)</p>
+        <h3>신뢰성을 위한 설계</h3>
+        <div class="trust">
+          <div class="it"><b>민감도 우선 체크포인트</b><span>검증 민감도 ≥ 0.80을 만족하는 후보 중 AUROC 최고 모델만 저장 — 환자를 놓치는 위음성 억제</span></div>
+          <div class="it"><b>보정·평가 데이터 분리</b><span>임계값은 DDR 20%에서만 정하고 나머지 80%로 성능 보고 — 낙관적 수치 방지</span></div>
+          <div class="it"><b>지름길(shortcut) 감사</b><span>배경 스타일 교환 실험으로 분류기의 지름길 학습을 점검 → 병변 근거는 독립 분할 모델로 분리</span></div>
+          <div class="it"><b>정직한 설명 문구</b><span>“병변 때문에 비정상”이 아닌 “비정상 판정 + 별도 검출된 병변 후보”로 표현</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">03</span>구현 결과</h2>
+
+        <h3>병변 후보 시각화 예시 (실제 배포 모델 출력)</h3>
+        <div class="viz">
+          <figure><img src="assets/abn_overlay.png" alt="비정상 예시"><figcaption><span class="badge abn">비정상 · 99.8%</span><br><b>4종 병변 후보 검출</b></figcaption></figure>
+          <figure><img src="assets/nor_overlay.png" alt="정상 예시"><figcaption><span class="badge nor">정상 · 0.5%</span><br><b>병변 후보 거의 없음</b></figcaption></figure>
+          <figure><img src="assets/bad_raw.jpg" alt="품질 불량 예시"><figcaption><span class="badge rej">품질 불량 · 거부</span><br><b>재촬영 안내 (bad 0.92)</b></figcaption></figure>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--ma)"></i>미세동맥류 MA</span>
+          <span><i style="background:var(--he)"></i>출혈 HE</span>
+          <span><i style="background:var(--ex)"></i>경성삼출물 EX</span>
+          <span><i style="background:var(--se)"></i>면화반 SE</span>
+        </div>
+
+        <h3>판별 성능 · 병변 분할 성능</h3>
+        <div class="res-grid">
+          <div>
+            <div class="cm">
+              <div></div><div class="h">AI: 정상</div><div class="h">AI: 비정상</div>
+              <div class="r">실제<br>정상</div><div class="c ok">4,547<small>TN</small></div><div class="c ng">466<small>FP</small></div>
+              <div class="r">실제<br>비정상</div><div class="c ng">843<small>FN</small></div><div class="c ok2">4,162<small>TP</small></div>
+            </div>
+            <div class="cm-cap">DDR 외부 홀드아웃 10,018장 · 정확도 86.9% · F1 0.864</div>
+          </div>
+          <div>
+            <svg viewBox="0 0 230 120" width="100%" style="display:block" font-family="Apple SD Gothic Neo, sans-serif">
+              <text x="0" y="9" font-size="8" font-weight="800" fill="#13315c">데이터셋별 병변 분할 mDice</text>
+              <!-- scale: 0.5 => 150px, origin x=58 -->
+              <g font-size="7" fill="#1d2a3a" text-anchor="end">
+                <text x="54" y="31">IDRiD</text><text x="54" y="53">DDR-SEG</text><text x="54" y="75">TJDR</text><text x="54" y="97">MAPLES-DR</text>
+              </g>
+              <rect x="58" y="22" width="124.5" height="12" rx="2" fill="#0f8b8d"/>
+              <rect x="58" y="44" width="106.2" height="12" rx="2" fill="#0f8b8d"/>
+              <rect x="58" y="66" width="104.7" height="12" rx="2" fill="#0f8b8d"/>
+              <rect x="58" y="88" width="74.7" height="12" rx="2" fill="#3aa7a3"/>
+              <g font-size="7" font-weight="800" fill="#0b2545">
+                <text x="186" y="31">0.415</text><text x="168" y="53">0.354</text><text x="167" y="75">0.349</text><text x="137" y="97">0.249</text>
+              </g>
+              <text x="0" y="116" font-size="6" fill="#5b6b7d">초기 분할 모델 IDRiD mDice 0.001 → 데이터 확장·좌표 보정 후 0.415</text>
+            </svg>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </main>
+
+  <!-- ====================== SCREENS ====================== -->
+  <div class="band">
+    <section class="card">
+      <h2><span class="num">03</span>구현 결과 — 서비스 화면 <span class="h2sub">Flutter Web · 실제 동작 화면</span></h2>
+        <div class="screens">
+          <figure><img src="assets/upload.png" alt="업로드 화면"><figcaption>업로드<span>형식·용량 검증, 진행 상태 표시</span></figcaption></figure>
+          <figure><img src="assets/result.png" alt="결과 화면"><figcaption>분석 결과<span>원본·결과 비교, 판정·확률, PDF</span></figcaption></figure>
+          <figure><img src="assets/history.png" alt="이력 화면"><figcaption>분석 이력<span>판정·기간 필터, 대시보드</span></figcaption></figure>
+        </div>
+    </section>
+  </div>
+
+  <!-- ====================== EFFECTS ====================== -->
+  <div class="effects-wrap">
+    <section class="card" style="padding-bottom:8mm">
+      <h2><span class="num">04</span>기대효과 및 향후 과제</h2>
+      <div class="effects">
+        <div class="eff"><div class="ic">01</div><b>1차 의료기관의<br>조기 선별 지원</b><span>안과 전문의가 없는 내과·검진센터에서도 DR 의심 환자를 빠르게 선별해 전문 진료로 연결</span></div>
+        <div class="eff"><div class="ic">02</div><b>판독 부담 경감<br>· 우선순위화</b><span>정상 가능성이 높은 영상과 의심 영상을 구분하고 병변 후보 위치를 제시해 판독 시간 단축</span></div>
+        <div class="eff"><div class="ic">03</div><b>검사 품질과<br>환자 소통 향상</b><span>품질 불량 영상은 즉시 재촬영을 유도하고, 색으로 표시된 병변 후보로 결과를 쉽게 설명</span></div>
+        <div class="eff"><div class="ic">04</div><b>안전하고 확장 가능한<br>의료 AI 기반</b><span>암호화 저장·Docker 배포·단일 설정으로 재현 가능하며, 중증도 등급·타 안질환으로 확장 가능</span></div>
+      </div>
+      <p class="small muted" style="margin-top:5mm"><b style="color:var(--navy)">향후 과제</b> &nbsp; 5단계 중증도 등급 분류 · 다기관 전향적 임상 검증 · 지름길 학습 완화 및 병변 분할 정확도(특히 MAPLES-DR 도메인) 향상 · GPU 서버 배포 최적화</p>
+    </section>
+  </div>
+
+  <!-- ====================== FOOTER ====================== -->
+  <footer>
+    <div>
+      <b>Datasets</b> — APTOS 2019 (Kaggle) · IDRiD (CC BY 4.0) · Messidor (ADCIS, 비상업 연구) · MAPLES-DR (CC0-1.0, Sci. Data 2024) · TJDR (Mao et al., arXiv:2312.15389) · DDR / DDR-SEG (nkicsl, MIT) &nbsp;|&nbsp; 품질 평가: QuickQual (DenseNet121 + SVM)<br>
+      <b>Stack</b> — PyTorch · FastAPI · Flutter Web · Docker Compose · AES-256-GCM &nbsp;|&nbsp; 시각화 예시 영상은 공개 데이터셋(APTOS·IDRiD) 샘플
+    </div>
+    <div style="text-align:right">
+      <span class="warn">본 시스템은 의료 보조 도구이며, 최종 진단은 반드시 의료 전문가가 내립니다.</span><br>
+      <b>RetinAI</b> · Team SixSense (이지호 · 정병훈 · 최지민) · 단국대학교 · github.com/Capstone-sixsense/eye-project
+    </div>
+  </footer>
+</div>
+</body>
+</html>
