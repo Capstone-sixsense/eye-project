@@ -3,7 +3,7 @@
 | 자료 | 위치 |
 |------|------|
 | 포스터 | [`docs/poster/poster.pdf`](docs/poster/poster.pdf) · [이미지(PNG)](docs/poster/poster.png) |
-| 프로젝트 결과보고서 (PDF) | _추가 예정_ |
+| 프로젝트 결과보고서 (PDF) | [`docs/RetinAI_Project_Report.pdf`](docs/RetinAI_Project_Report.pdf) |
 | 시연 영상 | https://www.youtube.com/watch?v=0U9qVIq3dqg |
 
 안저(眼底) 이미지 기반 **당뇨병성 망막병증 보조 스크리닝** MVP입니다.
